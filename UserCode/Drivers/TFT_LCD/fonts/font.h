@@ -27,7 +27,7 @@ extern const FontInfo YPLXT18x18;
 extern const FontInfo yahei18x18;
 extern const FontInfo yahei20x20;
 extern const FontInfo yahei16x16;
-
+extern const FontInfo DIN_Medium32x48;
 
 
 #endif //XM_POWER_KIT_FONT_H
