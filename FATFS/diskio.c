@@ -137,7 +137,7 @@ DRESULT disk_ioctl (
 			break;
 
 		case GET_SECTOR_COUNT:  // Get media size (for only f_mkfs())
-			*(DWORD*)buff = FLASH_SECTOR_COUNT;  // 8192 sectors
+			*(DWORD*)buff = FLASH_SECTOR_COUNT;
 			res = RES_OK;
 			break;
 
@@ -146,7 +146,7 @@ DRESULT disk_ioctl (
 			res = RES_OK;
 			break;
 
-		case GET_BLOCK_SIZE:  // Get erase block size (for only f_mkfs())
+		case GET_BLOCK_SIZE:  // Get erase block size (for only f_mkfs())	// 表示一次擦除几个扇区，填1即可
 			*(DWORD*)buff = 1;  // Erase block size in unit of sector (since sector is the erase unit)
 			res = RES_OK;
 			break;
