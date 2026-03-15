@@ -662,6 +662,7 @@ void freq_digit_handler(KeyEventMsg_t msg) {
         awg_previous_page = PAGE_FREQ_DIGIT;
         // 清空数位选择示意条
         lcd_draw_line(177, 137, 257, 137, COLOR_PARAM_BG);
+        StartBeezer(0);
         return;
     } else {
         return; // 其他按键不处理
@@ -735,6 +736,7 @@ void duty_digit_handler(KeyEventMsg_t msg) {
         awg_previous_page = PAGE_DUTY_DIGIT;
         // 清空数位选择示意条
         lcd_draw_line(177, 166, 257, 166, COLOR_PARAM_BG);
+        StartBeezer(0);
         return;
     } else {
         return; // 其他按键不处理
@@ -808,6 +810,7 @@ void amp_digit_handler(KeyEventMsg_t msg) {
         awg_previous_page = PAGE_AMP_DIGIT;
         // 清空数位选择示意条
         lcd_draw_line(177, 195, 257, 195, COLOR_PARAM_BG);
+        StartBeezer(0);
         return;
     } else {
         return; // 其他按键不处理
@@ -885,6 +888,7 @@ void bias_digit_handler(KeyEventMsg_t msg) {
         awg_previous_page = PAGE_BIAS_DIGIT;
         // 清空数位选择示意条
         lcd_draw_line(177, 224, 257, 224, COLOR_PARAM_BG);
+        StartBeezer(0);
         return;
     } else {
         return; // 其他按键不处理
