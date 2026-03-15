@@ -157,7 +157,8 @@ float energy = 0;                   // 累计输出能量（单位：Wh）
 uint32_t running_time = 0;          // 电源运行时长（单位：秒）
 
 uint8_t widgets_update_time_count = 0;          // 界面控件更新计时（每10ms+1，20次=200ms刷新）
-uint8_t Time_and_Fan_update_time_count = 0;     // 时间/风扇更新计时（每10ms+1，100次=1s刷新）
+uint8_t Time_update_time_count = 0;             // 时间更新计时（每10ms+1，100次=1s刷新）
+uint8_t Fan_update_time_count = 0;              // 风扇占空比更新计时（每10ms+1，100次=1s刷新）
 
 KeyEventMsg_t Keymsg;               // 按键事件消息缓存
 
@@ -723,8 +724,10 @@ void Start_DpsCoreTask(void *argument) {
     for (;;) {
         // 界面更新计时（每10ms+1）
         widgets_update_time_count++;
-        // 时间/风扇更新计时（仅电源开启时）
-        if (IsPowerOn) Time_and_Fan_update_time_count++;
+        // 时间更新计时（仅电源开启时）
+        if (IsPowerOn) Time_update_time_count++;
+        // 风扇状态更新计时
+        Fan_update_time_count ++;
 
         // 读取按键事件并分发到当前页面的处理函数
         if (osMessageQueueGet(KeyEventQueueHandle, &Keymsg, NULL, 0) == osOK)
@@ -736,12 +739,16 @@ void Start_DpsCoreTask(void *argument) {
             UpdateLableValues();
         }
 
-        // 每1秒更新一次运行时间和风扇占空比（100×10ms）
-        if (Time_and_Fan_update_time_count >= 100) {
-            Time_and_Fan_update_time_count = 0;
+        // 每1秒更新一次运行时间（100×10ms）
+        if (Time_update_time_count >= 100) {
+            Time_update_time_count = 0;
             running_time++;
             seconds_to_hms_format(running_time, TimeMsg);
             lcd_draw_string(33, 215, TimeMsg, &KaiTi16x20, 0xFFFF, 0x31e8, -3);
+        }
+        // 每s更新一次风扇状态（100×10ms）
+        if (Fan_update_time_count >= 100) {
+            Fan_update_time_count = 0;
             uint8_to_000_percent(Fan_Duty_Cycle, FanMsg);
             lcd_draw_string(262, 5, FanMsg, &KaiTi16x20, 0xef7d, 0x31e8, -4);
         }
@@ -996,9 +1003,10 @@ static void UpdateLableValues(void) {
 
     // 更新功率模式显示（仅模式变化时）
     if (PowerMode != PowerMode_last) {
-        uint16_t bg = PowerMode ? 0x869f : 0x7644;
-        lcd_draw_round_rect(182, 144, 304, 169, 8, bg, 1);
-        lcd_draw_string(264, 180, PowerMode ? "CC" : "CV", &JetBrainsMono14x18, 0xFFFF, 0xec10, 5);
+        uint16_t bg = PowerMode ? 0x869f : 0xec10;
+        uint16_t ft = PowerMode ? 0x632c : 0xef7d;
+        lcd_draw_round_rect(247, 177, 311, 200, 8, bg, 1);
+        lcd_draw_string(264, 180, PowerMode ? "CC" : "CV", &JetBrainsMono14x18, ft, bg, 5);
         PowerMode_last = PowerMode;
     }
 }

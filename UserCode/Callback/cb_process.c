@@ -65,11 +65,11 @@ void Setting_screen_bright_process(void) {
     // 更新lable标签
     int32_t slider_val = lv_slider_get_value(guider_ui.screen_Setting_slider_ScrenLight);
     char buf[8];
-    lv_snprintf(buf, sizeof(buf), "%ld%%", slider_val);
+    lv_snprintf(buf, sizeof(buf), "%ld%%", slider_val); // slider_val范围是10 ~ 100
     lv_label_set_text(guider_ui.screen_Setting_label_var, buf);
 
     // 更新屏幕亮度
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, slider_val * 10 - 1);
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * slider_val / 100);
 
     // 更新UserParam
     UserParam.Screen_Brightness = slider_val;

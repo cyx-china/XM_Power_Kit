@@ -119,6 +119,7 @@ typedef enum {
     APP_CAL         // 校准
 }AppListType;
 
+extern AppListType RunningApp;
 
 /*================ IndevDetectTask ===============*/
 void StartBeezer(uint16_t time_ms);

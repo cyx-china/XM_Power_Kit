@@ -101,6 +101,9 @@ static InitErrorCode Sys_Init(void) {
   LCD_Clear(0x0000); // 黑色清屏
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2); // 开启显示
 
+  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 0); // 设置风扇占空比为0
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3); // 开启风扇
+
   // 初始化按键 & 旋转编码器
   Key_Init();
   Encoder_Init();
@@ -121,16 +124,21 @@ static InitErrorCode Sys_Init(void) {
     return INA226_ERROR; // INA226初始化失败
   }
 
-  // // 初始化TMP102
-  // htmp102_dcdc.hi2c = &hi2c1;
-  // htmp102_dcdc.dev_addr   = 0x48 << 1;        // 0x90
-  //
-  // if (TMP102_Init(&htmp102_dcdc) != HAL_OK) {return TMP102_DC_ERROR; }
-  //
-  // if (MCP4725_Init(&hmcp4725_DC,&hi2c3,MCP4725_ADDR) != HAL_OK){return MCP4725_DC_ERROR;}
-  // if (MCP4725_Init(&hmcp4725_OSC,&hi2c1,MCP4725_ADDR) != HAL_OK){return MCP4725_OSC_ERROR;}
+  // 初始化TMP102
+  htmp102_dcdc.hi2c = &hi2c1;
+  htmp102_dcdc.dev_addr   = 0x48 << 1;        // 0x90
 
+  if (TMP102_Init(&htmp102_dcdc) != HAL_OK) {return TMP102_DC_ERROR; }
+
+  // 初始化MCP4725
+  if (MCP4725_Init(&hmcp4725_DC,&hi2c3,MCP4725_ADDR) != HAL_OK){return MCP4725_DC_ERROR;}
+  if (MCP4725_Init(&hmcp4725_OSC,&hi2c1,MCP4725_ADDR) != HAL_OK){return MCP4725_OSC_ERROR;}
+
+  // 读取用户自定义数据
   if (UserParam_LoadAllValues() != HAL_OK){return USER_PARAM_ERROR;}
+
+  // 设置屏幕亮度
+  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * UserParam.Screen_Brightness / 100);
 
   return INIT_OK; // 初始化成功
 }

@@ -42,7 +42,7 @@ void Start_IndevDetectTask(void *argument) {
 
     for (;;) {
         if (osMessageQueueGet(BeezerQueueHandle, &BeezerTime, NULL, 0) == osOK) {
-            BeezerRemainTicks = UserParam.Beezer_Time;  // 先赋值默认值
+            BeezerRemainTicks = UserParam.Beezer_Time + 1;  // 先赋值默认值
             if (BeezerTime != 0){BeezerRemainTicks = BeezerTime / 10 + 1;}  // 如果入参不是0，那么就计算时间的时间
             BeezerIsActive = 1;
             HAL_TIM_PWM_Start(&htim9, TIM_CHANNEL_1);

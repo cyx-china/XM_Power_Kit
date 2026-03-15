@@ -25,6 +25,7 @@
 #include "lv_label.h"
 #include "os_handles.h"
 #include "tim.h"
+#include "UserDefineManage.h"
 
 static void FAN_Regulation(void);
 
@@ -50,8 +51,9 @@ void Start_SensorTask(void *argument){
     for(;;)
     {
         counter++;
-        if(counter > 40) {
-            FAN_Regulation();   // 每5s调控一次风扇
+        if(counter > 8) {   // 每1s调控一次风扇
+            FAN_Regulation();
+            counter = 0;
         }
 
         osMutexAcquire(IIC1_MutexHandle, osWaitForever);
@@ -72,20 +74,21 @@ void Start_SensorTask(void *argument){
 }
 
 
-const float TEMP_START     = 40.0f;     // 开始转动的温度（℃）
-const float TEMP_FULL      = 70.0f;     // 达到100%占空比的温度（℃）
-const uint8_t DUTY_MIN     = 0;         // 最低占空比（通常0或20~30）
+const float TEMP_FULL      = 60.0f;     // 达到100%占空比的温度（℃）
+const uint8_t DUTY_MIN     = 0;        // 最低占空比
 const uint8_t DUTY_MAX     = 100;       // 最高占空比
 
 static uint8_t Fan_GetDutyCycle(float current_temp){
-    if (current_temp <= TEMP_START) {return DUTY_MIN;}
+    if (UserParam.Fan_Enable == 0){return 0;}       // 未启用风扇，占空比返回0
+    
+    if (current_temp <= (float)UserParam.Fan_StartTemperture) {return 0;}
     if (current_temp >= TEMP_FULL)  {return DUTY_MAX;}
 
-    float temp_range   = TEMP_FULL - TEMP_START;
+    float temp_range   = TEMP_FULL - (float)UserParam.Fan_StartTemperture;
     float duty_range   = (float)(DUTY_MAX - DUTY_MIN);
-    float temp_percent = (current_temp - TEMP_START) / temp_range;
+    float temp_percent = (current_temp - (float)UserParam.Fan_StartTemperture) / temp_range;
 
-    uint8_t duty = (uint8_t)(DUTY_MIN + duty_range * temp_percent + 0.5f);
+    uint8_t duty = (uint8_t)((float)DUTY_MIN + duty_range * temp_percent + 0.5f);
 
     if (duty > DUTY_MAX) duty = DUTY_MAX;
     if (duty < DUTY_MIN) duty = DUTY_MIN;
@@ -94,7 +97,7 @@ static uint8_t Fan_GetDutyCycle(float current_temp){
 
 static void FAN_Regulation(void) {
     Fan_Duty_Cycle = Fan_GetDutyCycle(DCDC_Temperature);
-    uint16_t ARR = 999 * Fan_Duty_Cycle / 100 ;
+    uint16_t ARR = 4999 * Fan_Duty_Cycle / 100 ;
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, ARR);
 }
 
