@@ -191,7 +191,7 @@ HAL_StatusTypeDef LCD_Init(void) {
     LCD_WR_DATA(0x30);
 
     // ----------------------- 显示使能 -----------------------
-    LCD_WR_CMD(0x21);        // 显示反显  <-- 请按照实际需求选择是否启用
+    //LCD_WR_CMD(0x21);        // 显示反显  <-- 请按照实际需求选择是否启用
     LCD_WR_CMD(0x11);        // 退出睡眠模式（SLPOUT）
     HAL_Delay(120);                   // 睡眠退出后等待≥120ms（手册要求）
     LCD_WR_CMD(0x29);        // 显示使能（DISPON）

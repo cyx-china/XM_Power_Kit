@@ -16,9 +16,6 @@ typedef enum {
     // 手动校准
     DPS_Current_original,               // 电流零点         (int16_t)   LSB         用于归零无输出时的显示
     DPS_Current_Factor,                 // 电流系数         (float)     Factor      用于确定I = U * K中K的值;K = 1 / 电阻R / TP181放大倍率
-    // 自动校准
-    DPS_Current_Coefficient,           // 电流寄生系数      (float)     Corefficent 输出正极到地有一个奇妙的电阻，大概500欧姆
-    DPS_Current_Constant,              // 电流寄生常数      (float)     Constant
     // PID参数
     DPS_Loop_P,                         // 电流环P值        (float)     P
     DPS_Loop_I,                         // 电流环I值        (float)     I
@@ -89,8 +86,6 @@ typedef struct {
     float    DPS_Voltage_DAC_Constant;    // DAC常数项        (float)     Constant
     int16_t  DPS_Current_Original;        // 电流零点         (int16_t)   LSB
     float    DPS_Current_Factor;          // 电流系数         (float)     Factor
-    float    DPS_Current_Coefficient;     // 电流寄生系数      (float)     Coefficient
-    float    DPS_Current_Constant;        // 电流寄生常数      (float)     Constant
     // PID参数
     float    DPS_Loop_P;                  // 电流环P值        (float)     P
     float    DPS_Loop_I;                  // 电流环I值        (float)     I

@@ -75,7 +75,7 @@ void Start_SensorTask(void *argument){
 
 
 const float TEMP_FULL      = 60.0f;     // 达到100%占空比的温度（℃）
-const uint8_t DUTY_MIN     = 0;        // 最低占空比
+const uint8_t DUTY_MIN     = 20;        // 最低占空比
 const uint8_t DUTY_MAX     = 100;       // 最高占空比
 
 static uint8_t Fan_GetDutyCycle(float current_temp){

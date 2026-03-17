@@ -11,7 +11,7 @@
 #include "ff.h"  // FATFS核心头文件（必须包含，否则FIL/FRESULT等未定义）
 
 // -------------------------- 全局变量定义 --------------------------
-// 用户自定义参数默认值表（保持原有默认值不变）
+// 用户自定义参数默认值表
 const UserParamType_t UserParamDefault = {
     // 数控电源APP - 校准参数
     .DPS_Voltage_Original        = 0,          // 电压原点
@@ -20,8 +20,6 @@ const UserParamType_t UserParamDefault = {
     .DPS_Voltage_DAC_Constant    = 4072.2f,    // DAC常数项默认值
     .DPS_Current_Original        = 0,          // 电流原点
     .DPS_Current_Factor          = 4.0f,       // 用于确定I = U * K中K的值;K = 1 / 电阻R / TP181放大倍率
-    .DPS_Current_Coefficient     = 0.0f,       // 电流寄生系数默认值
-    .DPS_Current_Constant        = 0.0f,       // 电流寄生常数默认值
     // 数控电源APP - PID参数
     .DPS_Loop_P                  = 40.0f,      // CC模式下，PID的P参数
     .DPS_Loop_I                  = 30.0f,      // I参数
@@ -101,8 +99,6 @@ static const ParamDesc_t param_desc_table[Param_Number] = {
     {4, &UserParamDefault.DPS_Voltage_DAC_Constant,    &UserParam.DPS_Voltage_DAC_Constant},
     {2, &UserParamDefault.DPS_Current_Original,        &UserParam.DPS_Current_Original},
     {4, &UserParamDefault.DPS_Current_Factor,          &UserParam.DPS_Current_Factor},
-    {4, &UserParamDefault.DPS_Current_Coefficient,     &UserParam.DPS_Current_Coefficient},
-    {4, &UserParamDefault.DPS_Current_Constant,        &UserParam.DPS_Current_Constant},
     {4, &UserParamDefault.DPS_Loop_P,                  &UserParam.DPS_Loop_P},
     {4, &UserParamDefault.DPS_Loop_I,                  &UserParam.DPS_Loop_I},
     {4, &UserParamDefault.DPS_Loop_D,                  &UserParam.DPS_Loop_D},

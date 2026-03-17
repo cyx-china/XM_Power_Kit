@@ -256,7 +256,7 @@ static const WaveAttribute_t WaveAttrTable[WAVE_TOTAL_COUNT] = {
 };
 
 /************************ 静态函数声明 ************************/
-static void DrawBasicElement(void);                                                 // 绘制基础界面元素
+static void DrawMainBasicElement(void);                                                 // 绘制基础界面元素
 static void DrawLeftColumn(uint8_t page_start_idx, uint8_t select_idx);             // 绘制左侧波形选择栏
 static void DrawWavePreview(WaveCursor_e wave_idx);                                 // 绘制波形预览图
 static void DrawIndiccateBox(bool is_output);                                       // 绘制输出状态提示框
@@ -276,7 +276,7 @@ void bias_digit_handler(KeyEventMsg_t msg);         // 偏置编辑页按键处�
  * @brief 绘制基础界面元素
  * @note  包括顶栏、背景、左侧栏、预览区、参数区等基础布局
  */
-static void DrawBasicElement(void) {
+static void DrawMainBasicElement(void) {
     //绘制顶部状态栏
     lcd_draw_rect(0, 0, SCREEN_WIDTH - 1, TOP_BAR_HEIGHT, COLOR_TOP_BAR_BG, 1);
     lcd_draw_line(0, TOP_BAR_HEIGHT, SCREEN_WIDTH - 1, TOP_BAR_HEIGHT, COLOR_TOP_BAR_LINE);
@@ -968,7 +968,7 @@ void Resume_AwgTask(void) {
     previous_wave = Wave_Sine;
 
     // 重新绘制基础界面
-    DrawBasicElement();
+    DrawMainBasicElement();
 
     // 恢复任务运行
     osThreadResume(AwgTaskHandle);
