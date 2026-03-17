@@ -15,7 +15,7 @@
 const UserParamType_t UserParamDefault = {
     // 数控电源APP - 校准参数
     .DPS_Voltage_Original        = 0,          // 电压原点
-    .DPS_Voltage_Factor          = 11.09756f,  // 电阻分压比，默认是91K/8.2K
+    .DPS_Voltage_Factor          = 11.09f,     // 电阻分压比，默认是91K/8.2K
     .DPS_Voltage_DAC_Coefficient = -102.09f,   // DAC系数默认值
     .DPS_Voltage_DAC_Constant    = 4072.2f,    // DAC常数项默认值
     .DPS_Current_Original        = 0,          // 电流原点
