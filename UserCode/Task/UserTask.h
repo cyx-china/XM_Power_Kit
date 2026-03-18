@@ -140,8 +140,12 @@ void Suspend_DpsCoreTask(void);
 void Resume_DpsCoreTask(void);
 
 /*================= CalibrateTask =================*/
+// 任务挂起/恢复
 void Suspend_CalibrateTask(void);
 void Resume_CalibrateTask(void);
+
+// 返回主界面（供校准模块调用）
+void Calibrate_ReturnToMain(void);
 
 /*=================== AwgTask =====================*/
 void Suspend_AwgTask(void);
