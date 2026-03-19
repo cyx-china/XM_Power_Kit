@@ -21,11 +21,11 @@ void SetTargetCurrent(float Current) {
 PID pid_controller = {0};
 
 void PID_Init(void) {
-    pid_controller.mode          = 0;
-    pid_controller.hysteresis    = 0.05f;
-    pid_controller.integral_max  = 200.0f;
-    pid_controller.integral_min  = -200.0f;
-    pid_controller.result        = 0.0f;
+    pid_controller.mode          = 0;           // 初始为 CV模式
+    pid_controller.hysteresis    = 0.02f;       // 死区电流
+    pid_controller.integral_max  = 200.0f;      // 积分项最大值
+    pid_controller.integral_min  = -200.0f;     // 积分项最小值
+    pid_controller.result        = 0.0f;        // 计算出的PID增量
 
     pid_controller.current_dac   = (uint16_t)(UserParam.DPS_Voltage_DAC_Coefficient * 5.0f +
                                               UserParam.DPS_Voltage_DAC_Constant);  // 默认5V
@@ -75,7 +75,7 @@ uint16_t PID_Calculate(float measured_current) {
 
     }else { // 当前是CC模式，进行增量式PID计算
         // 计算误差
-        float error = measured_current - Target_Current;    // 误差 = 目标电压 - 当前电压
+        float error = measured_current - Target_Current + 0.01f;    // 误差 = 目标电流 - 当前电流
 
         // PID 计算出增量
         float increment = UserParam.DPS_Loop_P * (error - pid_controller.prev_error)

@@ -1,3 +1,22 @@
+/**
+******************************************************************************
+  * @file           : CalibrateTask.c
+  * @brief          : 校准任务的核心程序，只实现主界面，并分发到各个校准模块。
+  * @date           : 2026/3/14
+  * @license        : CC-BY-NC-SA 4.0
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 雪萌_Xuemeng
+  * All rights reserved.
+  *
+  * This AWG core task module is independently developed by the author.
+  * It is released under the CC-BY-NC-SA 4.0 open source license.
+  * And the author's right of attribution is reserved.
+  ******************************************************************************
+  */
+
+
 #include <inttypes.h>
 #include <stdio.h>
 

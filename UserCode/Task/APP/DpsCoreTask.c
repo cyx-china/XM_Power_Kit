@@ -150,7 +150,8 @@ volatile bool IsPowerOn = false;             // 电源使能：true-开启，fal
 
 volatile uint16_t g_adc_raw_buf[128] = {0};  // ADC原始采样缓冲区（128个值，偶数列-电压，奇数列-电流）
 volatile float Voltage = 0;                  // 实时输出电压（单位：V）
-volatile float Current = 0;                  // 实时输出电流（单位：A）
+volatile float Current = 0;                  // 实时输出电流_显示（单位：A）
+volatile float Current_PID = 0;              // 实时输出电流_PID（单位：A）
 float Power = 0;                    // 实时输出功率（单位：W）
 float energy = 0;                   // 累计输出能量（单位：Wh）
 
@@ -558,10 +559,32 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         int32_t temp2 = (int32_t)(sum_ch2 >> 6) + UserParam.DPS_Current_Original;
 
         // 转换为实际电压值（3.3V参考，12位ADC，乘以校准系数）
-        Voltage = (float) (temp1 > 4096 ? 0 : temp1) * 3.3f / 4096.0f * UserParam.DPS_Voltage_Factor;
+        float raw_voltage = (float) (temp1 > 4096 ? 0 : temp1) * 3.3f / 4096.0f * UserParam.DPS_Voltage_Factor;
 
         // 转换为实际电流值（扣除电压耦合偏移和固定偏移）
-        Current = (float) (temp2 > 4096 ? 0 : temp2) * 3.3f / 4096.0f * UserParam.DPS_Current_Factor;
+        float raw_current = (float) (temp2 > 4096 ? 0 : temp2) * 3.3f / 4096.0f * UserParam.DPS_Current_Factor;
+
+        // ==========================================
+        //              软件 IIR 低通滤波
+        // ==========================================
+        // 滤波系数 (0.0 ~ 1.0)，越小滤波越强，反应越慢
+        const float filter_display_alpha = 0.02f;       // 显示用小系数，保证平滑
+        const float filter_PID_alpha = 0.1f;            // PID用大系数，保证快速响应
+
+        // 静态变量保存上一次的滤波结果
+        static float filtered_voltage = 0.0f;           // 滤波后的电压值_显示
+        static float filtered_current = 0.0f;           // 滤波后的电流值_显示
+        static float filtered_current_pid = 0.0f;       // 滤波后的电流值_PID
+
+        // 一阶 IIR 滤波公式：Output = alpha * Input + (1 - alpha) * Output_Last
+        filtered_voltage = filter_display_alpha * raw_voltage + (1.0f - filter_display_alpha) * filtered_voltage;
+        filtered_current = filter_display_alpha * raw_current + (1.0f - filter_display_alpha) * filtered_current;
+        filtered_current_pid = filter_PID_alpha * raw_current + (1.0f - filter_PID_alpha) * filtered_current_pid;
+
+        // 更新全局变量
+        Voltage = filtered_voltage;
+        Current = filtered_current;
+        Current_PID = filtered_current_pid;
 
         // 计算实时功率
         Power = Voltage * Current;
@@ -1392,7 +1415,7 @@ void Start_PIDTask(void *argument) {
         // 仅当电源开启时执行PID运算和DAC更新
         if (IsPowerOn == true) {
             // 计算电流PID输出值（目标电流-实际电流的闭环调节）
-            uint16_t DAC_Value = PID_Calculate(Current);
+            uint16_t DAC_Value = PID_Calculate(Current_PID);
             // 将PID输出写入DAC（MCP4725），控制输出电流
             MCP4725_WriteFast(&hmcp4725_DC, DAC_Value, MCP4725_MODE_NORMAL);
         }
