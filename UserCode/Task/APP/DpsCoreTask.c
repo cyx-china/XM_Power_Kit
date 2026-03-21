@@ -150,12 +150,13 @@ volatile bool IsPowerOn = false;             // 电源使能：true-开启，fal
 
 volatile uint16_t g_adc_raw_buf[128] = {0};  // ADC原始采样缓冲区（128个值，偶数列-电压，奇数列-电流）
 volatile float Voltage = 0;                  // 实时输出电压（单位：V）
+volatile float Voltage_PID = 0;              // 实时输出电压_PID（单位：V）
 volatile float Current = 0;                  // 实时输出电流_显示（单位：A）
-volatile float Current_PID = 0;              // 实时输出电流_PID（单位：A）
-float Power = 0;                    // 实时输出功率（单位：W）
-float energy = 0;                   // 累计输出能量（单位：Wh）
+volatile float Current_PID = 0;              // 实时输出电流_PID（单位：A）  此变量也用于校准
+float Power = 0;                             // 实时输出功率（单位：W）
+float energy = 0;                            // 累计输出能量（单位：Wh）
 
-uint32_t running_time = 0;          // 电源运行时长（单位：秒）
+uint32_t running_time = 0;                   // 电源运行时长（单位：秒）
 
 uint8_t widgets_update_time_count = 0;          // 界面控件更新计时（每10ms+1，20次=200ms刷新）
 uint8_t Time_update_time_count = 0;             // 时间更新计时（每10ms+1，100次=1s刷新）
@@ -569,22 +570,25 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         // ==========================================
         // 滤波系数 (0.0 ~ 1.0)，越小滤波越强，反应越慢
         const float filter_display_alpha = 0.02f;       // 显示用小系数，保证平滑
-        const float filter_PID_alpha = 0.1f;            // PID用大系数，保证快速响应
+        const float filter_PID_alpha = 0.12f;           // PID用大系数，保证快速响应
 
         // 静态变量保存上一次的滤波结果
         static float filtered_voltage = 0.0f;           // 滤波后的电压值_显示
         static float filtered_current = 0.0f;           // 滤波后的电流值_显示
         static float filtered_current_pid = 0.0f;       // 滤波后的电流值_PID
+        static float filtered_voltage_pid = 0.0f;       // 滤波后的电压值_PID
 
         // 一阶 IIR 滤波公式：Output = alpha * Input + (1 - alpha) * Output_Last
         filtered_voltage = filter_display_alpha * raw_voltage + (1.0f - filter_display_alpha) * filtered_voltage;
         filtered_current = filter_display_alpha * raw_current + (1.0f - filter_display_alpha) * filtered_current;
         filtered_current_pid = filter_PID_alpha * raw_current + (1.0f - filter_PID_alpha) * filtered_current_pid;
+        filtered_voltage_pid = filter_PID_alpha * raw_voltage + (1.0f - filter_PID_alpha) * filtered_voltage_pid;
 
         // 更新全局变量
         Voltage = filtered_voltage;
-        Current = filtered_current;
+        filtered_current < 0.01f ? (Current = 0.0f) : (Current = filtered_current); // 如果电流小于0.01A，就归零，避免静止时跑量
         Current_PID = filtered_current_pid;
+        Voltage_PID = filtered_voltage_pid;
 
         // 计算实时功率
         Power = Voltage * Current;
@@ -755,8 +759,8 @@ void Start_DpsCoreTask(void *argument) {
         if (osMessageQueueGet(KeyEventQueueHandle, &Keymsg, NULL, 0) == osOK)
             page_handlers[current_page](Keymsg);
 
-        // 每200ms更新一次界面数值（20×10ms）
-        if (widgets_update_time_count >= 20) {
+        // 每100ms更新一次界面数值（10×10ms）
+        if (widgets_update_time_count >= 10) {
             widgets_update_time_count = 0;
             UpdateLableValues();
         }
@@ -1100,6 +1104,13 @@ void dps_main_page_handler(KeyEventMsg_t msg) {
     }
     // 长按编码器：切换到LVGL APP
     else if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
+        IsPowerOn = false;
+        DpsPower_OFF();
+        DpsRelease_ON();
+        osDelay(80);
+        DpsDc_OFF();
+        DpsGnd_OFF();
+
         AppListType APP = APP_LVGL;
         StartBeezer(0);
         osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
@@ -1368,14 +1379,23 @@ void Resume_DpsCoreTask(void) {
     DpsRelease_ON();
 
     // 重置UI和状态变量，恢复初始界面
-    widgets_update_time_count = 0;                                      // 重置UI更新计数器
+    Voltage = 0;                            // 实时输出电压（单位：V）
+    Current = 0;                            // 实时输出电流_显示（单位：A）
+    Current_PID = 0;                        // 实时输出电流_PID（单位：A）  此变量也用于校准
+    Power = 0;                              // 实时输出功率（单位：W）
+    energy = 0;                             // 累计输出能量（单位：Wh）
+    running_time = 0;                       // 电源运行时长（单位：秒）
+    widgets_update_time_count = 0;          // 界面控件更新计时（每10ms+1，20次=200ms刷新）
+    Time_update_time_count = 0;             // 时间更新计时（每10ms+1，100次=1s刷新）
+    Fan_update_time_count = 0;              // 风扇占空比更新计时（每10ms+1，100次=1s刷新）
+    IsPowerOn = false;                      // 电源开启状态（默认关闭）
+
     current_page = previous_page = PAGE_MAIN;                           // 恢复主界面
     main_page_cursor_current = main_page_cursor_past = Main_Voltage;    // 光标默认选中电压
     VoltagePosition_Current = VoltagePosition_Past = hundredths;        // 电压编辑位默认百分位
     CurrentPosition_Current = CurrentPosition_Past = hundredths;        // 电流编辑位默认百分位
     Flush_OutputData = true;                                            // 使能输出数据刷新
 
-    Power = Voltage = Current = 0;
 
     DPS_ADC_Init();             // 重新初始化ADC
     DrawMainBasicElement();         // 绘制基础UI界面
@@ -1415,7 +1435,7 @@ void Start_PIDTask(void *argument) {
         // 仅当电源开启时执行PID运算和DAC更新
         if (IsPowerOn == true) {
             // 计算电流PID输出值（目标电流-实际电流的闭环调节）
-            uint16_t DAC_Value = PID_Calculate(Current_PID);
+            uint16_t DAC_Value = PID_Calculate(Current_PID,Voltage_PID);
             // 将PID输出写入DAC（MCP4725），控制输出电流
             MCP4725_WriteFast(&hmcp4725_DC, DAC_Value, MCP4725_MODE_NORMAL);
         }

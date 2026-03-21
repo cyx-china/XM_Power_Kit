@@ -14,7 +14,7 @@
 // ============= 外部变量和函数声明 =============
 extern volatile uint16_t g_adc_raw_buf[128];                            // ADC原始数据           DpsCoreTask.c
 extern volatile float Voltage;                                          // 输出电压值            DpsCoreTask.c
-extern volatile float Current;                                          // 输出电流值            DpsCoreTask.c
+extern volatile float Current_PID;                                      // 输出电流值            DpsCoreTask.c
 extern volatile bool IsPowerOn;                                         // 电源是否打开          DpsCoreTask.c
 extern void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc);       // ADC转换完成回调函数    DpsCoreTask.c
 extern void DPS_ADC_Init(void);                                         // ADC初始化              DpsCoreTask.c
@@ -521,7 +521,7 @@ static void Refresh_DpsCal_Origin_Voltage(void) {
 
 // 更新电流显示 (+0.000)
 static void Refresh_DpsCal_Origin_Current(void) {
-    snprintf(Current_Current_str, sizeof(Current_Current_str), "%+06.3f", Current);
+    snprintf(Current_Current_str, sizeof(Current_Current_str), "%+06.3f", Current_PID);
     lcd_draw_string(58,90,Current_Current_str, &DIN_Medium32x48,0x5cbd,0x0000,2);
 }
 
