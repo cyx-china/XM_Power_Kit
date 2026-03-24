@@ -127,6 +127,13 @@ const osThreadAttr_t AwgTask_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for DmmCoreTask */
+osThreadId_t DmmCoreTaskHandle;
+const osThreadAttr_t DmmCoreTask_attributes = {
+  .name = "DmmCoreTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* Definitions for AppSwitchQueue */
 osMessageQueueId_t AppSwitchQueueHandle;
 const osMessageQueueAttr_t AppSwitchQueue_attributes = {
@@ -193,6 +200,7 @@ extern void Start_IndevDetectTask(void *argument);
 extern void Start_PIDTask(void *argument);
 extern void Start_CalibrateTask(void *argument);
 extern void Start_AwgTask(void *argument);
+extern void Start_DmmCoreTask(void *argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -318,6 +326,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of AwgTask */
   AwgTaskHandle = osThreadNew(Start_AwgTask, NULL, &AwgTask_attributes);
+
+  /* creation of DmmCoreTask */
+  DmmCoreTaskHandle = osThreadNew(Start_DmmCoreTask, NULL, &DmmCoreTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */

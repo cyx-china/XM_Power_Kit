@@ -52,11 +52,11 @@ const UserParamType_t UserParamDefault = {
     .DDS_Factor                  = 3.0f,       // 波形发生器放大倍数
     // 万用表APP - 电压表校准参数
     .DMM_Voltage_Original        = 0,          // 万用表电压档电压原点
-    .DMM_Voltage_Factor_B        = 0.044715f,  // 差分放大器黑表笔的分压倍率，即输出电压 = 输入电压 * 0.0046809 （47K+2.2K分压）
-    .DMM_Voltage_Factor_R        = 0.044715f,  // 红表笔的分压倍率
+    .DMM_Voltage_Factor_B        = 22.36f,     // 差分放大器黑表笔的分压倍率，即实际电压 = ADC电压 * DMM_Voltage_Factor_B (47K+2.2k分压)
+    .DMM_Voltage_Factor_R        = 22.36f,     // 红表笔的分压倍率
     // 万用表APP - 电流表校准参数
     .DMM_Current_Original        = 0,          // 电流表电流零点
-    .DMM_Current_Factor          = 50.0f,      // 电流表放大倍率，也是TP181,默认50倍
+    .DMM_Current_Factor          = 1.33f,      // 用于确定I = U * K中K的值;K = 1 / 电阻R / TP181放大倍率
     // 万用表APP - 电阻表校准参数
     .DMM_Res_Voltage             = 3.3f,       // 电阻表的基准电源，这个基本不用改
     .DMM_Res_Parasitic           = 0.0f,       // 电阻表寄生电阻（并在被测电阻上，大概170K）

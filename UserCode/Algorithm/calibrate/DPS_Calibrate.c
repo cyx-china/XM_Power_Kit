@@ -12,7 +12,7 @@
 #include "UserTask.h"
 
 // ============= 外部变量和函数声明 =============
-extern volatile uint16_t g_adc_raw_buf[128];                            // ADC原始数据           DpsCoreTask.c
+extern volatile uint16_t dps_adc_raw_buf[128];                            // ADC原始数据           DpsCoreTask.c
 extern volatile float Voltage;                                          // 输出电压值            DpsCoreTask.c
 extern volatile float Current_PID;                                      // 输出电流值            DpsCoreTask.c
 extern volatile bool IsPowerOn;                                         // 电源是否打开          DpsCoreTask.c
@@ -124,8 +124,8 @@ void DPS_Calibrate_Enter(void) {
     DpsRelease_ON();            // 开启泄放电阻
     DPS_ADC_Init();             // 初始化ADC配置
     HAL_ADC_RegisterCallback(&hadc1, HAL_ADC_CONVERSION_COMPLETE_CB_ID, CB_DPS_ADC_ConvCpltCallback);   // 注册DMA回调
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t *)g_adc_raw_buf, 128);                                    // 启动ADC & DMA
-    DpsTim_ON();                                // 开启时钟触发源
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t *)dps_adc_raw_buf, 128);                                    // 启动ADC & DMA
+    AdcTim_ON();                                // 开启时钟触发源
     
     PID_Init();                                 // 初始化PID任务
     osThreadResume(PIDTaskHandle);              // 恢复PID任务
@@ -243,7 +243,7 @@ static void DpsCal_Origin_Current_Main_handler(KeyEventMsg_t msg) {
             // 更新提示框文字
             lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
             lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
-            lcd_draw_string(25,165,"连接万用表，使数值等于万用表值", &yahei16x16,0xdf3c,0x29a7,1);
+            lcd_draw_string(25,165,"连接万用表，使万用表值等于数值", &yahei16x16,0xdf3c,0x29a7,1);
             // 更新编辑框提示文字
             lcd_draw_round_rect(15,200,212,231,8,0x18c6,1);
             lcd_draw_round_rect(15,200,212,231,8,0x07E0,0);
@@ -261,8 +261,8 @@ static void DpsCal_Origin_Current_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_string(125, 52, "显示校准", &yahei16x16, 0xDEFB, 0x048A, 2);
             
             // 电源参数配置
-            SetTargetVoltage(15.00f);       // 将输出电压设置成 15V     （此时没有校准输出，所以是不准的，13 ~ 17V 之间）
-            IsPowerOn = true;               // 开启PID运算             （没用到PID运算，但是硬件控制在PID循环里）
+            MCP4725_WriteFast(&hmcp4725_DC, 2800, MCP4725_MODE_NORMAL);
+            IsPowerOn = true;               // 开启PID运算
             DpsPower_ON();                  // 开启PID输出
             osDelay(100);              // 等待100ms稳定  
             DpsRelease_OFF();               // 关闭泄放电阻             （可以防止过冲）
@@ -328,9 +328,9 @@ static void DpsCal_Display_Voltage_Main_handler(KeyEventMsg_t msg) {
             
             lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
             lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
-            lcd_draw_string(25,165,"输出3.5V，请接负载。可不调", &yahei16x16,0xdf3c,0x29a7,1);
+            lcd_draw_string(25,165,"输出1.5V，请接负载。可不调", &yahei16x16,0xdf3c,0x29a7,1);
             
-            SetTargetVoltage(3.5f);        // 将输出电压设置成 3.5V         (此时未校准，实际 3V ~ 4V之间)
+            SetTargetVoltage(1.5f);        // 将输出电压设置成 1.5V
             
             StartBeezer(0);
             return;
@@ -497,7 +497,6 @@ static void DpsCal_Output_Main_handler(KeyEventMsg_t msg) {
                 lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
                 lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
                 lcd_draw_string(25,165,"校准失败，请重试！", &yahei16x16,0xF800,0x29a7,1);
-                Suspend_DpsCoreTask();
             }
             mode = 1;
             Resume_IndevDetectTask();

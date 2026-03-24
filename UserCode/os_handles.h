@@ -36,6 +36,7 @@ extern osThreadId_t DpsCoreTaskHandle;            // 数控电源APP任务句柄
     extern osThreadId_t PIDTaskHandle;            // PID计算任务句柄 （由DpsCoreTask管理）
 extern osThreadId_t AwgTaskHandle;                // 任意波形发生器APP任务句柄
 extern osThreadId_t CalibrateTaskHandle;          // 校准任务句柄
+extern osThreadId_t DmmCoreTaskHandle;            // 数字万用表APP任务句柄
 // ============================= Mutex_Handles =============================//
 extern osMutexId_t IIC1_MutexHandle;              // IIC1总线互斥锁句柄
 extern osMutexId_t IIC3_MutexHandle;              // IIC3总线互斥锁句柄

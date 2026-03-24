@@ -20,8 +20,8 @@
 #define DpsPower_ON()       HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_SET)          // 开启输出
 #define DpsPower_OFF()      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_2, GPIO_PIN_RESET)        // 关闭输出
 
-#define DpsTim_ON()         HAL_TIM_Base_Start(&htim8)                                  // 开启定时器(用于ADC)
-#define DpsTim_OFF()        HAL_TIM_Base_Stop(&htim8)                                   // 关闭定时器
+#define AdcTim_ON()         HAL_TIM_Base_Start(&htim8)                                  // 开启定时器(用于ADC)
+#define AdcTim_OFF()        HAL_TIM_Base_Stop(&htim8)                                   // 关闭定时器
 
 // 示波器
 typedef enum {

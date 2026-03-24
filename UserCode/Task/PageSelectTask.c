@@ -81,7 +81,7 @@ static void ResumeTask(AppListType APP) {
         case APP_POWER: Resume_DpsCoreTask();       break;
         case APP_DSO:   break;
         case APP_AWG:   Resume_AwgTask();           break;
-        case APP_DMM:   break;
+        case APP_DMM:   Resume_DmmTask();           break;
         case APP_SENSOR:break;
         case APP_CAL:   Resume_CalibrateTask();     break;
         case APP_NONE:  break;

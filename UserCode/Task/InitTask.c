@@ -28,6 +28,7 @@
 #include "INA226_Driver.h"
 #include "MCP4725.h"
 #include "ST7789.h"
+#include "SwitchManager.h"
 #include "tim.h"
 #include "TMP102.h"
 #include "Manager/UserDefineManage.h"
@@ -139,6 +140,12 @@ static InitErrorCode Sys_Init(void) {
 
   // 设置屏幕亮度
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * UserParam.Screen_Brightness / 100);
+
+  DpsRelease_ON();
+
+
+
+
 
   return INIT_OK; // 初始化成功
 }
