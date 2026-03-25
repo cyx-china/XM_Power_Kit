@@ -2,12 +2,11 @@
 #include "dac.h"
 #include "tim.h"
 #include <math.h>
-#include <stdbool.h>
-
 #include "UserDefineManage.h"
 
 // DMA缓冲区，所有波形共享
 uint16_t dac1_buffer[MAX_SAMPLE];
+
 
 // ------------------- 内部静态函数声明 -------------------
 static HAL_StatusTypeDef WaveGen_CommonInit(float freq, uint16_t* N, float amplitude, float bias, float* amp_code);
@@ -70,8 +69,8 @@ static HAL_StatusTypeDef WaveGen_CommonInit(float freq, uint16_t* N, float ampli
     // 计算振幅&和偏置，并配置DAC2
     *amp_code = (amplitude * DAC_MAX) / (UserParam.DDS_Factor * VREF); // （UserParam.DDS_Factor 是硬件设计放大倍数）
 
-    // 计算DAC2的偏置对应的dac值
-    float dac2_val = 2047.5f - (bias * DAC_MAX) / (UserParam.DDS_Factor * VREF);
+    // 计算DAC2的偏置对应的dac值,带偏移校准值
+    float dac2_val = 2047.5f - (bias * DAC_MAX) / (UserParam.DDS_Factor * VREF) - (float)UserParam.DDS_Original;
     dac2_val = (dac2_val < 0) ? 0 : (dac2_val > DAC_MAX) ? DAC_MAX : dac2_val;
     if (HAL_DAC_SetValue(&hdac, DAC_CHANNEL_2, DAC_ALIGN_12B_R, (uint16_t)roundf(dac2_val)) != HAL_OK)
         return HAL_ERROR;
@@ -111,7 +110,7 @@ HAL_StatusTypeDef WaveGen_Sin(float freq, float amplitude, float bias, float dut
 
     for (uint16_t i = 0; i < N; i++) {
         float theta = 2 * (float)M_PI * i / N;
-        float val = 2047.5f - amp_code * sinf(theta);
+        float val = 2047.5f + amp_code * sinf(theta);
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
     }
@@ -131,8 +130,8 @@ HAL_StatusTypeDef WaveGen_Square(float freq, float amplitude, float bias, float 
     if (WaveGen_CommonInit(freq, &N, amplitude, bias, &amp_code) != HAL_OK) return HAL_ERROR;
 
     uint16_t high_samples = (uint16_t)roundf(N * duty_cycle);
-    uint16_t high_level = (uint16_t)roundf(2047.5f - amp_code);
-    uint16_t low_level = (uint16_t)roundf(2047.5f + amp_code);
+    uint16_t high_level = (uint16_t)roundf(2047.5f + amp_code);
+    uint16_t low_level = (uint16_t)roundf(2047.5f - amp_code);
 
     high_level = (high_level > DAC_MAX) ? DAC_MAX : high_level;
     low_level = (low_level < 0) ? 0 : low_level;
@@ -162,10 +161,10 @@ HAL_StatusTypeDef WaveGen_Sawtooth(float freq, float amplitude, float bias, floa
         float val;
         if (i < breakpoint) {
             // 上升沿
-            val = 2047.5f + amp_code - ((float)i / (breakpoint - 1)) * total_amp_span;
+            val = 2047.5f - amp_code + ((float)i / (breakpoint - 1)) * total_amp_span;
         } else {
             // 下降沿
-            val = 2047.5f - amp_code + (((float)(i - breakpoint)) / (N - breakpoint - 1)) * total_amp_span;
+            val = 2047.5f + amp_code - (((float)(i - breakpoint)) / (N - breakpoint - 1)) * total_amp_span;
         }
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
@@ -187,7 +186,7 @@ HAL_StatusTypeDef WaveGen_HalfWaveRect(float freq, float amplitude, float bias, 
         float theta = 2 * (float)M_PI * i / N;
         float sin_val = sinf(theta);
         // 负半周削波为0
-        float val = 2047.5f - amp_code * ((sin_val > 0) ? sin_val : 0);
+        float val = 2047.5f + amp_code * ((sin_val > 0) ? sin_val : 0);
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
     }
@@ -207,7 +206,7 @@ HAL_StatusTypeDef WaveGen_FullWaveRect(float freq, float amplitude, float bias, 
     for (uint16_t i = 0; i < N; i++) {
         float theta = (float)M_PI * i / N;
         // 取绝对值，实现全波整流
-        float val = 2047.5f - amp_code * fabsf(sinf(theta));
+        float val = 2047.5f + amp_code * fabsf(sinf(theta));
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
     }
@@ -232,7 +231,7 @@ HAL_StatusTypeDef WaveGen_UpStep(float freq, float amplitude, float bias, float 
         uint8_t step_number = i / step_size;
         if (step_number >= NUM_STEPS) step_number = NUM_STEPS - 1;
 
-        float val = 2047.5f + amp_code - step_number * step_voltage;
+        float val = 2047.5f - amp_code + step_number * step_voltage;
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
     }
@@ -257,7 +256,7 @@ HAL_StatusTypeDef WaveGen_DownStep(float freq, float amplitude, float bias, floa
         uint8_t step_number = i / step_size;
         if (step_number >= NUM_STEPS) step_number = NUM_STEPS - 1;
 
-        float val = 2047.5f - amp_code + step_number * step_voltage;
+        float val = 2047.5f + amp_code - step_number * step_voltage;
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
     }
@@ -284,7 +283,7 @@ HAL_StatusTypeDef WaveGen_ExpRise(float freq, float amplitude, float bias, float
         // 正确的指数增长模型：(exp(t/tau) - 1) / (exp(N/tau) - 1)，归一化到 [0, 1]
         float exp_val = (exp(t / tau) - 1.0f) / norm_factor;
         // 映射到 DAC 电压范围（从 MIN 到 MAX）
-        float val = 2047.5f + amp_code - exp_val * 2 * amp_code;
+        float val = 2047.5f - amp_code + exp_val * 2 * amp_code;
 
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
@@ -312,7 +311,7 @@ HAL_StatusTypeDef WaveGen_ExpDecay(float freq, float amplitude, float bias, floa
         // 正确的指数下降模型：1 - (exp(t/tau) - 1)/(exp(N/tau) - 1)，归一化到 [0, 1]
         float exp_val = 1.0f - (exp(t / tau) - 1.0f) / norm_factor;
         // 映射到 DAC 电压范围（从 MAX 到 MIN）
-        float val = 2047.5f + amp_code - exp_val * 2 * amp_code;
+        float val = 2047.5f - amp_code + exp_val * 2 * amp_code;
 
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
@@ -372,7 +371,7 @@ HAL_StatusTypeDef WaveGen_MultiTone(float freq, float amplitude, float bias, flo
             combined_val += sinf(harmonics[h] * theta) * ratios[h];
         }
         // 归一化并转换为DAC码值
-        float val = 2047.5f - (amp_code / total_ratio) * combined_val;
+        float val = 2047.5f + (amp_code / total_ratio) * combined_val;
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
     }
@@ -400,7 +399,7 @@ HAL_StatusTypeDef WaveGen_Sinc(float freq, float amplitude, float bias, float du
             sinc_val = sinf((float)M_PI * x) / ((float)M_PI * x);
         }
 
-        float val = 2047.5f - amp_code * sinc_val;
+        float val = 2047.5f + amp_code * sinc_val;
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
     }
@@ -425,7 +424,7 @@ HAL_StatusTypeDef WaveGen_Lorenz(float freq, float amplitude, float bias, float 
         float lorenz_val = 1.0f / (1.0f + x * x);
 
         // 将0~1范围的lorenz_val映射到 -amp_code ~ +amp_code
-        float val = 2047.5f + amp_code - lorenz_val * 2 * amp_code;
+        float val = 2047.5f - amp_code + lorenz_val * 2 * amp_code;
         dac1_buffer[i] = (uint16_t)roundf(val);
         dac1_buffer[i] = (dac1_buffer[i] > DAC_MAX) ? DAC_MAX : (dac1_buffer[i] < 0) ? 0 : dac1_buffer[i];
     }

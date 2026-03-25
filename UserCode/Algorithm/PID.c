@@ -28,7 +28,7 @@ void SetTargetVoltage(float Voltage) {
         cv_adjust_cnt = 0;        // 重置防抖计数
         cv_adjust_timer = 0;      // 重置限速计数
     }
-    osDelay(100);
+    osDelay(20);
 }
 
 void SetTargetCurrent(float Current) {

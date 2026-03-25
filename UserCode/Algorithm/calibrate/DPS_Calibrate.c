@@ -12,7 +12,7 @@
 #include "UserTask.h"
 
 // ============= 外部变量和函数声明 =============
-extern volatile uint16_t dps_adc_raw_buf[128];                            // ADC原始数据           DpsCoreTask.c
+extern volatile uint16_t dps_adc_raw_buf[128];                          // ADC原始数据           DpsCoreTask.c
 extern volatile float Voltage;                                          // 输出电压值            DpsCoreTask.c
 extern volatile float Current_PID;                                      // 输出电流值            DpsCoreTask.c
 extern volatile bool IsPowerOn;                                         // 电源是否打开          DpsCoreTask.c

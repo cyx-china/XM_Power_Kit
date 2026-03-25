@@ -10,7 +10,7 @@
 #include "tim.h"
 #include "UserDefineManage.h"
 
-
+static void DrawDmmMainBasicElement(void);
 volatile uint16_t dmm_adc_raw_buf[600] = {0};   // 三个通道，每个通道200个点
 
 volatile float DMM_Voltage = 0.0f;                  // 电压表_实际值
@@ -24,23 +24,56 @@ char msg3[12] = {0};
 void Start_DmmCoreTask(void *argument) {
     // 自挂启
     osThreadSuspend(DmmCoreTaskHandle);
-    lcd_draw_clear_screen(0x0000);
+    DrawDmmMainBasicElement();
 
     for (;;) {
 
-            sprintf(msg1, "%.5fV", DMM_Voltage);
-            lcd_draw_string(10, 10, msg1,&yahei16x16,0x0000, 0xFFFF,0);
-
-            sprintf(msg2, "%.5fA", DMM_Current);
-            lcd_draw_string(10, 30, msg2,&yahei16x16, 0x0000, 0xFFFF,0);
-
-            sprintf(msg3, "%.5fV", DMM_Resistance_Voltage);
-            lcd_draw_string(10, 50, msg3, &yahei16x16,0x0000, 0xFFFF,0);
+            // sprintf(msg1, "%.5fV", DMM_Voltage);
+            // lcd_draw_string(10, 100, msg1,&yahei16x16,0x0000, 0xFFFF,0);
+            //
+            // sprintf(msg2, "%.5fA", DMM_Current);
+            // lcd_draw_string(10, 130, msg2,&yahei16x16, 0x0000, 0xFFFF,0);
+            //
+            // sprintf(msg3, "%.5fV", DMM_Resistance_Voltage);
+            // lcd_draw_string(10, 150, msg3, &yahei16x16,0x0000, 0xFFFF,0);
 
         osDelay(125);
 
     }
 }
+
+
+
+static void DrawDmmMainBasicElement(void){
+    //背景
+    lcd_draw_rect(0, 0, 319, 31, 0x1908, 1);             // 顶栏背景色
+    lcd_draw_rect(0, 31, 319, 239, 0x18c6, 1);           // 主体背景色
+    lcd_draw_round_rect(12,66,308,154,8,0x1908,1);     // 数据区背景
+    for (uint8_t i = 0;i < 4;i ++) {
+        lcd_draw_round_rect(12 + 76 * i,166,80 + 76 * i,209,8,0x1908,1);
+        lcd_draw_round_rect(12 + 76 * i,166,80 + 76 * i,209,8,0x21aa,0);
+    }
+
+    // 顶栏
+    lcd_draw_string(127, 6, "万用表", &yahei20x20, 0x24be, 0x1908, 3);
+    lcd_draw_line(0, 31, 319, 31, 0x11ac);                      // 顶栏下划线
+
+    // body
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
 
 
 
