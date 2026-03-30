@@ -9,7 +9,7 @@
 
 
 static void DrawAwgCalibratePage(void);
-static char AwgOriginalMsg[10] = {0};                         // 原点校准值
+static char AwgOriginalMsg[10] = {0};                    // 原点校准值
 static char AwgAmpMsg[10] = {0};                         // 原点校准值
 
 
@@ -19,7 +19,7 @@ void AWG_Calibrate_Enter(void) {
 }
 
 
-typedef enum AwgCalPage{
+typedef enum {
     AwgCal_Origin_Main = 0,
     AwgCal_Origin_Edit,
     AwgCal_Output_Main,

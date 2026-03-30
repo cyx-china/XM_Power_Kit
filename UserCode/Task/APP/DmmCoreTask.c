@@ -277,7 +277,7 @@ static void DrawDmmMainBasicElement(void) {
  * @note   1. 格式化规则：±00.00（包含符号、两位整数、两位小数）
  *         2. 千分位提取：绝对值×1000后取个位，修正浮点误差
  */
-static int FormatFloatWithThousandth(float num, char *formatted_buf, char *thousandth_buf) {
+int FormatFloatWithThousandth(float num, char *formatted_buf, char *thousandth_buf) {
     // 空指针校验
     if (formatted_buf == NULL || thousandth_buf == NULL) {
         return -1;
@@ -306,7 +306,7 @@ static int FormatFloatWithThousandth(float num, char *formatted_buf, char *thous
  * @note   1. 格式化规则：±0.000（包含符号、一位整数、三位小数）
  *         2. 万分位提取：绝对值×10000后取个位，修正浮点误差
  */
-static int FormatFloatWithTenThousandth(float num, char *formatted_buf, char *tenthousandth_buf) {
+int FormatFloatWithTenThousandth(float num, char *formatted_buf, char *tenthousandth_buf) {
     // 空指针校验
     if (formatted_buf == NULL || tenthousandth_buf == NULL) {
         return -1;
@@ -904,7 +904,7 @@ void DMM_ADC_DeInit(void) {
 }
 
 // 宏定义 - IIR滤波系数（越小越平滑，响应越慢）
-#define IIR_ALPHA_VOLTAGE    0.05f         // 电压滤波系数
+#define IIR_ALPHA_VOLTAGE    0.1f         // 电压滤波系数
 #define IIR_ALPHA_CURRENT    0.1f          // 电流滤波系数
 #define IIR_ALPHA_RESISTANCE 0.1f          // 电阻滤波系数
 
@@ -985,8 +985,8 @@ void CB_DMM_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         // 电压校准
         int32_t temp1 = (int32_t)ch1_14bit - (8192 - UserParam.DMM_Voltage_Original);
         float raw_voltage = (float) temp1 * (3.3f / 16383.0f) * (temp1 >= 0
-                                                               ? UserParam.DMM_Voltage_Factor_B
-                                                               : UserParam.DMM_Voltage_Factor_R);
+                                                               ? UserParam.DMM_Voltage_Factor_R
+                                                               : UserParam.DMM_Voltage_Factor_B);
         // 电流校准
         int32_t temp2 = (int32_t)ch2_14bit - (8192 + UserParam.DMM_Current_Original);
         float raw_current = (float) temp2 * (3.3f / 16383.0f) * UserParam.DMM_Current_Factor;

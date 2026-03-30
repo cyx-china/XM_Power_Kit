@@ -175,11 +175,11 @@ void Start_CalibrateTask(void *argument) {
         if (osMessageQueueGet(KeyEventQueueHandle, &CAL_Keymsg, NULL, 0) == osOK) {
             page_handlers[CAL_current_page](CAL_Keymsg);
         }
-        if (cal_time_count > 20) {
+        if (cal_time_count > 10) {
             cal_time_count = 0;
-            if (CAL_current_page == PAGE_DPS_CAL) {
-                DPS_Calibrate_Refresh();
-            }
+            if      (CAL_current_page == PAGE_DPS_CAL)      {DPS_Calibrate_Refresh();}
+            else if (CAL_current_page == PAGE_DMM_V_CAL)    {DMM_V_Calibrate_Refresh();}
+
         }
         osDelay(10);
     }

@@ -125,7 +125,10 @@ void DPS_Calibrate_Enter(void) {
     DPS_ADC_Init();             // 初始化ADC配置
     HAL_ADC_RegisterCallback(&hadc1, HAL_ADC_CONVERSION_COMPLETE_CB_ID, CB_DPS_ADC_ConvCpltCallback);   // 注册DMA回调
     HAL_ADC_Start_DMA(&hadc1, (uint32_t *)dps_adc_raw_buf, 128);                                    // 启动ADC & DMA
-    AdcTim_ON();                                // 开启时钟触发源
+    AdcTim_OFF();
+    __HAL_TIM_SET_PRESCALER(&htim8, 149);   // 设定更新频率64Khz
+    __HAL_TIM_SET_AUTORELOAD(&htim8, 14);
+    AdcTim_ON();                                                            // 启动定时器（ADC触发源）
     
     PID_Init();                                 // 初始化PID任务
     osThreadResume(PIDTaskHandle);              // 恢复PID任务
