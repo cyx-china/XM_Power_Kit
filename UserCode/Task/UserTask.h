@@ -152,8 +152,9 @@ void Suspend_AwgTask(void);
 void Resume_AwgTask(void);
 
 
-
+/*=================== DmmTask =====================*/
 void Resume_DmmTask(void);
+void Suspend_DmmTask(void);
 
 #endif //XM_POWER_KIT_USERTASK_H
 

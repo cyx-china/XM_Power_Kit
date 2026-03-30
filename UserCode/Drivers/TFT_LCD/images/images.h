@@ -35,7 +35,7 @@ extern const ImageInfo img_wave11_212x57;
 extern const ImageInfo img_wave12_212x57;
 extern const ImageInfo img_wave13_212x57;
 extern const ImageInfo img_wave14_212x57;
-
+extern const ImageInfo img_DMM_DC_30x30;
 
 
 

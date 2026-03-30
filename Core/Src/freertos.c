@@ -280,11 +280,11 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* creation of AppSwitchQueue */
-  AppSwitchQueueHandle = osMessageQueueNew (1, sizeof(AppListType), &AppSwitchQueue_attributes);
-
   /* creation of LcdMsgQueue */
   LcdMsgQueueHandle = osMessageQueueNew (48, sizeof(refresh_msg_t*), &LcdMsgQueue_attributes);
+
+  /* creation of AppSwitchQueue */
+  AppSwitchQueueHandle = osMessageQueueNew (1, sizeof(AppListType), &AppSwitchQueue_attributes);
 
   /* creation of KeyEventQueue */
   KeyEventQueueHandle = osMessageQueueNew (8, sizeof(KeyEventMsg_t), &KeyEventQueue_attributes);

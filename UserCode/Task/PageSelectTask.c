@@ -67,7 +67,7 @@ static void SuspendTask(AppListType APP) {
         case APP_POWER: Suspend_DpsCoreTask();      break;
         case APP_DSO:   break;
         case APP_AWG:   Suspend_AwgTask();          break;
-        case APP_DMM:   break;
+        case APP_DMM:   Suspend_DmmTask();          break;
         case APP_SENSOR:break;
         case APP_CAL:   Suspend_CalibrateTask();    break;
         case APP_NONE:  break;

@@ -8,10 +8,10 @@
 #include "UserTask.h"
 #include "os_handles.h"
 #include "freertos_os2.h"
-#include "ff.h"  // FATFS核心头文件（必须包含，否则FIL/FRESULT等未定义）
+#include "ff.h"  // FATFS核心头文件
 
 // -------------------------- 全局变量定义 --------------------------
-// 用户自定义参数默认值表
+// 用户自定义参数默认值表（严格同步枚举，移除旧项，添加新项）
 const UserParamType_t UserParamDefault = {
     // 数控电源APP - 校准参数
     .DPS_Voltage_Original        = 0,          // 电压原点
@@ -58,11 +58,12 @@ const UserParamType_t UserParamDefault = {
     .DMM_Current_Original        = 0,          // 电流表电流零点
     .DMM_Current_Factor          = 1.33f,      // 用于确定I = U * K中K的值;K = 1 / 电阻R / TP181放大倍率
     // 万用表APP - 电阻表校准参数
-    .DMM_Res_Voltage             = 3.3f,       // 电阻表的基准电源，这个基本不用改
-    .DMM_Res_Parasitic           = 0.0f,       // 电阻表寄生电阻（并在被测电阻上，大概170K）
+    .DMM_Res_R200_Original       = 0,          // 200Ω输出零点
+    .DMM_Res_R200_Voltage        = 3.3f,       // 200Ω空载电压
     .DMM_Res_R200                = 200.0f,     // 200Ω基准电阻
+    .DMM_Res_R2K_Original        = 0,          // 2KΩ输出零点
+    .DMM_Res_R2K_Voltage         = 2.7f,       // 2KΩ空载电压
     .DMM_Res_R2K                 = 2000.0f,    // 2KΩ基准电阻
-    .DMM_Res_R100k               = 100000.0f,  // 100KΩ基准电阻
     // 其他配置
     .Screen_Brightness    = 100,        // 屏幕启动亮度亮度，值10~100，免得有呆子搞个0下去屏幕都看不清
     .Screen_Sleeptime     = 0,          // 休眠时间           (uint16_t)  0~3600 s
@@ -90,7 +91,7 @@ typedef struct {
     void *current_ptr;         // 指向当前值结构体成员的指针
 } ParamDesc_t;
 
-// 按UserParamType_e枚举顺序排列的参数描述表（与枚举一一对应，不可打乱顺序）
+// 按UserParamType_e枚举顺序排列的参数描述表（严格同步枚举，移除旧项，添加新项）
 static const ParamDesc_t param_desc_table[Param_Number] = {
     // 数控电源APP - 校准参数
     {2, &UserParamDefault.DPS_Voltage_Original,        &UserParam.DPS_Voltage_Original},
@@ -134,11 +135,12 @@ static const ParamDesc_t param_desc_table[Param_Number] = {
     {2, &UserParamDefault.DMM_Current_Original,        &UserParam.DMM_Current_Original},
     {4, &UserParamDefault.DMM_Current_Factor,          &UserParam.DMM_Current_Factor},
     // 万用表APP - 电阻表校准参数
-    {4, &UserParamDefault.DMM_Res_Voltage,             &UserParam.DMM_Res_Voltage},
-    {4, &UserParamDefault.DMM_Res_Parasitic,           &UserParam.DMM_Res_Parasitic},
+    {2, &UserParamDefault.DMM_Res_R200_Original,       &UserParam.DMM_Res_R200_Original},
+    {4, &UserParamDefault.DMM_Res_R200_Voltage,        &UserParam.DMM_Res_R200_Voltage},
     {4, &UserParamDefault.DMM_Res_R200,                &UserParam.DMM_Res_R200},
+    {2, &UserParamDefault.DMM_Res_R2K_Original,        &UserParam.DMM_Res_R2K_Original},
+    {4, &UserParamDefault.DMM_Res_R2K_Voltage,         &UserParam.DMM_Res_R2K_Voltage},
     {4, &UserParamDefault.DMM_Res_R2K,                 &UserParam.DMM_Res_R2K},
-    {4, &UserParamDefault.DMM_Res_R100k,               &UserParam.DMM_Res_R100k},
     // 其他配置
     {2, &UserParamDefault.Screen_Brightness,           &UserParam.Screen_Brightness},
     {2, &UserParamDefault.Screen_Sleeptime,            &UserParam.Screen_Sleeptime},

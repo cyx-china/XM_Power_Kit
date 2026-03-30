@@ -38,7 +38,7 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc);
 void DPS_ADC_DeInit(void);
 void DPS_ADC_Init(void);
 
-static void DrawMainBasicElement(void);
+static void DrawCalMainBasicElement(void);
 void cal_main_page_handler(KeyEventMsg_t msg);
 
 // 校准页面枚举
@@ -51,11 +51,11 @@ typedef enum {
     PAGE_DMM_A_CAL,     // 万用表电流档校准
     PAGE_DMM_R_CAL,     // 万用表电阻档校准
     PAGE_NUM            // 页面总数
-} AWG_AppPage_t;
+} CAL_AppPage_t;
 
 // 当前激活页面
-AWG_AppPage_t CAL_current_page = PAGE_MAIN;
-AWG_AppPage_t CAL_previous_page = PAGE_MAIN;
+CAL_AppPage_t CAL_current_page = PAGE_MAIN;
+CAL_AppPage_t CAL_previous_page = PAGE_MAIN;
 
 /* ========================== 页面处理函数回调表 ========================== */
 static void (*page_handlers[PAGE_NUM])(KeyEventMsg_t) = {
@@ -105,7 +105,7 @@ static const CalItem_t CalItems[6] = {
 #define CardTextBgColor         0x1908
 #define CardTextIntervalSize    4
 
-static void DrawMainBasicElement(void) {
+static void DrawCalMainBasicElement(void) {
     lcd_draw_rect(0, 0, 319, 31, 0x1908, 1);
     lcd_draw_line(0, 31, 319, 31, 0x11ac);
     lcd_draw_string(120,7,"设备校准",&yahei18x18,0x24be,0x1908,2);
@@ -134,7 +134,7 @@ void cal_main_page_handler(KeyEventMsg_t msg) {
     }
     else if ((msg.key == KEY_SET || msg.key == KEY_ENCODER) && msg.event == KEY_EVENT_CLICK) {
         CAL_previous_page = CAL_current_page;
-        CAL_current_page = (AWG_AppPage_t)(CAL_main_page_cursor_current) + 1;
+        CAL_current_page = (CAL_AppPage_t)(CAL_main_page_cursor_current) + 1;
         switch (CAL_main_page_cursor_current) {
             case Main_DPS:          DPS_Calibrate_Enter(); break;
             case Main_DSO:          DSO_Calibrate_Enter(); break;
@@ -164,19 +164,19 @@ void cal_main_page_handler(KeyEventMsg_t msg) {
 }
 
 /* ========================== 任务函数 ========================== */
-uint8_t time_count = 0;
+uint8_t cal_time_count = 0;
 KeyEventMsg_t CAL_Keymsg;
 
 void Start_CalibrateTask(void *argument) {
     osThreadSuspend(CalibrateTaskHandle);
 
     for (;;) {
-        time_count++;
+        cal_time_count++;
         if (osMessageQueueGet(KeyEventQueueHandle, &CAL_Keymsg, NULL, 0) == osOK) {
             page_handlers[CAL_current_page](CAL_Keymsg);
         }
-        if (time_count > 20) {
-            time_count = 0;
+        if (cal_time_count > 20) {
+            cal_time_count = 0;
             if (CAL_current_page == PAGE_DPS_CAL) {
                 DPS_Calibrate_Refresh();
             }
@@ -193,7 +193,7 @@ void Calibrate_ReturnToMain(void) {
     CAL_previous_page = PAGE_AWG_CAL;
     CAL_main_page_cursor_current = Main_DPS;
     CAL_main_page_cursor_past = Main_DPS;
-    DrawMainBasicElement();
+    DrawCalMainBasicElement();
     Resume_IndevDetectTask();
 }
 
@@ -205,7 +205,7 @@ void Suspend_CalibrateTask(void) {
 
 // 恢复本任务
 void Resume_CalibrateTask(void) {
-    DrawMainBasicElement();                     // 绘制基础见面
+    DrawCalMainBasicElement();                     // 绘制基础见面
     osDelay(150);                          // 等待界面绘制完成
     osThreadResume(CalibrateTaskHandle);        // 恢复本任务线程
     Resume_IndevDetectTask();                   // 恢复输入检查任务

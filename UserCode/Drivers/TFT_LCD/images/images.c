@@ -38,7 +38,7 @@ const ImageInfo img_wave13_212x57 = { .width = 212, .height = 57, .path = "0:/im
 
 const ImageInfo img_wave14_212x57 = { .width = 212, .height = 57, .path = "0:/images/wave14_212x57.bin" };
 
-
+const ImageInfo img_DMM_DC_30x30 = { .width = 30, .height = 30, .path = "0:/images/DMM_DC_30x30.bin" };
 
 
 

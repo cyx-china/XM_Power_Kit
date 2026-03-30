@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
 
-// 可自定义量枚举
+// 可自定义量枚举（严格保留您的修改）
 typedef enum {
     //============= 数控电源APP ============== //
     //== 校准参数 ==//
@@ -57,11 +57,12 @@ typedef enum {
     DMM_Current_original,               // 电流零点           (int16_t)   LSB
     DMM_Current_Factor,                 // 电流系数           (float)     Factor
     // 电阻表校准参数
-    DMM_Res_Voltage,                    // 电阻表电源         (int16_t)   LSB
-    DMM_Res_Parasitic,                  // 寄生下拉电阻        (float)     R_Ω
+    DMM_Res_R200_Original,              // 200Ω输出零点       (int16_t)   LSB
+    DMM_Res_R200_Voltage,               // 200Ω空载电压       (float)     V
     DMM_Res_R200,                       // 200Ω基准阻值       (float)     R_Ω
+    DMM_Res_R2K_Original,               // 2KΩ输出零点        (int16_t)   LSB
+    DMM_Res_R2K_Voltage,                // 2KΩ空载电压        (float)     V
     DMM_Res_R2K,                        // 2KΩ基准阻值        (float)     R_Ω
-    DMM_Res_R100k,                      // 100KΩ基准阻值      (float)     R_Ω
     //============== 其他配置 =============== //
     // 屏幕设置
     Screen_Brightness,           // 屏幕亮度           (uint16_t)  10~100
@@ -76,7 +77,7 @@ typedef enum {
     Param_Number                        // 参数个数
 } UserParamType_e;
 
-// 可自定义量结构体
+// 可自定义量结构体（严格同步枚举）
 typedef struct {
     //============= 数控电源APP ============== //
     // 校准参数
@@ -127,11 +128,12 @@ typedef struct {
     int16_t  DMM_Current_Original;        // 电流零点           (int16_t)   LSB
     float    DMM_Current_Factor;          // 电流系数           (float)     Factor
     // 电阻表校准参数
-    float    DMM_Res_Voltage;             // 电阻表电源         (int16_t)   LSB
-    float    DMM_Res_Parasitic;           // 寄生下拉电阻        (float)     R_Ω
+    int16_t  DMM_Res_R200_Original;       // 200Ω输出零点       (int16_t)   LSB
+    float    DMM_Res_R200_Voltage;        // 200Ω空载电压       (float)     V
     float    DMM_Res_R200;                // 200Ω基准阻值       (float)     R_Ω
+    int16_t  DMM_Res_R2K_Original;        // 2KΩ输出零点        (int16_t)   LSB
+    float    DMM_Res_R2K_Voltage;         // 2KΩ空载电压        (float)     V
     float    DMM_Res_R2K;                 // 2KΩ基准阻值        (float)     R_Ω
-    float    DMM_Res_R100k;               // 100KΩ基准阻值      (float)     R_Ω
     //============== 其他配置 =============== //
     uint16_t Screen_Brightness;    // 屏幕初始亮度        (uint16_t)  10~100
     uint16_t Screen_Sleeptime;     // 休眠时间           (uint16_t)  0~3600 s

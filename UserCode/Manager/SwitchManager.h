@@ -50,10 +50,14 @@ void OSC_Attenuation_Ctrl(AttenuationTypeDef attenuation_mode);     // 配置衰
 void OSC_Couple_Ctrl(CoupleTypeDef couple_mode);                    // 配置放大倍率
 
 // 万用表
+typedef enum {
+    Dmm_Mode_Voltage = 0,
+    Dmm_Mode_Current,
+    Dmm_Mode_Resistance,
+    Dmm_Mode_Diode
+}DmmModeTypeDef;
 
-
-
-
+void DMM_Switch_Mode(DmmModeTypeDef mode);
 
 
 
