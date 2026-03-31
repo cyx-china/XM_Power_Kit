@@ -24,7 +24,7 @@ static char DMM_V_Vol_formatted_buf[8] = {0};       // 电压格式化缓存
 static char DMM_V_Vol_thousandth_buf[2] = {0};      // 电压千分位缓存
 
 // 绘制万用表电压档校准初始页面
-static void DrawAwgCalibratePage(void)
+static void DrawDmmVCalibratePage(void)
 {
     // ===== 底色绘制 ===== //
     lcd_draw_rect(0, 0, 319, 31, 0x1908, 1);
@@ -385,7 +385,7 @@ static void DmmVCal_Negative_Edit_handler(KeyEventMsg_t msg)
 // 进入电压校准流程
 void DMM_V_Calibrate_Enter(void)
 {
-    DrawAwgCalibratePage();
+    DrawDmmVCalibratePage();
 
     DMM_ADC_Init();                          // 初始化ADC
     osDelay(100);                            // 延时确保界面绘制完成
