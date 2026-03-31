@@ -31,7 +31,7 @@ static void DrawDmmACalibratePage(void)
 
     // ===== 顶栏绘制 ===== //
     lcd_draw_line(0, 31, 319-1, 31, 0x11ac);
-    lcd_draw_string(105, 6, "电压表校准", &yahei20x20, 0x24be, 0x1908, 3);
+    lcd_draw_string(105, 6, "电流表校准", &yahei20x20, 0x24be, 0x1908, 3);
 
     // ===== 进度提示绘制 ===== //
     lcd_draw_round_rect(18, 47, 108, 73, 8, 0x048A, 1);

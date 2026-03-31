@@ -79,7 +79,7 @@ typedef enum {
     DMM_RES_MODE_2K,        // 2KΩ档位
 } DMM_Res_Mode_t;
 
-DMM_Res_Mode_t dmm_res_mode = DMM_RES_MODE_200; // 当前电阻测量档位
+volatile DMM_Res_Mode_t dmm_res_mode = DMM_RES_MODE_200; // 当前电阻测量档位
 
 /**
  * @brief  万用表核心任务主函数
@@ -430,8 +430,8 @@ static void Refresh_Resistance(float Res_Vol) {
          ? UserParam.DMM_Res_R200_Voltage
          : UserParam.DMM_Res_R2K_Voltage) - Res_Vol);
 
-    // 超量程判断（200Ω档>2000，2K档>25000）
-    if (Res > (dmm_res_mode == DMM_RES_MODE_200 ? 2000.0f : 25000.0f)) {
+    // 超量程判断（200Ω档>2000，2K档>30000）
+    if (Res > (dmm_res_mode == DMM_RES_MODE_200 ? 2000.0f : 30000.0f) || Res < 0.0f) {
         // 避免重复绘制OL
         if (Res_Is_Last_OL) {
             return;
@@ -684,8 +684,8 @@ static void dmm_Resistance_page_handler(KeyEventMsg_t msg) {
         dmm_res_mode = DMM_RES_MODE_2K;
         // 刷新挡位区边框
         lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
-        // 显示25KΩ挡位文字
-        lcd_draw_string(67, 47, "25KΩ", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
+        // 显示30KΩ挡位文字
+        lcd_draw_string(67, 47, "30KΩ", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
 
         // 硬件档位切换：关闭200Ω，打开2KΩ
         HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);
@@ -700,6 +700,8 @@ static void dmm_Resistance_page_handler(KeyEventMsg_t msg) {
         lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
         lcd_draw_string(288, 110, "K", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
 
+        Res_Is_Last_OL = false;
+
         // 停止蜂鸣
         StartBeezer(0);
         return;
@@ -710,8 +712,11 @@ static void dmm_Resistance_page_handler(KeyEventMsg_t msg) {
         dmm_res_mode = DMM_RES_MODE_200;
         // 刷新挡位区边框
         lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
-        // 显示AUTO挡位文字
-        lcd_draw_string(69, 47, "AUTO", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
+        // 刷新挡位区背景
+        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x1908, 1);
+        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
+        // 显示2KΩ挡位文字（默认）
+        lcd_draw_string(74, 47, "2KΩ", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
 
         // 硬件档位切换：打开200Ω，关闭2KΩ
         HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
@@ -724,6 +729,8 @@ static void dmm_Resistance_page_handler(KeyEventMsg_t msg) {
         lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
         // 更新单位（仅Ω）
         lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
+
+        Res_Is_Last_OL = false;
 
         // 停止蜂鸣
         StartBeezer(0);
@@ -751,6 +758,7 @@ static void dmm_Resistance_page_handler(KeyEventMsg_t msg) {
         Hold_ctrl(false);
         // 重置二极管OL状态
         Dio_Is_Last_OL = false;
+        dmm_res_mode = DMM_RES_MODE_2K;
         // 停止蜂鸣
         StartBeezer(0);
         return;
@@ -786,6 +794,7 @@ static void dmm_diode_page_handler(KeyEventMsg_t msg) {
         Hold_ctrl(false);
         // 重置电阻OL状态
         Res_Is_Last_OL = false;
+        dmm_res_mode = DMM_RES_MODE_200;
         // 停止蜂鸣
         StartBeezer(0);
         return;

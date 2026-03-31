@@ -5,5 +5,5 @@
 
 void dmm_r_cal_handler(KeyEventMsg_t msg);
 void DMM_R_Calibrate_Enter(void);
-
+void DMM_R_Calibrate_Refresh(void);
 #endif

@@ -450,12 +450,14 @@ const uint8_t font_map_yahei16x16[][4] = {
     { 0xE7, 0x9F, 0xA5, 0x00 },  /* 知 */
     { 0xE5, 0xAE, 0x9E, 0x00 },  /* 实 */
     { 0xE9, 0x99, 0x85, 0x00 },  /* 际 */
+    { 0xE9, 0x87, 0x8F, 0x00 },  /* 量 */
+    { 0xCE, 0xA9, 0x00, 0x00 },  /* Ω */
 };
 
 const FontInfo yahei16x16 = {
     .font_width  = 16,
     .font_height = 16,
-    .font_num    = 185,
+    .font_num    = 187,
     .path        = "0:/font/yahei16x16.bin",
     .font_map    = font_map_yahei16x16
 };

@@ -8,9 +8,10 @@
 
 // 函数声明
 void DMM_ADC_Init(void);
+void DMM_ADC_DeInit(void);
 void CB_DMM_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc);
 int FormatFloatWithThousandth(float num, char *formatted_buf, char *thousandth_buf);
-void DMM_ADC_DeInit(void);
+int FormatFloatWithTwoDigits(float num, char *formatted_buf, char *digits_buf);
 
 // 全局变量声明
 extern volatile uint16_t dmm_adc_raw_buf[600];

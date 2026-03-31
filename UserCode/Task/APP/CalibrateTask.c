@@ -180,6 +180,7 @@ void Start_CalibrateTask(void *argument) {
             if      (CAL_current_page == PAGE_DPS_CAL)      {DPS_Calibrate_Refresh();}
             else if (CAL_current_page == PAGE_DMM_V_CAL)    {DMM_V_Calibrate_Refresh();}
             else if (CAL_current_page == PAGE_DMM_A_CAL)    {DMM_A_Calibrate_Refresh();}
+            else if (CAL_current_page == PAGE_DMM_R_CAL)    {DMM_R_Calibrate_Refresh();}
 
         }
         osDelay(10);
