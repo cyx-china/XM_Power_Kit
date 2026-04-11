@@ -28,6 +28,9 @@ extern const FontInfo yahei18x18;
 extern const FontInfo yahei20x20;
 extern const FontInfo yahei16x16;
 extern const FontInfo DIN_Medium32x48;
+extern const FontInfo JetBrainsMono10x14;
+extern const FontInfo yahei12x12;
+extern const FontInfo MapleMono9x12;
 
 
 #endif //XM_POWER_KIT_FONT_H

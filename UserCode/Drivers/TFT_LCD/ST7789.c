@@ -3,6 +3,7 @@
 #include "cmsis_os2.h"
 #include "dma.h"
 #include "os_handles.h"
+#include "UserTask.h"
 
 // -------------------------- FSMC传输函数 -------------------------- //
 // 发送一个16bit命令
@@ -79,6 +80,11 @@ void LCD_FLUSH_DMA(uint32_t src_addr,uint32_t data_length) {
 void CB_LCD_FSMC_TransmitCpltCallback(DMA_HandleTypeDef *_hdma) {
     // 释放信号量
     osSemaphoreRelease(LCD_DMA_Cplt_SemHandle);
+
+    if (IS_DrawData) {
+        Is_DrawData_Busy = false;
+        IS_DrawData = false;
+    }
 }
 
 

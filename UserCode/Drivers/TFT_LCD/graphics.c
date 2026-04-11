@@ -525,9 +525,38 @@ void GFX_DrawEllipse(uint16_t x0, uint16_t y0, uint16_t a, uint16_t b, uint16_t 
     }
 }
 
-#define IMAGE_MAX_BUFFER_SIZE  1024
+
+// =============== 画等边三角 =============== //
+void GFX_DrawIsoscelesTriangle(uint16_t x0, uint16_t y0, uint16_t direction, uint16_t height, uint16_t color) {
+    int16_t x1, y1, x2, y2, c;
+    for (uint16_t i = 0; i < height; i++) {
+        // 根据方向计算线段端点
+        switch (direction) {
+            case 0: x1 = x0 - i; y1 = y0 + i; x2 = x0 + i; y2 = y0 + i; break; // 上
+            case 1: x1 = x0 - i; y1 = y0 - i; x2 = x0 - i; y2 = y0 + i; break; // 右
+            case 2: x1 = x0 - i; y1 = y0 - i; x2 = x0 + i; y2 = y0 - i; break; // 下
+            case 3: x1 = x0 + i; y1 = y0 - i; x2 = x0 + i; y2 = y0 + i; break; // 左
+            default: return;
+        }
+
+        // 统一裁剪逻辑 (X轴)
+        if (x1 > x2) { c = x1; x1 = x2; x2 = c; }
+        if (x2 < 0 || x1 > 319) continue;
+        x1 = (x1 < 0) ? 0 : x1; x2 = (x2 > 319) ? 319 : x2;
+
+        // 统一裁剪逻辑 (Y轴)
+        if (y1 > y2) { c = y1; y1 = y2; y2 = c; }
+        if (y2 < 0 || y1 > 239) continue;
+        y1 = (y1 < 0) ? 0 : y1; y2 = (y2 > 239) ? 239 : y2;
+
+        GFX_DrawLine(x1, y1, x2, y2, color);
+    }
+}
+
 
 // -------------------------- 图片绘制 -------------------------- //
+#define IMAGE_MAX_BUFFER_SIZE  1024
+
 void GFX_DrawImage(const ImageInfo *pic, uint16_t x, uint16_t y) {
     if (pic == NULL || pic->width == 0 || pic->height == 0) {
         return;

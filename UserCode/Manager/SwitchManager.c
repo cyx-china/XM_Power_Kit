@@ -25,35 +25,38 @@ void OSC_Attenuation_Ctrl(AttenuationTypeDef attenuation_mode) {
 }
 
 void OSC_Magnify_Ctrl(MagnifyTypeDef magnify_mode) {
+    // 第一步：先清零3个控制引脚的对应位，避免状态残留
+    GPIOC->ODR &= ~(GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15);
 
-    GPIOC->ODR &= ~(GPIO_PIN_14 | GPIO_PIN_15);
-    GPIOC->ODR |= GPIO_PIN_13 ;
     // 根据放大倍数设置对应引脚状态
     switch (magnify_mode) {
         case Magnify_1:
+            GPIOC->ODR |= GPIO_PIN_13;  // 100
             break;
         case Magnify_2:
-            GPIOC->ODR |= GPIO_PIN_13 | GPIO_PIN_14;  // PC13=1, PC14=1, PC15=0
+            GPIOC->ODR |= GPIO_PIN_13 | GPIO_PIN_14;  // 110
             break;
         case Magnify_4:
-            GPIOC->ODR |= GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;  // 全1
+            GPIOC->ODR |= GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;  // 111
             break;
         case Magnify_8:
-            GPIOC->ODR |= GPIO_PIN_13 | GPIO_PIN_15;  // PC13=1, PC14=0, PC15=1
+            GPIOC->ODR |= GPIO_PIN_13 | GPIO_PIN_15;  // 101
             break;
         case Magnify_16:
-            GPIOC->ODR |= GPIO_PIN_14 | GPIO_PIN_15;  // PC13=0, PC14=1, PC15=1
+            GPIOC->ODR |= GPIO_PIN_14 | GPIO_PIN_15;  // 011
             break;
         case Magnify_32:
-            GPIOC->ODR &= ~(GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15);   // PC13=0, PC14=0, PC15=0
+            // 已提前清零，无需额外操作 000
             break;
         case Magnify_64:
-            GPIOC->ODR |= GPIO_PIN_15;  // PC13=0, PC14=0, PC15=1
+            GPIOC->ODR |= GPIO_PIN_15;  // 001
             break;
         case Magnify_128:
-            GPIOC->ODR |= GPIO_PIN_13 | GPIO_PIN_15;  // PC13=1, PC14=0, PC15=1
+            GPIOC->ODR |= GPIO_PIN_14;  // 010
             break;
         default:
+            // 异常默认使用×1倍率
+            GPIOC->ODR |= GPIO_PIN_13;
             break;
     }
 }

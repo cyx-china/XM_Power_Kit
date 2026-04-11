@@ -1407,8 +1407,8 @@ void Resume_DpsCoreTask(void) {
     HAL_ADC_Start_DMA(&hadc1, (uint32_t *) dps_adc_raw_buf, 128);
 
     AdcTim_OFF();
-    __HAL_TIM_SET_PRESCALER(&htim8, 149);   // 设定更新频率64Khz
-    __HAL_TIM_SET_AUTORELOAD(&htim8, 14);
+    __HAL_TIM_SET_PRESCALER(&htim8, 0);   // 设定更新频率64Khz
+    __HAL_TIM_SET_AUTORELOAD(&htim8, 2249);
     AdcTim_ON();                                                            // 启动定时器（ADC触发源）
 
     PID_Init();                                                             // 初始化PID控制器

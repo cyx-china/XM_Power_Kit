@@ -31,30 +31,8 @@
  * 2. 适配手动调用刷新屏幕的需求，根据消息，调用对应的绘制函数
  */
 
-// 高速内存拷贝函数保留（手动刷新逻辑可能潜在用到，若确认不用可删除）
-// static void FastMemCopy(lv_color_t *restrict dst,const lv_color_t *restrict src,uint32_t pixel_count){
-//     uint32_t *d = (uint32_t *)dst;
-//     const uint32_t *s = (const uint32_t *)src;
-//     uint32_t pairs = pixel_count >> 1;   // 多少组（每组 2 个像素 = 4 字节）
-//
-//     while (pairs >= 8)
-//     {
-//         d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
-//         d[4] = s[4]; d[5] = s[5]; d[6] = s[6]; d[7] = s[7];
-//         d += 8;
-//         s += 8;
-//         pairs -= 8;
-//     }
-//     while (pairs--)
-//     {
-//         *d++ = *s++;
-//     }
-//     // 处理奇数像素
-//     if (pixel_count & 1)
-//     {
-//         *(uint16_t *)d = *(const uint16_t *)s;
-//     }
-// }
+volatile bool Is_DrawData_Busy = false;
+volatile bool IS_DrawData = false;
 
 void Start_LcdFlushTask(void *argument) {
     refresh_msg_t* msg = NULL;
@@ -131,6 +109,17 @@ void Start_LcdFlushTask(void *argument) {
                             GFX_DrawString(cmd->start_point >> 16, cmd->start_point & 0xFFFF,
                                            cmd->str, cmd->font, cmd->color, cmd->param1, cmd->param2);
                         }
+                        break;
+                    case DRAW_DATA:
+                        IS_DrawData = true;
+                        LCD_SET_WINDOWS(cmd->start_point >> 16, cmd->start_point & 0xFFFF, cmd->end_point >> 16,
+                                        cmd->end_point & 0xFFFF);
+                        uint32_t ptr = ((uint32_t)cmd->param1 << 16) | cmd->param2;
+                        LCD_FLUSH_DMA(ptr, cmd->color);
+                        break;
+                    case DRAW_IsoscelesTriangle:
+                        GFX_DrawIsoscelesTriangle(cmd->start_point >> 16, cmd->start_point & 0xFFFF,cmd->param2,
+                            cmd->param1,cmd->color);
                         break;
                     default:
                         break;

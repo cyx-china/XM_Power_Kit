@@ -620,9 +620,9 @@ void freq_digit_handler(KeyEventMsg_t msg) {
     }
     // 编码器左转：减少对应数位的数值
     else if (msg.event == ENCODER_EVENT_LEFT) {
-        // 边界处理：不小于1Hz
-        FreqValue = (FreqValue - awg_pow10_table[freq_digit_current]) < 1
-                        ? 1
+        // 边界处理：不小于10Hz
+        FreqValue = (FreqValue - awg_pow10_table[freq_digit_current]) < 10
+                        ? 10
                         : (FreqValue - awg_pow10_table[freq_digit_current]);
 
         // 更新频率显示字符串

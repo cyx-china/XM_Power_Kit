@@ -84,7 +84,8 @@ osStatus_t lcd_draw_string(uint16_t x, uint16_t y, const char* str,
                            const FontInfo* font, uint16_t ft_color,uint16_t bg_color, int8_t spacing);
 
 
+osStatus_t lcd_draw_data(uint16_t x0,uint16_t y0,uint16_t x1,uint16_t y1,uint16_t *data,uint16_t len);
 
-
+osStatus_t lcd_draw_IsoscelesTriangle(uint16_t x,uint16_t y,Triangle_Direction_e direction,uint16_t hight,uint16_t color);
 
 #endif //XM_POWER_KIT_LCD_DRAW_API_H

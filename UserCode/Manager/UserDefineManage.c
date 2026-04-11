@@ -38,7 +38,7 @@ const UserParamType_t UserParamDefault = {
     // 数控电源APP - 杂项
     .DPS_Fan_Start               = 40,         // 风扇启转温度，只支持整数
     // 示波器APP - 校准参数
-    .OSC_Original                = 0,          // 示波器电压原点，正常是1.65V，这里表DAC值的偏移
+    .OSC_Original                = 0,          // 示波器电压原点，正常是1.65V，这里表值的偏移
     .OSC_Factor                  = 5.0f,       // 示波器5倍降压的降压比例
     .OSC_AMP_X2                  = 2.0f,       // 程控放大器倍率
     .OSC_AMP_X4                  = 4.0f,       // 程控放大器倍率
@@ -46,7 +46,7 @@ const UserParamType_t UserParamDefault = {
     .OSC_AMP_X16                 = 16.0f,      // 程控放大器倍率
     .OSC_AMP_X32                 = 32.0f,      // 程控放大器倍率
     .OSC_AMP_X64                 = 64.0f,      // 程控放大器倍率
-    .OSC_AMP_X128                = 128.0f,     // 程控放大器倍率
+    .OSC_AMP_X128                = 128.0f,     // 程控放大器倍率   // 暂不开放
     // 信号发生器APP - 校准参数
     .DDS_Original                = 0,          // 波形发生器电压原点
     .DDS_Factor                  = 3.0f,       // 波形发生器放大倍数
@@ -278,7 +278,7 @@ HAL_StatusTypeDef UserParam_ResetToDefault(void)
     }
     memset(pBuf, 0, PARAM_TOTAL_BYTES); // 缓冲区初始化为0
 
-    // 第三步：查表填充默认值到缓冲区（替代原switch-case）
+    // 第三步：查表填充默认值到缓冲区
     for (uint32_t i = 0; i < Param_Number; i++) {
         uint8_t *pParam = &pBuf[i * 4];                // 缓冲区中当前参数的起始地址
         const ParamDesc_t *desc = &param_desc_table[i];// 当前参数的描述信息

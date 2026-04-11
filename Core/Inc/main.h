@@ -95,8 +95,6 @@ void Error_Handler(void);
 #define ECD_S_GPIO_Port GPIOC
 #define DMM_SWITCH_GND_Pin GPIO_PIN_7
 #define DMM_SWITCH_GND_GPIO_Port GPIOC
-#define OSC_FREQ_Pin GPIO_PIN_8
-#define OSC_FREQ_GPIO_Port GPIOC
 #define LCD_PWM_T1C2_Pin GPIO_PIN_9
 #define LCD_PWM_T1C2_GPIO_Port GPIOA
 #define FAN_PWM_T1C3_Pin GPIO_PIN_10

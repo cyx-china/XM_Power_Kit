@@ -75,6 +75,8 @@ typedef enum {
     DRAW_ELLIPSE,        // 绘制椭圆
     DRAW_IMAGE,          // 绘制图片
     DRAW_STRING,         // 绘制字符串
+    DRAW_DATA,           // DMA刷新数据
+    DRAW_IsoscelesTriangle  // 绘制等腰三角
 } LcdFlushType;
 
 // 这里扣扣索索省点内存
@@ -106,6 +108,15 @@ typedef struct {
     void* cmd_mem;              // GFX_DrawCommand_t的内存指针
 } refresh_msg_t;
 
+typedef enum {
+    Triangle_UP = 0,
+    Triangle_RIGHT,
+    Triangle_DOWN,
+    Triangle_LEFT
+}Triangle_Direction_e;
+
+extern volatile bool Is_DrawData_Busy;      // 专为了 DRAW_DATA 准备
+extern volatile bool IS_DrawData;
 /*================= PageSelectTask ================*/
 // 定义app列表枚举
 typedef enum {
@@ -155,6 +166,10 @@ void Resume_AwgTask(void);
 /*=================== DmmTask =====================*/
 void Resume_DmmTask(void);
 void Suspend_DmmTask(void);
+
+/*=================== DsoTask =====================*/
+void Suspend_DsoCoreTask(void);
+void Resume_DsoCoreTask(void);
 
 #endif //XM_POWER_KIT_USERTASK_H
 

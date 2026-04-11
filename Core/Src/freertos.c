@@ -76,7 +76,7 @@ osThreadId_t LcdFlushTaskHandle;
 const osThreadAttr_t LcdFlushTask_attributes = {
   .name = "LcdFlushTask",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityAboveNormal,
+  .priority = (osPriority_t) osPriorityHigh1,
 };
 /* Definitions for PageSelectTask */
 osThreadId_t PageSelectTaskHandle;
@@ -131,6 +131,13 @@ const osThreadAttr_t AwgTask_attributes = {
 osThreadId_t DmmCoreTaskHandle;
 const osThreadAttr_t DmmCoreTask_attributes = {
   .name = "DmmCoreTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for DsoCoreTask */
+osThreadId_t DsoCoreTaskHandle;
+const osThreadAttr_t DsoCoreTask_attributes = {
+  .name = "DsoCoreTask",
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
@@ -201,6 +208,7 @@ extern void Start_PIDTask(void *argument);
 extern void Start_CalibrateTask(void *argument);
 extern void Start_AwgTask(void *argument);
 extern void Start_DmmCoreTask(void *argument);
+extern void Start_DsoCoreTask(void *argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -280,11 +288,11 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* creation of LcdMsgQueue */
-  LcdMsgQueueHandle = osMessageQueueNew (48, sizeof(refresh_msg_t*), &LcdMsgQueue_attributes);
-
   /* creation of AppSwitchQueue */
   AppSwitchQueueHandle = osMessageQueueNew (1, sizeof(AppListType), &AppSwitchQueue_attributes);
+
+  /* creation of LcdMsgQueue */
+  LcdMsgQueueHandle = osMessageQueueNew (48, sizeof(refresh_msg_t*), &LcdMsgQueue_attributes);
 
   /* creation of KeyEventQueue */
   KeyEventQueueHandle = osMessageQueueNew (8, sizeof(KeyEventMsg_t), &KeyEventQueue_attributes);
@@ -329,6 +337,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of DmmCoreTask */
   DmmCoreTaskHandle = osThreadNew(Start_DmmCoreTask, NULL, &DmmCoreTask_attributes);
+
+  /* creation of DsoCoreTask */
+  DsoCoreTaskHandle = osThreadNew(Start_DsoCoreTask, NULL, &DsoCoreTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */

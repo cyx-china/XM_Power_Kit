@@ -38,6 +38,8 @@ void GFX_DrawCircle(uint16_t x0, uint16_t y0, uint16_t r,
 void GFX_DrawEllipse(uint16_t x0, uint16_t y0, uint16_t a, uint16_t b,
                      uint16_t color, uint8_t is_filled);
 
+void GFX_DrawIsoscelesTriangle(uint16_t x0, uint16_t y0, uint16_t direction, uint16_t height, uint16_t color);
+
 // 图片绘制（从文件系统加载并绘制，支持任意尺寸）
 void GFX_DrawImage(const ImageInfo* pic, uint16_t x, uint16_t y);
 

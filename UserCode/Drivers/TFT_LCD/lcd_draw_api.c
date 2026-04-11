@@ -119,9 +119,25 @@ osStatus_t lcd_draw_string(uint16_t x, uint16_t y, const char* str,
     return lcd_draw_send_cmd(DRAW_STRING, COORD(x, y), 0, ft_color, 0, bg_color, spacing, NULL, font, str);
 }
 
+// 关于此函数，有无奈之举：此函数用于向选定区域发送已知数据，由于是异步处理，所以要求数据在处理完前都不能更改。
+//  这个函数我只用在了DSO这个APP上，用于刷新波形数据。由于是一列一列的刷新，需要大量的调用。
+//  方法一就是给每一次调用都动态分配一个400字节的内存，但我在短时间内会调用300次，也就是120K内存，显然无法实现。
+//  所以我用了方法二：在调用后会置标志位，直到线程处理完成次刷新任务，才会发送下一个刷新任务，相当于阻塞执行了。
 
+osStatus_t lcd_draw_data(uint16_t x0,uint16_t y0,uint16_t x1,uint16_t y1,uint16_t *data,uint16_t len) {
+    Is_DrawData_Busy = true;
 
+    uint32_t addr = (uint32_t)data;
+    uint16_t addr_h = (uint16_t)(addr >> 16);  // 高16位
+    uint16_t addr_l = (uint16_t)(addr & 0xFFFF); // 低16位
+    lcd_draw_send_cmd(DRAW_DATA, COORD(x0, y0), COORD(x1, y1), len, 0, addr_h, addr_l, NULL, NULL,NULL);
+    while (Is_DrawData_Busy){};
+    return osOK;
+}
 
+osStatus_t lcd_draw_IsoscelesTriangle(uint16_t x,uint16_t y,Triangle_Direction_e direction,uint16_t hight,uint16_t color) {
+    return lcd_draw_send_cmd(DRAW_IsoscelesTriangle, COORD(x, y), 0, color, 0, hight, direction, NULL, NULL, NULL);
+}
 
 
 
