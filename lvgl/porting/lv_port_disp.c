@@ -59,11 +59,10 @@ void lv_port_disp_init(void)
      * Create a buffer for drawing
      *----------------------------*/
 
-    // PS:此处的两个缓冲区都放在了ccmram中，并且指定了存放的位置，以避免和lvgl的memory pool冲突，你可以查看STM32F407XX_FLASH.ld
     static lv_disp_draw_buf_t draw_buf_dsc_2;
-    static lv_color_t buf_2_1[MY_DISP_HOR_RES * 25] ;
-    static lv_color_t buf_2_2[MY_DISP_HOR_RES * 25] ;
-    lv_disp_draw_buf_init(&draw_buf_dsc_2, buf_2_1, buf_2_2, MY_DISP_HOR_RES * 25);
+    static lv_color_t buf_2_1[MY_DISP_HOR_RES * 40] ;
+    static lv_color_t buf_2_2[MY_DISP_HOR_RES * 40] ;
+    lv_disp_draw_buf_init(&draw_buf_dsc_2, buf_2_1, buf_2_2, MY_DISP_HOR_RES * 40);
 
     /*-----------------------------------
      * Register the display in LVGL

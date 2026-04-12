@@ -8,6 +8,7 @@
 #include "os_handles.h"
 #include "stm32f4xx_hal.h"
 #include "tim.h"
+#include "UserTask.h"
 
 static int32_t get_encoder_delta(void);
 static bool is_encoder_button_pressed(void);
@@ -204,6 +205,7 @@ void Encoder_Init(void) {
 // LVGL 回调
 void encoder_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
+    static bool last_btn_state = 1;
     int32_t diff;
     bool pressed; // <- 这是个占位变量
     get_encoder_data(&diff, &pressed);
@@ -212,6 +214,12 @@ void encoder_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
                                                          // 否则会吞事件，因此直接读电平传过去就行了
     data->enc_diff = (int16_t)diff;
     data->state = is_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    if (diff != 0) {StartBeezer((0));}
+    if (is_pressed == 0 && last_btn_state == 1)
+    {
+        StartBeezer(0);  // 按键按下 → 只响一次
+    }
+    last_btn_state = is_pressed;
 }
 
 void Encoder_Scan(void)
