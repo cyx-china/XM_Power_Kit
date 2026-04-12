@@ -1,0 +1,3 @@
+此仓库是本人立创开源项目：XM POWER KIT的工程代码
+项目地址如下：https://oshwhub.com/cyxsnbb666/xm_power_kit_v7
+本人博客如下：xuemeng.work
