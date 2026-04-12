@@ -36,16 +36,6 @@ extern DMA_HandleTypeDef hdma_adc3;
 
 extern char Sys_Version[30];
 /*==================== InitTask ===================*/
-typedef enum {
-    INIT_OK = 0,        // 初始化成功
-    FLASH_ERROR,        // FLASH初始化错误
-    FATFS_ERROR,        // 文件系统初始化错误
-    INA226_ERROR,       // INA226初始化错误
-    TMP102_DC_ERROR,    //TMP102_DCDC初始化错误
-    MCP4725_DC_ERROR,   // 数控电源MCP4725初始化错误
-    MCP4725_OSC_ERROR,  // 示波器MCP4725初始化错误
-    USER_PARAM_ERROR,   // 用户自定义参数值初始化失败
-  } InitErrorCode;
 
 extern MCP4725_HandleTypeDef hmcp4725_DC;
 extern MCP4725_HandleTypeDef hmcp4725_OSC;

@@ -207,7 +207,6 @@ static void lv_svg_draw_page(void) {
     lcd_draw_round_rect(100,169,219,204,8,0x1908,1);
     lcd_draw_round_rect(100,169,219,204,8,0x21aa,0);
     lcd_draw_string(135,176,"发生",&yahei20x20, 0xef7d, 0x1908, 10);
-
 }
 
 

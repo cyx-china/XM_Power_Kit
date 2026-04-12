@@ -454,12 +454,15 @@ const uint8_t font_map_yahei16x16[][4] = {
     { 0xCE, 0xA9, 0x00, 0x00 },  /* Ω */
     { 0xE5, 0x8D, 0x95, 0x00 },  /* 单 */
     { 0xE6, 0xAC, 0xA1, 0x00 },  /* 次 */
+    { 0xE6, 0x88, 0xB7, 0x00 },  /* 户 */
+    { 0xE9, 0x85, 0x8D, 0x00 },  /* 配 */
+    { 0x5F, 0x00, 0x00, 0x00 },  /* _ */
 };
 
 const FontInfo yahei16x16 = {
     .font_width  = 16,
     .font_height = 16,
-    .font_num    = 189,
+    .font_num    = 192,
     .path        = "0:/font/yahei16x16.bin",
     .font_map    = font_map_yahei16x16
 };
@@ -615,4 +618,23 @@ const FontInfo MapleMono9x12 = {
     .font_num    = 17,
     .path        = "0:/font/MapleMono9x12.bin",
     .font_map    = font_map_MapleMono9x12
+};
+
+/*========== yahei字体24号 ==========*/
+const uint8_t font_map_yahei24x24[][4] = {
+    { 0xE7, 0xB3, 0xBB, 0x00 },  /* 系 */
+    { 0xE7, 0xBB, 0x9F, 0x00 },  /* 统 */
+    { 0xE5, 0x88, 0x9D, 0x00 },  /* 初 */
+    { 0xE5, 0xA7, 0x8B, 0x00 },  /* 始 */
+    { 0xE5, 0x8C, 0x96, 0x00 },  /* 化 */
+    { 0xE7, 0x8A, 0xB6, 0x00 },  /* 状 */
+    { 0xE6, 0x80, 0x81, 0x00 },  /* 态 */
+};
+
+const FontInfo yahei24x24 = {
+    .font_width  = 24,
+    .font_height = 24,
+    .font_num    = 7,
+    .path        = "0:/font/yahei24x24.bin",
+    .font_map    = font_map_yahei24x24
 };

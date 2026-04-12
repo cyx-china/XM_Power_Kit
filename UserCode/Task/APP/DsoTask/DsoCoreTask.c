@@ -37,7 +37,6 @@
 static uint8_t DSO_ADC_BUFFER[DSO_Buffer_Size] = {0};
 
 // 排序后的原始采样点缓冲区
-// 结构说明：
 // [0..1439] 触发点前的1440个采样点 | [1440] 触发点 | [1441..2880] 触发点后的1440个采样点
 static uint8_t raw_sorted_buf[SORTED_BUF_SIZE];
 
@@ -47,52 +46,52 @@ static uint8_t stretched_buf[SORTED_BUF_SIZE];
 // 显示点缓冲区：存储最终用于LCD绘制的波形数据（经过峰值抽取处理）
 static uint8_t DSO_SAMPLE_SHOW_BUFFER[DSO_ShowBuffer_Deep] = {0};
 
-// 网格/波形刷新缓冲区：缓存LCD绘制的网格和波形数据，减少刷屏耗时（提升显示效率）
+// 网格/波形刷新缓冲区
 static uint16_t grid_buffer[1608] = {0};
 
 /* ============================ 全局变量定义 ============================ */
 // ---------------- 触发相关状态标志位 ----------------
-volatile bool Is_Trig = false;          // 触发标志：是否已触发
-volatile bool Is_conv_finish = false;   // ADC转换完成标志
-volatile bool post_trigger_counting = false; // 后触发计数标志
+volatile bool Is_Trig = false;                          // 触发标志：是否已触发
+volatile bool Is_conv_finish = false;                   // ADC转换完成标志
+volatile bool post_trigger_counting = false;            // 后触发计数标志
 
-volatile bool Is_Pause = false;         // 暂停标志：是否处于暂停状态
+volatile bool Is_Pause = false;                         // 暂停标志：是否处于暂停状态
 
 // ---------------- 触发相关参数 ----------------
-volatile uint32_t   trigger_ndtr_at_capture = 0; // 捕获时刻的DMA剩余计数
-volatile uint32_t   trigger_pos = 0;            // 触发点在ADC缓冲区中的位置
-volatile int8_t     trigger_offset = 0;         // 触发电压偏移量
-volatile int16_t    software_offset = 0;        // 软件触发微调偏移量
+volatile uint32_t   trigger_ndtr_at_capture = 0;        // 捕获时刻的DMA剩余计数
+volatile uint32_t   trigger_pos = 0;                    // 触发点在ADC缓冲区中的位置
+volatile int8_t     trigger_offset = 0;                 // 触发电压偏移量
+volatile int16_t    software_offset = 0;                // 软件触发微调偏移量
 
 // ---------------- 示波器核心配置参数 ----------------
-TimeBase_e           TimeBase = time_200us;     // 时基档位（默认200us/格）
-Vdiv_e               V_div = div_500mv;         // 电压档位（默认500mV/格）
-CoupleTypeDef        CoupleType = Couple_DC;    // 耦合方式（默认直流）
-AttenuationTypeDef   AttenuationType = Attenuation_1; // 硬件衰减倍数
-EdgeType_e           EdgeType = EDGE_RISING;    // 触发边沿类型（默认上升沿）
-TriggerMode_e        TriggerMode = TrigMode_Auto; // 触发模式（默认自动）
+TimeBase_e           TimeBase = time_200us;             // 时基档位（默认200us/格）
+Vdiv_e               V_div = div_500mv;                 // 电压档位（默认500mV/格）
+CoupleTypeDef        CoupleType = Couple_DC;            // 耦合方式（默认直流）
+AttenuationTypeDef   AttenuationType = Attenuation_1;   // 硬件衰减倍数
+EdgeType_e           EdgeType = EDGE_RISING;            // 触发边沿类型（默认上升沿）
+TriggerMode_e        TriggerMode = TrigMode_Auto;       // 触发模式（默认自动）
 
 // ---------------- 显示偏移参数 ----------------
-int16_t offset_h = 0;  // 水平偏移量
-int8_t offset_w = 0;   // 垂直偏移量
-int8_t offset_v = 0;   // 触发电压偏移量
+int16_t offset_h = 0;       // 水平偏移量
+int8_t offset_w = 0;        // 垂直偏移量
+int8_t offset_v = 0;        // 触发电压偏移量
 
 // ---------------- 波形特征参数 ----------------
-float Wave_Freq = 0.0f; // 波形频率 (KHz)
-float Wave_Duty = 0.0f; // 波形占空比 (%)
-float Wave_Vpp  = 0.0f; // 波形峰峰值 (V)
+float Wave_Freq = 0.0f;     // 波形频率 (KHz)
+float Wave_Duty = 0.0f;     // 波形占空比 (%)
+float Wave_Vpp  = 0.0f;     // 波形峰峰值 (V)
 
 // ---------------- 格式化字符缓冲区 ----------------
-char Freq_buf[10] = {0}; // 频率显示字符串缓冲区
-char Duty_buf[10] = {0}; // 占空比显示字符串缓冲区
-char Vpp_buf[10]  = {0}; // 峰峰值显示字符串缓冲区
+char Freq_buf[10] = {0};    // 频率显示字符串缓冲区
+char Duty_buf[10] = {0};    // 占空比显示字符串缓冲区
+char Vpp_buf[10]  = {0};    // 峰峰值显示字符串缓冲区
 
 // ---------------- 按键响应区 ----------------
-KeyEventMsg_t DSO_Keymsg; // 示波器按键事件消息
+KeyEventMsg_t DSO_Keymsg;                                   // 示波器按键事件消息
 DSO_AppPage_t dso_current_page = DSO_PAGE_MAIN;             // 当前激活的功能页面
 uint8_t Bias_triangle = 0;                                  // 偏移三角选中：0-左右偏移；1-上下偏移;2-调节触发
 DSO_SettingMenu_t dso_current_setting = Setting_TimeBase;   // 当前激活的设置选项
-DSO_SettingMenu_t dso_past_setting = -1;      // 上一个激活的设置选项
+DSO_SettingMenu_t dso_past_setting = -1;                    // 上一个激活的设置选项
 
 /* ============================ 函数声明 ============================ */
 // 界面绘制与刷新函数
@@ -134,10 +133,15 @@ static void (*page_handlers[DSO_PAGE_NUM])(KeyEventMsg_t);
 /**
  * @brief  TIM3触发捕获中断回调函数（硬件边沿触发）
  * @param  htim: 定时器句柄
- * @retval None
+* @retval None
  */
 void CB_Trigger_CaptureCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance != TIM3) return;
+    /* 由硬件触发时，需要极快的速度读取到DMA的NDTR值，这样才能算到尽量准的触发点。
+     * 因此我将此处的读取函数放在了 stm32f4xx_it.c 中，尽量避免函数层层调用带来的延时
+     */
+
+    //trigger_ndtr_at_capture = __HAL_DMA_GET_COUNTER(&hdma_adc1);
     TriggerHandler();
 }
 
@@ -148,6 +152,7 @@ void CB_Trigger_CaptureCallback(TIM_HandleTypeDef *htim) {
  */
 void CB_DSO_TIM11_UpdateCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance != TIM11) return;
+    trigger_ndtr_at_capture = __HAL_DMA_GET_COUNTER(&hdma_adc1);
     TriggerHandler();
 }
 
@@ -157,10 +162,10 @@ void CB_DSO_TIM11_UpdateCallback(TIM_HandleTypeDef *htim) {
  * @retval None
  */
 void CB_ADC_HalfConvCplt(ADC_HandleTypeDef *hadc) {
-    if (!post_trigger_counting) return;
+    if (!post_trigger_counting) return;     // 如果没进入后触发状态，直接返回
 
-    uint32_t current_ndtr = __HAL_DMA_GET_COUNTER(&hdma_adc1);
-    uint32_t post = (trigger_ndtr_at_capture - current_ndtr + DSO_Buffer_Size) % DSO_Buffer_Size;
+    uint32_t current_ndtr = __HAL_DMA_GET_COUNTER(&hdma_adc1);      // 读取当DMA的NDTR值
+    uint32_t post = (trigger_ndtr_at_capture - current_ndtr + DSO_Buffer_Size) % DSO_Buffer_Size;  // 计算后触发已经采集的点数
 
     // 后触发采样达到 POST_TRIGGER_POINTS 点，停止采样并标记完成
     if (post >= POST_TRIGGER_POINTS) {
@@ -208,7 +213,7 @@ void Start_DsoCoreTask(void *argument) {
         // ADC转换完成后处理波形数据
         if (Is_conv_finish && !Is_Pause) { // 波形转换完成且未暂停
 
-            if (TriggerMode == TrigMode_Single) {
+            if (TriggerMode == TrigMode_Single) {   // 如果是单次触发模式，那么直接暂停函数
                 Is_Pause = !Is_Pause;
                 lcd_draw_rect(130,0,190,17,0x1082,1);
                 lcd_draw_string(135,0,"STOP",&JetBrainsMono14x18,0xf000,0x1082,-2);
@@ -318,7 +323,8 @@ static void DrawDsoMainBasicElement(void) {
  * @param  sample_data: 显示缓冲区数据指针
  * @param  h_offset: 水平偏移量
  * @param  v_offset: 垂直偏移量
- * @retval None
+ * @note   当然可以先画完背景网格，再连线成波形，这样确实方便，但是会导致严重的屏闪。
+ *         所以这里创建一个缓冲区，同时绘制背景和波形，随后刷到屏幕上，即可避免屏闪，但是复杂度很高。
  */
 static void Refresh_DSO_Waveform(const uint8_t* sample_data, int16_t h_offset, int8_t v_offset) {
     static int16_t last_group_y = -1;
@@ -394,7 +400,7 @@ static void Refresh_DSO_Waveform(const uint8_t* sample_data, int16_t h_offset, i
         last_group_y = y_cols[7];
     }
 
-    // 绘制最后5列（补充到300像素宽度）
+    // 绘制最后5列(301 // 8 = 5)
     uint8_t last_col_block = 37;
     uint16_t* dst_last = grid_buffer;
     // 填充网格背景
@@ -486,7 +492,7 @@ static void TriggerHandler(void) {
 }
 
 /**
- * @brief  设置触发电压（通过DAC输出）
+ * @brief  设置触发电压
  * @param  offset: 触发电压偏移量（-100 ~ 100）
  * @retval None
  */
@@ -514,7 +520,7 @@ void TriggerVoltage_Set(int8_t offset) {
  */
 static int16_t Software_Trigger_FineTune(const uint8_t* buffer, EdgeType_e edge_type) {
     const int16_t center = 300;          // 理想触发位置
-    const int16_t search_range = 125;    // 搜索范围
+    const int16_t search_range = 125;    // 搜索范围(±)
     const uint8_t edge_threshold = 5;    // 边沿变化阈值
     const uint8_t voltage_window = 5;    // 电压匹配窗口
 
@@ -542,7 +548,7 @@ static int16_t Software_Trigger_FineTune(const uint8_t* buffer, EdgeType_e edge_
                             (abs((int16_t)buffer[i] - (int16_t)threshold_value) <= voltage_window);
         }
 
-        // 判断是否为过阈值边沿
+        // 判断是否为过阈值边沿 (专门用来判断像矩形波这种快边沿)
         bool is_rect_edge = false;
         if (edge_type == EDGE_RISING && diff > 0) {
             is_rect_edge = (pos1 <= threshold_value && threshold_value <= pos2) ||
@@ -569,7 +575,7 @@ static int16_t Software_Trigger_FineTune(const uint8_t* buffer, EdgeType_e edge_
 /* ============================ 数据处理函数 ============================ */
 /**
  * @brief  计算电压档位缩放因子
- * @retval None
+ * @note   软件进入时计算一次缩放因子，匹配实际
  */
 static void Calculat_ZoomFactors(void) {
     for (int i = 0; i < div_num; i++) {
@@ -632,7 +638,7 @@ void TimeBase_Set(TimeBase_e base) {
 /**
  * @brief  将环形缓冲区数据按触发点排序到raw_sorted_buf
  * @param  trigger_pos: 触发点在ADC缓冲区中的位置
- * @retval None
+ * @note   环形缓冲区，触发点随机，触发点前1440 + 后1440个点，如果经过起始点，就需要根据索引重排序
  */
 static void SortRawSamplesToBuffer(uint32_t trigger_pos) {
     const uint32_t pre_len = PRE_TRIGGER_POINTS;  // 触发前采样点数
@@ -664,7 +670,7 @@ static void SortRawSamplesToBuffer(uint32_t trigger_pos) {
 }
 
 /**
- * @brief  Catmull-Rom插值算法（用于波形拉伸）
+ * @brief  Catmull-Rom插值算法（用于波形拉伸）仅仅适用于时基很酷的情况
  * @param  p0-p3: 插值相邻四个点
  * @param  t: 插值系数（0~1）
  * @retval 插值结果
@@ -700,7 +706,7 @@ static void ApplyStretchToBuffer(void) {
         default:         stretch_factor = 1.0f;     break;
     }
 
-    // 拉伸因子≤1.1时直接复制（无需插值）
+    // 拉伸因子≤1.1时直接复制（避免精度原因取1.1f）
     if (stretch_factor <= 1.1f) {
         memcpy(stretched_buf, raw_sorted_buf, SORTED_BUF_SIZE);
     } else {
@@ -799,9 +805,9 @@ static void Calculate_WaveParas(void) {
     }
 
     // 计算波形参数
-    Wave_Freq = Get_Main_AC_Freq(raw_sorted_buf, time_base[TimeBase].sample_rate) / 1000;    // FFT计算频率 (KHz)
-    Wave_Duty = (float)high_cnt / 601.0f * 100.0f;                                          // 占空比 (%)
-    Wave_Vpp  =  (float)(current_max - current_min) / 256 * (div_base[V_div].div_value * 8); // 峰峰值 (V)
+    Wave_Freq = Get_Main_AC_Freq(raw_sorted_buf, time_base[TimeBase].sample_rate) / 1000;       // FFT计算频率 (KHz)
+    Wave_Duty = (float)high_cnt / 601.0f * 100.0f;                                              // 占空比 (%)
+    Wave_Vpp  =  (float)(current_max - current_min) / 256 * (div_base[V_div].div_value * 8);    // 峰峰值 (V)
 }
 
 /**
@@ -1103,17 +1109,21 @@ void Resume_DsoCoreTask(void) {
 }
 
 
+
 // ================================================================================================================== //
                 /* ============================ 操作响应函数 ============================ */
 static void dso_main_page_handler(KeyEventMsg_t msg);
 static void dso_setting_page_handler(KeyEventMsg_t msg);
 
+// 按键事件分发
 static void (*page_handlers[DSO_PAGE_NUM])(KeyEventMsg_t) = {
     [DSO_PAGE_MAIN]    = dso_main_page_handler,
     [DSO_PAGE_SETTING] = dso_setting_page_handler,
 };
 
+// 主界面响应逻辑
 static void dso_main_page_handler(KeyEventMsg_t msg) {
+    // 如果set键单击，则在暂停/继续中切换
     if (msg.key == KEY_SET && msg.event == KEY_EVENT_CLICK) {
         Is_Pause = !Is_Pause;
         lcd_draw_rect(130,0,190,17,0x1082,1);
@@ -1124,6 +1134,7 @@ static void dso_main_page_handler(KeyEventMsg_t msg) {
             lcd_draw_string(135,0,"STOP",&JetBrainsMono14x18,0xf000,0x1082,-2);
         }
     }
+    // 如果mode键单击，在“左右平移”“上下平移”“触发调节”之间切换
     else if (msg.key == KEY_MODE && msg.event == KEY_EVENT_CLICK) {
         Bias_triangle = (Bias_triangle + 1) % 3;  // 0,1,2,0 循环
         lcd_draw_rect(220,0,234,17,0x1082,1);
@@ -1138,6 +1149,7 @@ static void dso_main_page_handler(KeyEventMsg_t msg) {
             lcd_draw_IsoscelesTriangle(223, 9, Triangle_LEFT, 6, 0x07c2);
         }
     }
+    // 如果编码器单击，则归零“左右平移”“上下平移”“触发调节”的值
     else if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_CLICK) {
         offset_h = 0;
         offset_w = 0;
@@ -1147,6 +1159,7 @@ static void dso_main_page_handler(KeyEventMsg_t msg) {
         lcd_draw_IsoscelesTriangle(7, 119, Triangle_RIGHT, 6, 0x057f);
         TriggerVoltage_Set(0);
     }
+    // 如果左转旋转编码器 或 下键单击，减少“左右平移”/“上下平移”/“触发调节”的值
     else if (msg.event == ENCODER_EVENT_LEFT || msg.key == KEY_DOWN) {
 
         if (Bias_triangle == 0) {
@@ -1167,6 +1180,7 @@ static void dso_main_page_handler(KeyEventMsg_t msg) {
             TriggerVoltage_Set(offset_v);
         }
     }
+    // 如果右转旋转编码器 或 上建单击，增加“左右平移”/“上下平移”/“触发调节”的值
     else if (msg.event == ENCODER_EVENT_RIGHT || msg.key == KEY_UP) {
         if (Bias_triangle == 0) {
             offset_h += 2;
@@ -1186,6 +1200,7 @@ static void dso_main_page_handler(KeyEventMsg_t msg) {
             TriggerVoltage_Set(offset_v);
         }
     }
+    // 如果mode键长按，则进入设置界面
     else if (msg.key == KEY_MODE && msg.event == KEY_EVENT_LONG_PRESS) {
         dso_current_page = DSO_PAGE_SETTING;
         dso_current_setting = Setting_TimeBase;
@@ -1193,6 +1208,7 @@ static void dso_main_page_handler(KeyEventMsg_t msg) {
         lcd_draw_rect(7,2,57,16,0x1082,1);
         lcd_draw_string(7, 2, time_base[TimeBase].TimeBase_msg, &JetBrainsMono10x14, 0xf3c0, 0x1082, 0);
     }
+    // 如果长按编码器，返回LVGL界面
     else if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
         AppListType APP = APP_LVGL;
         StartBeezer(0);
@@ -1203,8 +1219,9 @@ static void dso_main_page_handler(KeyEventMsg_t msg) {
     StartBeezer(0);
 }
 
-
+// 设置界面响应逻辑
 static void dso_setting_page_handler(KeyEventMsg_t msg) {
+    // 左右旋转编码器，在参数中选择
     if (msg.event == ENCODER_EVENT_LEFT) {
         dso_past_setting = dso_current_setting;
         dso_current_setting = (dso_current_setting == 0) ? Setting_CoupleMode : (dso_current_setting - 1);
@@ -1213,10 +1230,12 @@ static void dso_setting_page_handler(KeyEventMsg_t msg) {
         dso_past_setting = dso_current_setting;
         dso_current_setting = (dso_current_setting == Setting_CoupleMode) ? Setting_TimeBase : (dso_current_setting + 1);
     }
+    // 长按mode键，回到主界面
     else if (msg.key == KEY_MODE && msg.event == KEY_EVENT_LONG_PRESS) {
         dso_current_page = DSO_PAGE_MAIN;
         dso_past_setting = dso_current_setting;
     }
+    // 单击上建，增加选中项目的值
     else if (msg.key == KEY_UP ) {
         switch (dso_current_setting) {
             case Setting_TimeBase:
@@ -1241,6 +1260,7 @@ static void dso_setting_page_handler(KeyEventMsg_t msg) {
                 break;
         }
     }
+    // 单击下键，减少选中项目的值
     else if (msg.key == KEY_DOWN) {
         switch (dso_current_setting) {
             case Setting_TimeBase:
@@ -1265,6 +1285,7 @@ static void dso_setting_page_handler(KeyEventMsg_t msg) {
                 break;
         }
     }
+    // set键单击，暂停/继续采集波形
     else if (msg.key == KEY_SET && msg.event == KEY_EVENT_CLICK) {
         Is_Pause = !Is_Pause;
         lcd_draw_rect(130,0,190,17,0x1082,1);

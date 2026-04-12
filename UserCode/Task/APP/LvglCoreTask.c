@@ -46,7 +46,7 @@ void Start_LvglCoreTask(void *argument) {
     // 自挂启，等待app切换
     osThreadSuspend(LvglCoreTaskHandle);
 
-    lv_little_svg_init();           // 初始化svg库
+    //lv_little_svg_init();           // 初始化svg库
     lv_init();                      // 初始化lvgl
     lv_port_disp_init();            // 初始化显示设备
     lv_port_indev_init();           // 初始化输入设备
