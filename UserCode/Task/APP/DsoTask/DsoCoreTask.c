@@ -590,7 +590,6 @@ static void Calculat_ZoomFactors(void) {
             case Magnify_8:   gain = UserParam.OSC_AMP_X8; break;
             case Magnify_16:  gain = UserParam.OSC_AMP_X16; break;
             case Magnify_32:  gain = UserParam.OSC_AMP_X32; break;
-            case Magnify_64:  gain = UserParam.OSC_AMP_X64; break;
             default: gain = 1.0f; break;
         }
         // 计算最终缩放因子
@@ -1024,7 +1023,7 @@ void Suspend_DsoCoreTask(void) {
     DSO_ADC_DeInit();
 
     OSC_Couple_Ctrl(Couple_AC);                         // 耦合方式：AC
-    Div_Set(div_5v);                           // 最大化前级
+    Div_Set(div_2v);                           // 最大化前级
     Suspend_IndevDetectTask();                          // 挂起输入设备检测任务
     osThreadSuspend(DsoCoreTaskHandle);                 // 挂起DSO核心任务
 }
@@ -1243,7 +1242,7 @@ static void dso_setting_page_handler(KeyEventMsg_t msg) {
                 TimeBase_Set(TimeBase);
                 break;
             case Setting_VoltageDiv:
-                V_div = (V_div < div_5v) ? (V_div + 1) : V_div;
+                V_div = (V_div < div_2v) ? (V_div + 1) : V_div;
                 Div_Set(V_div);
                 break;
             case Setting_TriggerEdge:

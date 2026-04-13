@@ -30,7 +30,6 @@ DivBase_t div_base[div_num] = {
     {div_500mv,0.5f,Attenuation_5,Magnify_4,0.825f,1,"500mv"},
     {div_1v,1.0f,Attenuation_5,Magnify_2,0.4125f,1,"1v"},
     {div_2v,2.0f,Attenuation_5,Magnify_1,0.20625f,1,"2v"},
-    {div_5v,5.0f,Attenuation_5,Magnify_1,0.0825f,1,"5v"}
 };
 
 const char *const TriggerMode_Msg[2] = {

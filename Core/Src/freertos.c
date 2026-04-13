@@ -141,6 +141,13 @@ const osThreadAttr_t DsoCoreTask_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for SensorCoreTask */
+osThreadId_t SensorCoreTaskHandle;
+const osThreadAttr_t SensorCoreTask_attributes = {
+  .name = "SensorCoreTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* Definitions for AppSwitchQueue */
 osMessageQueueId_t AppSwitchQueueHandle;
 const osMessageQueueAttr_t AppSwitchQueue_attributes = {
@@ -209,6 +216,7 @@ extern void Start_CalibrateTask(void *argument);
 extern void Start_AwgTask(void *argument);
 extern void Start_DmmCoreTask(void *argument);
 extern void Start_DsoCoreTask(void *argument);
+extern void Star_tSensorCoreTask(void *argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -340,6 +348,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of DsoCoreTask */
   DsoCoreTaskHandle = osThreadNew(Start_DsoCoreTask, NULL, &DsoCoreTask_attributes);
+
+  /* creation of SensorCoreTask */
+  SensorCoreTaskHandle = osThreadNew(Star_tSensorCoreTask, NULL, &SensorCoreTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */

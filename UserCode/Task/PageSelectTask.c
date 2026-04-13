@@ -63,28 +63,28 @@ void Start_PageSelectTask(void *argument) {
 // 挂起指定App任务
 static void SuspendTask(AppListType APP) {
     switch (APP) {
-        case APP_LVGL:  Suspend_LvglCoreTask();     break;
-        case APP_POWER: Suspend_DpsCoreTask();      break;
-        case APP_DSO:   Suspend_DsoCoreTask();      break;
-        case APP_AWG:   Suspend_AwgTask();          break;
-        case APP_DMM:   Suspend_DmmTask();          break;
-        case APP_SENSOR:                            break;
-        case APP_CAL:   Suspend_CalibrateTask();    break;
-        case APP_NONE:  break;
+        case APP_LVGL:      Suspend_LvglCoreTask();     break;
+        case APP_POWER:     Suspend_DpsCoreTask();      break;
+        case APP_DSO:       Suspend_DsoCoreTask();      break;
+        case APP_AWG:       Suspend_AwgTask();          break;
+        case APP_DMM:       Suspend_DmmTask();          break;
+        case APP_SENSOR:    Suspend_SensorTask();       break;
+        case APP_CAL:       Suspend_CalibrateTask();    break;
+        case APP_NONE:                                  break;
     }
 }
 
 // 恢复指定任务
 static void ResumeTask(AppListType APP) {
     switch (APP) {
-        case APP_LVGL:  Resume_LvglCoreTask();      break;
-        case APP_POWER: Resume_DpsCoreTask();       break;
-        case APP_DSO:   Resume_DsoCoreTask();       break;
-        case APP_AWG:   Resume_AwgTask();           break;
-        case APP_DMM:   Resume_DmmTask();           break;
-        case APP_SENSOR:                            break;
-        case APP_CAL:   Resume_CalibrateTask();     break;
-        case APP_NONE:  break;
+        case APP_LVGL:      Resume_LvglCoreTask();      break;
+        case APP_POWER:     Resume_DpsCoreTask();       break;
+        case APP_DSO:       Resume_DsoCoreTask();       break;
+        case APP_AWG:       Resume_AwgTask();           break;
+        case APP_DMM:       Resume_DmmTask();           break;
+        case APP_SENSOR:    Resume_SensorTask();        break;
+        case APP_CAL:       Resume_CalibrateTask();     break;
+        case APP_NONE:                                  break;
     }
 }
 

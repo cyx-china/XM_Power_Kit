@@ -69,7 +69,6 @@ typedef enum {
     div_500mv,
     div_1v,
     div_2v,
-    div_5v,
     div_num
 } Vdiv_e;
 

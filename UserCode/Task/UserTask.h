@@ -161,5 +161,9 @@ void Suspend_DmmTask(void);
 void Suspend_DsoCoreTask(void);
 void Resume_DsoCoreTask(void);
 
+/*================ SensorCoreTask =================*/
+void Suspend_SensorTask(void);
+void Resume_SensorTask(void);
+
 #endif //XM_POWER_KIT_USERTASK_H
 
