@@ -11,7 +11,7 @@
 #include "ff.h"  // FATFS核心头文件
 
 // -------------------------- 全局变量定义 --------------------------
-// 用户自定义参数默认值表（严格同步枚举，移除旧项，添加新项）
+// 用户自定义参数默认值表
 const UserParamType_t UserParamDefault = {
     // 数控电源APP - 校准参数
     .DPS_Voltage_Original        = 0,          // 电压原点
@@ -39,6 +39,13 @@ const UserParamType_t UserParamDefault = {
     .DPS_Fan_Start               = 40,         // 风扇启转温度，只支持整数
     // 示波器APP - 校准参数
     .OSC_Original                = 0,          // 示波器电压原点，正常是1.65V，这里表值的偏移
+    .OSC_Original_X2             = 0,          // 示波器X2档电压原点 新增
+    .OSC_Original_X4             = 0,          // 示波器X4档电压原点 新增
+    .OSC_Original_X8             = 0,          // 示波器X8档电压原点 新增
+    .OSC_Original_X16            = 0,          // 示波器X16档电压原点 新增
+    .OSC_Original_X32            = 0,          // 示波器X32档电压原点 新增
+    .OSC_Original_X64            = 0,          // 示波器X64档电压原点 新增
+    .OSC_Original_X128           = 0,          // 示波器X128档电压原点 新增
     .OSC_Factor                  = 5.0f,       // 示波器5倍降压的降压比例
     .OSC_AMP_X2                  = 2.0f,       // 程控放大器倍率
     .OSC_AMP_X4                  = 4.0f,       // 程控放大器倍率
@@ -116,6 +123,13 @@ static const ParamDesc_t param_desc_table[Param_Number] = {
     {2, &UserParamDefault.DPS_Fan_Start,               &UserParam.DPS_Fan_Start},
     // 示波器APP - 校准参数
     {2, &UserParamDefault.OSC_Original,                &UserParam.OSC_Original},
+    {2, &UserParamDefault.OSC_Original_X2,             &UserParam.OSC_Original_X2},    
+    {2, &UserParamDefault.OSC_Original_X4,             &UserParam.OSC_Original_X4},    
+    {2, &UserParamDefault.OSC_Original_X8,             &UserParam.OSC_Original_X8},    
+    {2, &UserParamDefault.OSC_Original_X16,            &UserParam.OSC_Original_X16},   
+    {2, &UserParamDefault.OSC_Original_X32,            &UserParam.OSC_Original_X32},   
+    {2, &UserParamDefault.OSC_Original_X64,            &UserParam.OSC_Original_X64},   
+    {2, &UserParamDefault.OSC_Original_X128,           &UserParam.OSC_Original_X128},  
     {4, &UserParamDefault.OSC_Factor,                  &UserParam.OSC_Factor},
     {4, &UserParamDefault.OSC_AMP_X2,                  &UserParam.OSC_AMP_X2},
     {4, &UserParamDefault.OSC_AMP_X4,                  &UserParam.OSC_AMP_X4},
@@ -159,7 +173,7 @@ static const ParamDesc_t param_desc_table[Param_Number] = {
  */
 HAL_StatusTypeDef UserParam_LoadAllValues(void)
 {
-    // 第一步：先赋值默认值，防止加载失败后参数为空
+    // 先赋值默认值，防止加载失败后参数为空
     UserParam = UserParamDefault;
 
     // 第二步：尝试打开配置文件
@@ -169,25 +183,25 @@ HAL_StatusTypeDef UserParam_LoadAllValues(void)
         return UserParam_ResetToDefault(); // 打开失败则重置默认值并写入文件
     }
 
-    // 第三步：分配缓冲区
+    // 分配缓冲区
     uint8_t *buffer = (uint8_t *)pvPortMalloc(PARAM_TOTAL_BYTES);
     if (buffer == NULL) {
         f_close(&fil);
         return HAL_ERROR;
     }
 
-    // 第四步：读取文件内容到缓冲区
+    // 读取文件内容到缓冲区
     br = 0;
     res = f_read(&fil, buffer, PARAM_TOTAL_BYTES, &br);
     f_close(&fil); // 立即关闭文件，减少资源占用
 
-    // 第五步：校验读取结果
+    // 校验读取结果
     if (res != FR_OK || br != PARAM_TOTAL_BYTES) {
         vPortFree(buffer); // 释放缓冲区
         return HAL_ERROR;
     }
 
-    // 第六步：查表更新UserParam结构体
+    // 查表更新UserParam结构体
     for (uint32_t i = 0; i < Param_Number; i++) {
         uint8_t *src = &buffer[i * 4];                  // 缓冲区中当前参数的起始地址
         const ParamDesc_t *desc = &param_desc_table[i]; // 当前参数的描述信息
@@ -202,7 +216,7 @@ HAL_StatusTypeDef UserParam_LoadAllValues(void)
         }
     }
 
-    // 第七步：释放缓冲区并返回成功
+    // 释放缓冲区并返回成功
     vPortFree(buffer);
     return HAL_OK;
 }
@@ -215,18 +229,18 @@ HAL_StatusTypeDef UserParam_LoadAllValues(void)
  */
 HAL_StatusTypeDef UserParam_UpdateSingle(UserParamType_e id, const void *value)
 {
-    // 第一步：校验参数ID合法性
+    //校验参数ID合法性
     if (id >= Param_Number) {
         return HAL_ERROR;
     }
 
-    // 第二步：打开配置文件
+    // 打开配置文件
     res = f_open(&fil, PARAM_PATH, FA_OPEN_EXISTING | FA_WRITE);
     if (res != FR_OK) {
         return HAL_ERROR;
     }
 
-    // 第三步：计算参数在文件中的偏移位置（每个参数占4字节）
+    // 计算参数在文件中的偏移位置（每个参数占4字节）
     FSIZE_t offset = (FSIZE_t)id * 4UL;
     res = f_lseek(&fil, offset); // 移动文件指针到目标位置
     if (res != FR_OK) {
@@ -234,7 +248,7 @@ HAL_StatusTypeDef UserParam_UpdateSingle(UserParamType_e id, const void *value)
         return HAL_ERROR;
     }
 
-    // 第四步：准备4字节写入缓冲区（默认清零）
+    // 准备4字节写入缓冲区（默认清零）
     uint8_t buf[4] = {0};
     const ParamDesc_t *desc = &param_desc_table[id];
 
@@ -245,12 +259,12 @@ HAL_StatusTypeDef UserParam_UpdateSingle(UserParamType_e id, const void *value)
         memcpy(buf, value, 4); // 4字节类型：完整拷贝
     }
 
-    // 第五步：写入文件并校验结果
+    // 写入文件并校验结果
     bw = 0;
     res = f_write(&fil, buf, 4, &bw);
     f_close(&fil); // 关闭文件
 
-    // 第六步：返回操作结果
+    // 返回操作结果
     if (res != FR_OK || bw != 4) {
         return HAL_ERROR;
     }
@@ -264,13 +278,13 @@ HAL_StatusTypeDef UserParam_UpdateSingle(UserParamType_e id, const void *value)
  */
 HAL_StatusTypeDef UserParam_ResetToDefault(void)
 {
-    // 第一步：打开/创建配置文件（覆盖模式）
+    // 打开/创建配置文件（覆盖模式）
     res = f_open(&fil, PARAM_PATH, FA_CREATE_ALWAYS | FA_WRITE);
     if (res != FR_OK) {
         return HAL_ERROR;
     }
 
-    // 第二步：分配缓冲区（FreeRTOS内存管理）
+    // 分配缓冲区（FreeRTOS内存管理）
     uint8_t *pBuf = (uint8_t *)pvPortMalloc(PARAM_TOTAL_BYTES);
     if (pBuf == NULL) {
         f_close(&fil);
@@ -278,7 +292,7 @@ HAL_StatusTypeDef UserParam_ResetToDefault(void)
     }
     memset(pBuf, 0, PARAM_TOTAL_BYTES); // 缓冲区初始化为0
 
-    // 第三步：查表填充默认值到缓冲区
+    // 查表填充默认值到缓冲区
     for (uint32_t i = 0; i < Param_Number; i++) {
         uint8_t *pParam = &pBuf[i * 4];                // 缓冲区中当前参数的起始地址
         const ParamDesc_t *desc = &param_desc_table[i];// 当前参数的描述信息
@@ -291,11 +305,11 @@ HAL_StatusTypeDef UserParam_ResetToDefault(void)
         }
     }
 
-    // 第四步：一次性写入缓冲区到文件
+    // 一次性写入缓冲区到文件
     bw = 0;
     res = f_write(&fil, pBuf, PARAM_TOTAL_BYTES, &bw);
 
-    // 第五步：释放资源并校验结果
+    // 释放资源并校验结果
     vPortFree(pBuf); // 释放缓冲区
     f_close(&fil);   // 关闭文件
 
@@ -310,13 +324,13 @@ HAL_StatusTypeDef UserParam_ResetToDefault(void)
  */
 HAL_StatusTypeDef UserParam_SaveAllValues(void)
 {
-    // 第一步：打开/创建配置文件（覆盖模式）
+    // 打开/创建配置文件（覆盖模式）
     res = f_open(&fil, PARAM_PATH, FA_CREATE_ALWAYS | FA_WRITE);
     if (res != FR_OK) {
         return HAL_ERROR;
     }
 
-    // 第二步：分配缓冲区（FreeRTOS内存管理）
+    // 分配缓冲区
     uint8_t *pBuf = (uint8_t *)pvPortMalloc(PARAM_TOTAL_BYTES);
     if (pBuf == NULL) {
         f_close(&fil);
@@ -324,7 +338,7 @@ HAL_StatusTypeDef UserParam_SaveAllValues(void)
     }
     memset(pBuf, 0, PARAM_TOTAL_BYTES); // 缓冲区初始化为0
 
-    // 第三步：查表填充当前参数值到缓冲区（替代原switch-case）
+    // 查表填充当前参数值到缓冲区（替代原switch-case）
     for (uint32_t i = 0; i < Param_Number; i++) {
         uint8_t *pParam = &pBuf[i * 4];                // 缓冲区中当前参数的起始地址
         const ParamDesc_t *desc = &param_desc_table[i];// 当前参数的描述信息
@@ -337,14 +351,14 @@ HAL_StatusTypeDef UserParam_SaveAllValues(void)
         }
     }
 
-    // 第四步：一次性写入缓冲区到文件
+    // 一次性写入缓冲区到文件
     bw = 0;
     res = f_write(&fil, pBuf, PARAM_TOTAL_BYTES, &bw);
 
-    // 第五步：释放资源并校验结果
+    // 释放资源并校验结果
     vPortFree(pBuf); // 释放缓冲区
     f_close(&fil);   // 关闭文件
 
-    // 返回结果：写入字节数等于总长度且无错误则成功
+    // 写入字节数等于总长度且无错误则成功
     return ((res == FR_OK) && (bw == PARAM_TOTAL_BYTES)) ? HAL_OK : HAL_ERROR;
 }

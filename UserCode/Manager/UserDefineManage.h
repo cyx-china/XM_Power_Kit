@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
 
-// 可自定义量枚举（严格保留您的修改）
+// 可自定义量枚举
 typedef enum {
     //============= 数控电源APP ============== //
     //== 校准参数 ==//
@@ -35,7 +35,14 @@ typedef enum {
     DPS_Fan_Start,                      // 风扇启转温度      (float)     Temp
     //============= 示波器APP ============== //
     // 校准参数
-    OSC_Original,                       // 示波器电压零点     (int16_t)   LSB
+    OSC_Original,                       // 示波器X1档电压零点 (int16_t)   LSB
+    OSC_Original_X2,                    // 
+    OSC_Original_X4,                    // 
+    OSC_Original_X8,                    // 
+    OSC_Original_X16,                   // 
+    OSC_Original_X32,                   // 
+    OSC_Original_X64,                   // 
+    OSC_Original_X128,                  // 
     OSC_Factor,                         // 示波器输入分压比   (float)     Factor
     OSC_AMP_X2,                         // 程控放大器_X2     (float)     Amp
     OSC_AMP_X4,                         // 程控放大器_X4     (float)     Amp
@@ -65,19 +72,19 @@ typedef enum {
     DMM_Res_R2K,                        // 2KΩ基准阻值        (float)     R_Ω
     //============== 其他配置 =============== //
     // 屏幕设置
-    Screen_Brightness,           // 屏幕亮度           (uint16_t)  10~100
-    Screen_Sleeptime,            // 休眠时间           (uint16_t)  0~3600 s     新增
-    Screen_ShowFlip,             // 显示翻转           (uint16_t)  0/1          新增
+    Screen_Brightness,                  // 屏幕亮度           (uint16_t)  10~100
+    Screen_Sleeptime,                   // 休眠时间           (uint16_t)  0~3600 s
+    Screen_ShowFlip,                    // 显示翻转           (uint16_t)  0/1
     // 蜂鸣器设置
-    Beezer_Volume,               // 蜂鸣器音量          (uint16_t)  0~100
-    Beezer_Time,                 // 蜂鸣时长           (uint16_t)  10 * n ms
+    Beezer_Volume,                      // 蜂鸣器音量          (uint16_t)  0~100
+    Beezer_Time,                        // 蜂鸣时长           (uint16_t)  10 * n ms
     // 风扇设置
-    Fan_Enable,                  // 是否启用风扇        (uint16_t)  0/1          新增
-    Fan_StartTemperture,         // 风扇启转温度        (uint16_t)  20~50        新增
+    Fan_Enable,                         // 是否启用风扇        (uint16_t)  0/1
+    Fan_StartTemperature,                // 风扇启转温度        (uint16_t)  20~50
     Param_Number                        // 参数个数
 } UserParamType_e;
 
-// 可自定义量结构体（严格同步枚举）
+// 可自定义量结构体
 typedef struct {
     //============= 数控电源APP ============== //
     // 校准参数
@@ -106,7 +113,14 @@ typedef struct {
     uint16_t DPS_Fan_Start;               // 风扇启转温度      (uint16_t)  Temp
     //============= 示波器APP ============== //
     // 校准参数
-    int16_t  OSC_Original;                // 示波器电压零点     (int16_t)   LSB
+    int16_t  OSC_Original;                // 示波器X1档电压零点 (int16_t)   LSB
+    int16_t  OSC_Original_X2;             // 示波器X2档电压零点 (int16_t)   LSB 
+    int16_t  OSC_Original_X4;             // 示波器X4档电压零点 (int16_t)   LSB 
+    int16_t  OSC_Original_X8;             // 示波器X8档电压零点 (int16_t)   LSB 
+    int16_t  OSC_Original_X16;            // 示波器X16档电压零点 (int16_t)  LSB 
+    int16_t  OSC_Original_X32;            // 示波器X32档电压零点 (int16_t)  LSB 
+    int16_t  OSC_Original_X64;            // 示波器X64档电压零点 (int16_t)  LSB 
+    int16_t  OSC_Original_X128;           // 示波器X128档电压零点 (int16_t) LSB 
     float    OSC_Factor;                  // 示波器输入分压比   (float)     Factor
     float    OSC_AMP_X2;                  // 程控放大器_X2     (float)     Amp
     float    OSC_AMP_X4;                  // 程控放大器_X4     (float)     Amp
