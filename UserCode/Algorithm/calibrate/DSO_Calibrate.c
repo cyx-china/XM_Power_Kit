@@ -187,7 +187,7 @@ static void DsoCal_Origin_Main_handler(KeyEventMsg_t msg) {
 
             lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
             lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
-            lcd_draw_string(25,165,"校准完成！单击进入下一项", &yahei16x16,0xdf3c,0x29a7,1);
+            lcd_draw_string(25,165,"校准完成！", &yahei16x16,0xdf3c,0x29a7,1);
 
             Is_Busy = false;
         }
@@ -361,7 +361,7 @@ static void DsoCal_Magnify_Main_handler(KeyEventMsg_t msg) {
 
             lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
             lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
-            lcd_draw_string(25,165,"校准完成！单击保存", &yahei16x16,0xdf3c,0x29a7,1);
+            lcd_draw_string(25,165,"校准完成！", &yahei16x16,0xdf3c,0x29a7,1);
 
             Is_Busy = false;
             return;
