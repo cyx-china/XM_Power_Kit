@@ -123,7 +123,7 @@ static void format_voltage(float voltage_v, char *buffer, size_t buffer_size);
 void CB_Trigger_CaptureCallback(TIM_HandleTypeDef *htim);
 void CB_DSO_TIM11_UpdateCallback(TIM_HandleTypeDef *htim);
 void CB_ADC_HalfConvCplt(ADC_HandleTypeDef *hadc);
-void CB_ADC_ConvCplt(ADC_HandleTypeDef *hadc);
+void CB_DSO_ADC_ConvCplt(ADC_HandleTypeDef *hadc);
 
 // 核心任务函数
 void Start_DsoCoreTask(void *argument);
@@ -180,7 +180,7 @@ void CB_ADC_HalfConvCplt(ADC_HandleTypeDef *hadc) {
  * @param  hadc: ADC句柄
  * @retval None
  */
-void CB_ADC_ConvCplt(ADC_HandleTypeDef *hadc) {
+void CB_DSO_ADC_ConvCplt(ADC_HandleTypeDef *hadc) {
     if (!post_trigger_counting) return;
 
     uint32_t current_ndtr = __HAL_DMA_GET_COUNTER(&hdma_adc1);
@@ -666,6 +666,8 @@ static void SortRawSamplesToBuffer(uint32_t trigger_pos) {
         memcpy(&raw_sorted_buf[pre_len + 1], &DSO_ADC_BUFFER[next_pos], len1);
         memcpy(&raw_sorted_buf[pre_len + 1 + len1], DSO_ADC_BUFFER, post_len - len1);
     }
+
+
 }
 
 /**
@@ -692,10 +694,11 @@ static uint8_t CatmullRomInterp(uint8_t p0, uint8_t p1, uint8_t p2, uint8_t p3, 
 }
 
 /**
- * @brief  对采样数据应用时基拉伸/插值处理
+ * @brief  对采样数据应用时基拉伸/插值处理 / 原点偏移校准及电压缩放
  * @retval None
  */
 static void ApplyStretchToBuffer(void) {
+
     // 根据时基确定拉伸因子
     float stretch_factor;
     switch (TimeBase) {
@@ -705,8 +708,9 @@ static void ApplyStretchToBuffer(void) {
         default:         stretch_factor = 1.0f;     break;
     }
 
-    // 拉伸因子≤1.1时直接复制（避免精度原因取1.1f）
+    // 时基拉伸处理
     if (stretch_factor <= 1.1f) {
+        // 拉伸因子≤1.1时直接复制（避免精度原因取1.1f）
         memcpy(stretched_buf, raw_sorted_buf, SORTED_BUF_SIZE);
     } else {
         // 拉伸因子>1.1时进行Catmull-Rom插值
@@ -732,11 +736,32 @@ static void ApplyStretchToBuffer(void) {
         }
     }
 
-    // 应用电压档位缩放
+    // 根据电压档位获取对应的偏置校正量
+    //    校正量定义：UserParam.OSC_Original_Xx = 理想值(128) - 实际空载ADC值
+    int16_t offset_calib = 0;
+    switch (V_div) {
+        case div_10mv:  offset_calib = UserParam.OSC_Original_X32;    break;
+        case div_20mv:  offset_calib = UserParam.OSC_Original_X16;    break;
+        case div_50mv:  offset_calib = UserParam.OSC_Original_X8;     break;
+        case div_100mv: offset_calib = UserParam.OSC_Original_X4;     break;
+        case div_200mv: offset_calib = UserParam.OSC_Original_X2;     break;
+        case div_500mv: offset_calib = UserParam.OSC_Original_X4;     break;
+        case div_1v:    offset_calib = UserParam.OSC_Original_X2;     break;
+        case div_2v:    offset_calib = UserParam.OSC_Original;        break;
+        default:                                                        break;
+    }
+
+    // 5. 应用偏置校正 + 围绕理想原点的电压缩放
     for (int i = 0; i < SORTED_BUF_SIZE; i++) {
+        const int16_t IDEAL_ORIGIN = 128;
         float code = (float)stretched_buf[i];
-        stretched_buf[i] = (uint8_t) CLAMP(
-            UserParam.OSC_Original + (code - UserParam.OSC_Original) * div_base[V_div].zoom_factor, 0.0f, 255.0f);
+
+        // 偏置校正
+        float calibrated_code = code + (float)offset_calib;
+        // 围绕理想原点(128)进行电压档位缩放
+        float final_code = (float)IDEAL_ORIGIN + (calibrated_code - (float)IDEAL_ORIGIN) * div_base[V_div].zoom_factor;
+        // 钳位到8bit显示范围(0-255)
+        stretched_buf[i] = (uint8_t) CLAMP(final_code, 0.0f, 255.0f);
     }
 }
 
@@ -1084,7 +1109,7 @@ void Resume_DsoCoreTask(void) {
     DSO_ADC_Init();
     // 注册回调
     HAL_ADC_RegisterCallback(&hadc1, HAL_ADC_CONVERSION_HALF_CB_ID, CB_ADC_HalfConvCplt);
-    HAL_ADC_RegisterCallback(&hadc1, HAL_ADC_CONVERSION_COMPLETE_CB_ID, CB_ADC_ConvCplt);
+    HAL_ADC_RegisterCallback(&hadc1, HAL_ADC_CONVERSION_COMPLETE_CB_ID, CB_DSO_ADC_ConvCplt);
     HAL_TIM_RegisterCallback(&htim3, HAL_TIM_IC_CAPTURE_CB_ID, CB_Trigger_CaptureCallback);
     HAL_TIM_RegisterCallback(&htim11, HAL_TIM_PERIOD_ELAPSED_CB_ID, CB_DSO_TIM11_UpdateCallback);
 
@@ -1267,7 +1292,7 @@ static void dso_setting_page_handler(KeyEventMsg_t msg) {
                 TimeBase_Set(TimeBase);
                 break;
             case Setting_VoltageDiv:
-                V_div = (V_div > div_5mv) ? (V_div - 1) : V_div;
+                V_div = (V_div > div_10mv) ? (V_div - 1) : V_div;
                 Div_Set(V_div);
                 break;
             case Setting_TriggerEdge:
@@ -1295,6 +1320,7 @@ static void dso_setting_page_handler(KeyEventMsg_t msg) {
             lcd_draw_string(135,0,"STOP",&JetBrainsMono14x18,0xf000,0x1082,-2);
         }
     }
+
     else return;
 
     StartBeezer(0);

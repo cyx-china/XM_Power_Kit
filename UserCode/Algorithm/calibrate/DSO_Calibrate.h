@@ -5,5 +5,6 @@
 
 void dso_cal_handler(KeyEventMsg_t msg);
 void DSO_Calibrate_Enter(void);
+void DSO_Calibrate_Refresh(void);
 
 #endif

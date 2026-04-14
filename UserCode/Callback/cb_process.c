@@ -101,7 +101,7 @@ void Setting_beezer_volume_process(void) {
     lv_snprintf(buf, sizeof(buf), "%ld%%", slider_val);
     lv_label_set_text(guider_ui.screen_Setting_label_2, buf);
 
-    __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, slider_val - 1);
+    __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, (slider_val - 1) / 2);
 
     // 更新UserParam
     UserParam.Beezer_Volume = slider_val;

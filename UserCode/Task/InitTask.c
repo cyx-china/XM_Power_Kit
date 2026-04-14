@@ -32,6 +32,7 @@
 #include "SwitchManager.h"
 #include "tim.h"
 #include "TMP102.h"
+#include "wave_generator.h"
 #include "Manager/UserDefineManage.h"
 
 FATFS fs;   FIL fil;    FRESULT res;    UINT br;    // Fatfs所需的全局变量
@@ -192,8 +193,12 @@ static bool Sys_Init(void) {
   // 设置屏幕亮度
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * UserParam.Screen_Brightness / 100);
 
+  // 设置蜂鸣器音量
+  __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, ((UserParam.Beezer_Volume - 1) / 2));
+
   DpsRelease_ON();
 
+  WaveGen_DC(1000, 0, 0, 0);      // 生成0V
   return pass;
 }
 

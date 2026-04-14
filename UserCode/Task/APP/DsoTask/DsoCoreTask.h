@@ -60,8 +60,7 @@ typedef struct {
 extern const TimeBase_t time_base[timebase_num];
 
 typedef enum {
-    div_5mv = 0,
-    div_10mv,
+    div_10mv = 0,
     div_20mv,
     div_50mv,
     div_100mv,

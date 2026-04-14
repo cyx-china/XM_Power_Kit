@@ -21,7 +21,6 @@ const TimeBase_t time_base[timebase_num] = {
 
 // 垂直灵敏度参数表
 DivBase_t div_base[div_num] = {
-    {div_5mv,0.005f,Attenuation_1,Magnify_64,82.5f,1,"5mv"}, // 这里的缩放因子每次进入程序都会更新
     {div_10mv,0.01f,Attenuation_1,Magnify_32,41.25f,1,"10mv"},
     {div_20mv,0.02f,Attenuation_1,Magnify_16,20.625f,1,"20mv"},
     {div_50mv,0.05f,Attenuation_1,Magnify_8,8.25f,1,"50mv"},
