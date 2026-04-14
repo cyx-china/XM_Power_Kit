@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 
-void btn_sensor_process(void);
+void btn_user_process(void);
 void btn_power_process(void);
 void btn_dso_process(void);
 void btn_awg_process(void);

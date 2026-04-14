@@ -116,7 +116,7 @@ typedef enum {
     APP_DSO,        // 示波器
     APP_AWG,        // 任意波发生器
     APP_DMM,        // 万用表
-    APP_SENSOR,     // 传感器
+    APP_USER,       // 用户APP
     APP_CAL         // 校准
 }AppListType;
 
@@ -161,9 +161,11 @@ void Suspend_DmmTask(void);
 void Suspend_DsoCoreTask(void);
 void Resume_DsoCoreTask(void);
 
-/*================ SensorCoreTask =================*/
-void Suspend_SensorTask(void);
-void Resume_SensorTask(void);
+/*================ UserCoreTask =================*/
+void Suspend_UserCoreTask(void);
+void Resume_UserCoreTask(void);
+
+#define USE_USER_APP 0      // 是否使用用户APP
 
 #endif //XM_POWER_KIT_USERTASK_H
 

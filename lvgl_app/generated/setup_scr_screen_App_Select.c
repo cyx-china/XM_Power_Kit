@@ -349,7 +349,7 @@ void setup_scr_screen_App_Select(lv_ui *ui)
 
     //Write codes screen_App_Select_label_SENSOR
     ui->screen_App_Select_label_SENSOR = lv_label_create(ui->screen_App_Select_cont_1);
-    lv_label_set_text(ui->screen_App_Select_label_SENSOR, "传感器");
+    lv_label_set_text(ui->screen_App_Select_label_SENSOR, "---");
     lv_label_set_long_mode(ui->screen_App_Select_label_SENSOR, LV_LABEL_LONG_WRAP);
     lv_obj_set_pos(ui->screen_App_Select_label_SENSOR, 10, 206);
     lv_obj_set_size(ui->screen_App_Select_label_SENSOR, 60, 16);

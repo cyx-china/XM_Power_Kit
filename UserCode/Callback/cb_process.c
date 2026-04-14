@@ -36,9 +36,12 @@ void btn_dmm_process(void) {
     osMessageQueuePut(AppSwitchQueueHandle,&APP,0,10);
 }
 
-// 传感器按钮回调函数
-void btn_sensor_process(void) {
-
+// 用户APP按钮回调函数
+void btn_user_process(void) {
+#if USE_USER_APP
+    AppListType APP = APP_USER;
+    osMessageQueuePut(AppSwitchQueueHandle,&APP,0,10);
+#endif
 }
 
 // 校准按钮回调函数

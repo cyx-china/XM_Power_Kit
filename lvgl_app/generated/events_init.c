@@ -80,7 +80,7 @@ static void screen_App_Select_btn_SENSOR_event_handler (lv_event_t *e)
     switch (code) {
     case LV_EVENT_CLICKED:
     {
-        btn_sensor_process();
+        btn_user_process();
         break;
     }
     default:
