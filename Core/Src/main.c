@@ -43,7 +43,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-char Sys_Version[30] = "STM32F407VE.260306Beta.0001";
+char Sys_Version[30] = "STM32F407VE.260415.Pre.0001";
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
