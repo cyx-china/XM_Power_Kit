@@ -775,7 +775,7 @@ void Start_DpsCoreTask(void *argument) {
             seconds_to_hms_format(running_time, TimeMsg);
             lcd_draw_string(33, 215, TimeMsg, &KaiTi16x20, 0xFFFF, 0x31e8, -3);
         }
-        // 每s更新一次风扇状态（100×10ms）
+        // 每1s更新一次风扇状态（100×10ms）
         if (Fan_update_time_count >= 100) {
             Fan_update_time_count = 0;
             uint8_to_000_percent(Fan_Duty_Cycle, FanMsg);
