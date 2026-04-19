@@ -84,10 +84,6 @@ const UserParamType_t UserParamDefault = {
 // 实际参数值结构体
 UserParamType_t UserParam = {0};
 
-// -------------------------- 宏定义 --------------------------
-#define PARAM_PATH              "0:/uparam.bin"        // 配置文件的路径
-#define PARAM_TOTAL_BYTES       (Param_Number * 4)     // 配置文件总字节数（每个参数占4字节）
-
 UINT bw;
 
 // -------------------------- 参数描述表 --------------------------
@@ -361,4 +357,116 @@ HAL_StatusTypeDef UserParam_SaveAllValues(void)
 
     // 写入字节数等于总长度且无错误则成功
     return ((res == FR_OK) && (bw == PARAM_TOTAL_BYTES)) ? HAL_OK : HAL_ERROR;
+}
+
+
+/**
+ * @brief  将所有参数的默认值按顺序填充到缓冲区（每个参数占4字节）
+ * @param  buf: 指向目标缓冲区的指针（缓冲区长度需至少为PARAM_TOTAL_BYTES）
+ * @return HAL_StatusTypeDef: HAL_OK=填充成功，HAL_ERROR=参数无效/填充失败
+ * @note   缓冲区需由调用者提前分配，长度需≥PARAM_TOTAL_BYTES
+ */
+HAL_StatusTypeDef Process_Default_Data(uint8_t *buf)
+{
+    // 校验缓冲区指针有效性
+    if (buf == NULL) {
+        return HAL_ERROR;
+    }
+
+    // 初始化缓冲区（清零，确保4字节对齐的空余位为0）
+    memset(buf, 0, PARAM_TOTAL_BYTES);
+
+    // 遍历参数描述表，按顺序填充默认值到缓冲区
+    for (uint32_t i = 0; i < Param_Number; i++) {
+        uint8_t *pParam = &buf[i * 4];                // 当前参数在缓冲区的起始位置（每个参数占4字节）
+        const ParamDesc_t *desc = &param_desc_table[i];// 当前参数的描述信息
+
+        // 根据参数实际长度拷贝默认值（2字节/4字节）
+        if (desc->data_len == 2) {
+            // 2字节类型（int16_t/uint16_t）：仅拷贝低2字节，高2字节保持0
+            memcpy(pParam, desc->default_ptr, 2);
+        } else if (desc->data_len == 4) {
+            // 4字节类型（float）：完整拷贝4字节
+            memcpy(pParam, desc->default_ptr, 4);
+        }
+    }
+
+    return HAL_OK;
+}
+
+/**
+ * @brief  从Flash配置文件中完整读取所有参数到缓冲区
+ * @param  buf: 指向目标缓冲区的指针（缓冲区长度需至少为PARAM_TOTAL_BYTES）
+ * @return HAL_StatusTypeDef: HAL_OK=读取成功，HAL_ERROR=参数无效/文件操作失败
+ * @note   1. 缓冲区需由调用者提前分配，长度需≥PARAM_TOTAL_BYTES
+ *         2. 读取失败时缓冲区内容不保证有效性
+ */
+HAL_StatusTypeDef Process_Current_Data(uint8_t* buf)
+{
+    // 1. 校验缓冲区指针有效性
+    if (buf == NULL) {
+        return HAL_ERROR;
+    }
+
+    // 2. 打开配置文件（只读模式）
+    res = f_open(&fil, PARAM_PATH, FA_READ);
+    if (res != FR_OK) {
+        return HAL_ERROR; // 文件打开失败
+    }
+
+    // 3. 清空缓冲区（避免残留数据干扰）
+    memset(buf, 0, PARAM_TOTAL_BYTES);
+
+    // 4. 从文件起始位置读取完整配置数据到缓冲区
+    res = f_read(&fil, buf, PARAM_TOTAL_BYTES, &br);
+
+    // 5. 立即关闭文件（释放资源）
+    f_close(&fil);
+
+    // 6. 校验读取结果：必须无错误且读取字节数等于总长度
+    if (res != FR_OK || br != PARAM_TOTAL_BYTES) {
+        return HAL_ERROR;
+    }
+
+    return HAL_OK;
+}
+
+
+/**
+ * @brief  以覆盖模式将指定长度的数据写入配置文件（uparam.bin）
+ * @param  buf: 待写入数据的缓冲区指针（非空）
+ * @param  len: 待写入数据的长度（需≤PARAM_TOTAL_BYTES且＞0）
+ * @return HAL_StatusTypeDef: HAL_OK=写入成功，HAL_ERROR=参数无效/文件操作失败
+ * @note   1. 函数会覆盖配置文件原有全部内容，需确保buf数据完整性
+ *         2. 写入长度建议等于PARAM_TOTAL_BYTES（参数总字节数），避免文件数据不完整
+ *         3. 依赖FATFS驱动和外部Flash初始化完成
+ */
+HAL_StatusTypeDef Write_Current_Data(uint8_t *buf, uint32_t len)
+{
+    // 输入参数有效性校验
+    // - 缓冲区指针非空
+    // - 写入长度大于0且不超过参数总字节数（避免文件数据溢出/不完整）
+    if (buf == NULL || len == 0 || len > PARAM_TOTAL_BYTES) {
+        return HAL_ERROR;
+    }
+
+    // 以「覆盖创建+可写」模式打开配置文件
+    // - FA_CREATE_ALWAYS：文件存在则清空原有内容，不存在则创建
+    res = f_open(&fil, PARAM_PATH, FA_CREATE_ALWAYS | FA_WRITE);
+    if (res != FR_OK) {
+        return HAL_ERROR; // 文件打开失败
+    }
+
+    // 将缓冲区数据写入文件
+    res = f_write(&fil, buf, len, &bw);
+
+    // 立即关闭文件（无论写入成功/失败，释放文件资源）
+    f_close(&fil);
+
+    // 校验写入结果：无文件错误且实际写入字节数等于指定长度
+    if (res != FR_OK || bw != len) {
+        return HAL_ERROR;
+    }
+
+    return HAL_OK;
 }

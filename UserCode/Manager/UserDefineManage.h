@@ -84,6 +84,9 @@ typedef enum {
     Param_Number                        // 参数个数
 } UserParamType_e;
 
+#define PARAM_PATH              "0:/uparam.bin"        // 配置文件的路径
+#define PARAM_TOTAL_BYTES       (Param_Number * 4)     // 配置文件总字节数（每个参数占4字节）
+
 // 可自定义量结构体
 typedef struct {
     //============= 数控电源APP ============== //
@@ -149,13 +152,13 @@ typedef struct {
     float    DMM_Res_R2K_Voltage;         // 2KΩ空载电压        (float)     V
     float    DMM_Res_R2K;                 // 2KΩ基准阻值        (float)     R_Ω
     //============== 其他配置 =============== //
-    uint16_t Screen_Brightness;    // 屏幕初始亮度        (uint16_t)  10~100
-    uint16_t Screen_Sleeptime;     // 休眠时间           (uint16_t)  0~3600 s
-    uint16_t Screen_ShowFlip;      // 显示翻转           (uint16_t)  0/1
-    uint16_t Beezer_Volume;        // 蜂鸣器音量          (uint16_t)  0~100
-    uint16_t Beezer_Time;          // 蜂鸣时长           (uint16_t)  10 * n ms
-    uint16_t Fan_Enable;           // 是否启用风扇        (uint16_t)  0/1
-    uint16_t Fan_StartTemperture;  // 风扇启转温度        (uint16_t)  20~50
+    uint16_t Screen_Brightness;           // 屏幕初始亮度        (uint16_t)  10~100
+    uint16_t Screen_Sleeptime;            // 休眠时间           (uint16_t)  0~3600 s
+    uint16_t Screen_ShowFlip;             // 显示翻转           (uint16_t)  0/1
+    uint16_t Beezer_Volume;               // 蜂鸣器音量          (uint16_t)  0~100
+    uint16_t Beezer_Time;                 // 蜂鸣时长           (uint16_t)  10 * n ms
+    uint16_t Fan_Enable;                  // 是否启用风扇        (uint16_t)  0/1
+    uint16_t Fan_StartTemperture;         // 风扇启转温度        (uint16_t)  20~50
 } UserParamType_t;
 
 extern UserParamType_t UserParam;
@@ -164,4 +167,8 @@ HAL_StatusTypeDef UserParam_ResetToDefault(void);
 HAL_StatusTypeDef UserParam_UpdateSingle(UserParamType_e id, const void *value);
 HAL_StatusTypeDef UserParam_LoadAllValues(void);
 HAL_StatusTypeDef UserParam_SaveAllValues(void);
+
+HAL_StatusTypeDef Process_Default_Data(uint8_t *buf);
+HAL_StatusTypeDef Process_Current_Data(uint8_t* buf);
+HAL_StatusTypeDef Write_Current_Data(uint8_t *buf, uint32_t len);
 #endif //XM_POWER_KIT_USERDEFINEMANAGE_H

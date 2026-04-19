@@ -32,6 +32,7 @@
 #include "i2c.h"
 #include "INA226_Driver.h"
 #include "Keys.h"
+#include "SerialCoreTask.h"
 #include "UserTask.h"
 #include "ST7789.h"
 #include "SwitchManager.h"
@@ -148,6 +149,13 @@ const osThreadAttr_t UserCoreTask_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for SerialCoreTask */
+osThreadId_t SerialCoreTaskHandle;
+const osThreadAttr_t SerialCoreTask_attributes = {
+  .name = "SerialCoreTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityRealtime1,
+};
 /* Definitions for AppSwitchQueue */
 osMessageQueueId_t AppSwitchQueueHandle;
 const osMessageQueueAttr_t AppSwitchQueue_attributes = {
@@ -167,6 +175,11 @@ const osMessageQueueAttr_t KeyEventQueue_attributes = {
 osMessageQueueId_t BeezerQueueHandle;
 const osMessageQueueAttr_t BeezerQueue_attributes = {
   .name = "BeezerQueue"
+};
+/* Definitions for SerialMsgQueue */
+osMessageQueueId_t SerialMsgQueueHandle;
+const osMessageQueueAttr_t SerialMsgQueue_attributes = {
+  .name = "SerialMsgQueue"
 };
 /* Definitions for IIC1_Mutex */
 osMutexId_t IIC1_MutexHandle;
@@ -217,6 +230,7 @@ extern void Start_AwgTask(void *argument);
 extern void Start_DmmCoreTask(void *argument);
 extern void Start_DsoCoreTask(void *argument);
 extern void Start_UserCoreTask(void *argument);
+extern void Start_SerialCoreTask(void *argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -308,6 +322,9 @@ void MX_FREERTOS_Init(void) {
   /* creation of BeezerQueue */
   BeezerQueueHandle = osMessageQueueNew (8, sizeof(uint16_t), &BeezerQueue_attributes);
 
+  /* creation of SerialMsgQueue */
+  SerialMsgQueueHandle = osMessageQueueNew (16, sizeof(CmdCode), &SerialMsgQueue_attributes);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -351,6 +368,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of UserCoreTask */
   UserCoreTaskHandle = osThreadNew(Start_UserCoreTask, NULL, &UserCoreTask_attributes);
+
+  /* creation of SerialCoreTask */
+  SerialCoreTaskHandle = osThreadNew(Start_SerialCoreTask, NULL, &SerialCoreTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */

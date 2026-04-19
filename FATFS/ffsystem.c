@@ -39,7 +39,7 @@ void ff_memfree (
 /* Definitions of Mutex                                                   */
 /*------------------------------------------------------------------------*/
 
-#define OS_TYPE	0	/* 0:Win32, 1:uITRON4.0, 2:uC/OS-II, 3:FreeRTOS, 4:CMSIS-RTOS */
+#define OS_TYPE	3	/* 0:Win32, 1:uITRON4.0, 2:uC/OS-II, 3:FreeRTOS, 4:CMSIS-RTOS */
 
 
 #if   OS_TYPE == 0	/* Win32 */
@@ -97,7 +97,7 @@ int ff_mutex_create (	/* Returns 1:Function succeeded or 0:Could not create the 
 	return (int)(err == OS_NO_ERR);
 
 #elif OS_TYPE == 3	/* FreeRTOS */
-	Mutex[vol] = xSemaphoreCreateMutex();
+	Mutex[vol] = xSemaphoreCreateRecursiveMutex();
 	return (int)(Mutex[vol] != NULL);
 
 #elif OS_TYPE == 4	/* CMSIS-RTOS */
@@ -166,7 +166,7 @@ int ff_mutex_take (	/* Returns 1:Succeeded or 0:Timeout */
 	return (int)(err == OS_NO_ERR);
 
 #elif OS_TYPE == 3	/* FreeRTOS */
-	return (int)(xSemaphoreTake(Mutex[vol], FF_FS_TIMEOUT) == pdTRUE);
+	return (int)(xSemaphoreTakeRecursive(Mutex[vol], FF_FS_TIMEOUT) == pdTRUE);
 
 #elif OS_TYPE == 4	/* CMSIS-RTOS */
 	return (int)(osMutexWait(Mutex[vol], FF_FS_TIMEOUT) == osOK);
@@ -196,7 +196,7 @@ void ff_mutex_give (
 	OSMutexPost(Mutex[vol]);
 
 #elif OS_TYPE == 3	/* FreeRTOS */
-	xSemaphoreGive(Mutex[vol]);
+	xSemaphoreGiveRecursive(Mutex[vol]);
 
 #elif OS_TYPE == 4	/* CMSIS-RTOS */
 	osMutexRelease(Mutex[vol]);

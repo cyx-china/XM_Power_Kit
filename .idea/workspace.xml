@@ -6,6 +6,7 @@
   <component name="BackendCodeEditorMiscSettings">
     <option name="/Default/Housekeeping/FeatureSuggestion/FeatureSuggestionManager/DisabledSuggesters/=SwitchToGoToActionSuggester/@EntryIndexedValue" value="true" type="bool" />
     <option name="/Default/Housekeeping/GlobalSettingsUpgraded/IsUpgraded/@EntryValue" value="true" type="bool" />
+    <option name="/Default/Housekeeping/RefactoringsMru/RenameRefactoring/DoQuickRename/@EntryValue" value="true" type="bool" />
     <option name="/Default/RiderDebugger/RiderRestoreDecompile/RestoreDecompileSetting/@EntryValue" value="false" type="bool" />
   </component>
   <component name="CMakePresetLoader">{
@@ -34,8 +35,26 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="c3042b8d-9838-4020-bfd1-dbce9002cc5a" name="更改" comment="跟新了系统版本">
-      <change beforePath="$PROJECT_DIR$/UserCode/Task/APP/DpsCoreTask.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/APP/DpsCoreTask.c" afterDir="false" />
+    <list default="true" id="c3042b8d-9838-4020-bfd1-dbce9002cc5a" name="更改" comment="更新了CDC">
+      <change afterPath="$PROJECT_DIR$/UserCode/Task/APP/SerialCoreTask/SerialCoreTask.c" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/UserCode/Task/APP/SerialCoreTask/SerialCoreTask.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Core/Src/freertos.c" beforeDir="false" afterPath="$PROJECT_DIR$/Core/Src/freertos.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Core/Src/main.c" beforeDir="false" afterPath="$PROJECT_DIR$/Core/Src/main.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/FATFS/ffconf.h" beforeDir="false" afterPath="$PROJECT_DIR$/FATFS/ffconf.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/FATFS/ffsystem.c" beforeDir="false" afterPath="$PROJECT_DIR$/FATFS/ffsystem.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/USB_DEVICE/App/usbd_cdc_if.c" beforeDir="false" afterPath="$PROJECT_DIR$/USB_DEVICE/App/usbd_cdc_if.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/USB_DEVICE/App/usbd_cdc_if.h" beforeDir="false" afterPath="$PROJECT_DIR$/USB_DEVICE/App/usbd_cdc_if.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Callback/cb_process.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Callback/cb_process.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Manager/UserDefineManage.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Manager/UserDefineManage.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Manager/UserDefineManage.h" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Manager/UserDefineManage.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Task/APP/LvglCoreTask.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/APP/LvglCoreTask.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Task/UserTask.h" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/UserTask.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/os_handles.h" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/os_handles.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/XM_Power_Kit_V7.ioc" beforeDir="false" afterPath="$PROJECT_DIR$/XM_Power_Kit_V7.ioc" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lvgl/porting/lv_port_fs.c" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lvgl/porting/lv_port_fs.h" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lvgl/src/extra/libs/fsdrv/lv_fs_fatfs.c" beforeDir="false" afterPath="$PROJECT_DIR$/lvgl/src/extra/libs/fsdrv/lv_fs_fatfs.c" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -137,6 +156,8 @@
       <recent name="F:\STM32_Clion\XM_Power_Kit_V7\UserCode\Algorithm\FFT" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="F:\STM32_Clion\XM_Power_Kit_V7\UserCode\Task\APP" />
+      <recent name="F:\STM32_Clion\XM_Power_Kit_V7\UserCode\Task" />
       <recent name="F:\STM32_Clion\XM_Power_Kit_V7" />
       <recent name="F:\STM32_Clion\XM_Power_Kit_V7\UserCode\Task\APP\DsoTask" />
       <recent name="F:\STM32_Clion\XM_Power_Kit_V7\UserCode\Algorithm\FFT" />
@@ -193,7 +214,9 @@
       <workItem from="1776330559489" duration="4634000" />
       <workItem from="1776443710905" duration="596000" />
       <workItem from="1776495284244" duration="1309000" />
-      <workItem from="1776499242437" duration="3372000" />
+      <workItem from="1776499242437" duration="10215000" />
+      <workItem from="1776528314845" duration="20764000" />
+      <workItem from="1776602562873" duration="1238000" />
     </task>
     <task id="LOCAL-00001" summary="完成了示波器主体功能">
       <option name="closed" value="true" />
@@ -267,7 +290,15 @@
       <option name="project" value="LOCAL" />
       <updated>1776259461679</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="更新了CDC">
+      <option name="closed" value="true" />
+      <created>1776505818695</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1776505818695</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -299,28 +330,21 @@
     <MESSAGE value="初版完成，新增用户APP" />
     <MESSAGE value="将USB切换为虚拟串口" />
     <MESSAGE value="跟新了系统版本" />
-    <option name="LAST_COMMIT_MESSAGE" value="跟新了系统版本" />
+    <MESSAGE value="更新了CDC" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新了CDC" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
-          <url>file://$PROJECT_DIR$/UserCode/Task/InitTask.c</url>
-          <line>188</line>
-          <option name="timeStamp" value="3" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
-          <url>file://$PROJECT_DIR$/UserCode/Task/InitTask.c</url>
-          <line>64</line>
-          <option name="timeStamp" value="13" />
+          <url>file://$PROJECT_DIR$/Core/Inc/main.h</url>
+          <option name="timeStamp" value="15" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
     <watches-manager>
       <configuration name="com.jetbrains.cidr.embedded.openocd.conf.type">
-        <watch expression="@ ALREADY PREPROCESSED @::UserParam" />
-        <watch expression="@ ALREADY PREPROCESSED @res" />
-        <watch expression="@ ALREADY PREPROCESSED @br" />
+        <watch expression="@ ALREADY PREPROCESSED @UserRxBufferFS" />
       </configuration>
     </watches-manager>
   </component>

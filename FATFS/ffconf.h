@@ -1,6 +1,7 @@
 /*---------------------------------------------------------------------------/
 /  Configurations of FatFs Module
 /---------------------------------------------------------------------------*/
+#pragma once
 
 #define FFCONF_DEF  80386   /* Revision ID */
 
@@ -56,8 +57,9 @@
 
 #define FF_FS_CRTIME        0
 #define FF_FS_NOFSINFO      0
-#define FF_FS_LOCK          0
+#define FF_FS_LOCK          3
 #define FF_FS_REENTRANT     0
-#define FF_FS_TIMEOUT       1000
+#define _SYNC_t             SemaphoreHandle_t
+#define FF_FS_TIMEOUT       pdMS_TO_TICKS(1000)
 
 /*--- End of configuration options ---*/

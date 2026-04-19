@@ -10,7 +10,6 @@
 
 #if LV_USE_FS_FATFS
 #include <stdlib.h>
-
 #include "ff.h"
 
 /*********************

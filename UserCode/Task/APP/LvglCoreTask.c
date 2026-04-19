@@ -74,6 +74,7 @@ void Start_LvglCoreTask(void *argument) {
 }
 
 void Suspend_LvglCoreTask(void) {
+    osDelay(300);
     IsLvglRunning = false;                  // 将标志位设为 false，停止lv_tick_inc的调用 <- main.c末尾
     disp_disable_update();                  // 禁止屏幕刷新
     osThreadSuspend(LvglCoreTaskHandle);    // 挂起LVGL核心任务
@@ -90,5 +91,6 @@ void Resume_LvglCoreTask(void) {
     osDelay(500);                      // 等你放手..... 听到蜂鸣器就立马放，按久了会重新进入app
 
     disp_enable_update();                   // 允许屏幕刷新
+    lv_obj_invalidate(lv_scr_act());        // 重绘全屏
     IsLvglRunning = true;                   // 将标志位设为 true，来恢复lv_tick_inc的调用
 }

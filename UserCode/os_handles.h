@@ -39,7 +39,7 @@ extern osThreadId_t CalibrateTaskHandle;          // 校准任务句柄
 extern osThreadId_t DmmCoreTaskHandle;            // 数字万用表APP任务句柄
 extern osThreadId_t DsoCoreTaskHandle;            // 示波器APP任务句柄
 extern osThreadId_t UserCoreTaskHandle;           // 用户自动逸APP任务句柄
-
+extern osThreadId_t SerialCoreTaskHandle;         // 串口通信APP任务句柄
 // ============================= Mutex_Handles =============================//
 extern osMutexId_t IIC1_MutexHandle;              // IIC1总线互斥锁句柄
 extern osMutexId_t IIC3_MutexHandle;              // IIC3总线互斥锁句柄
@@ -55,7 +55,7 @@ extern osMessageQueueId_t LcdMsgQueueHandle;      // LCD刷新消息队列句柄
 extern osMessageQueueId_t AppSwitchQueueHandle;   // APP切换消息队列
 extern osMessageQueueId_t KeyEventQueueHandle;    // 按键事件消息队列 (APP)
 extern osMessageQueueId_t BeezerQueueHandle;      // 蜂鸣器消息队列
-
+extern osMessageQueueId_t SerialMsgQueueHandle;   // 串口消息队列
 // ============================= FileSystem_Handles =============================//
 extern FATFS fs;
 extern FIL fil;
