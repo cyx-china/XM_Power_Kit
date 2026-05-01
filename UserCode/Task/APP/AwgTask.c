@@ -945,7 +945,7 @@ void Start_AwgTask(void *argument) {
  * @note  停止波形输出，挂起输入设备检测任务和AWG任务
  */
 void Suspend_AwgTask(void) {
-    WaveGen_Stop(); // 停止波形输出
+    //WaveGen_Stop(); // 停止波形输出
     Suspend_IndevDetectTask(); // 挂起输入设备检测任务
     osThreadSuspend(AwgTaskHandle); // 挂起AWG任务
 }
@@ -955,6 +955,9 @@ void Suspend_AwgTask(void) {
  * @note  重置页面状态，重新绘制界面，恢复输入设备检测任务和AWG任务
  */
 void Resume_AwgTask(void) {
+    WaveGen_Stop();     // 停止波形输出
+    osDelay(10);
+    WaveGen_DC(1000,0,0,0); // 输出0V
     // 重置页面状态
     awg_current_page = PAGE_MAIN;
     awg_previous_page = PAGE_MAIN;

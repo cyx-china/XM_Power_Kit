@@ -77,6 +77,7 @@ void Key_Scan(void)
                     msg.key   = (IndevTypeDef)i;
                     msg.event = KEY_EVENT_LONG_PRESS;
                     osMessageQueuePut(KeyEventQueueHandle, &msg, 0, 0);
+                    WakeUp();   // 唤醒设备
 
                     k->state = KEY_STATE_LONG_HOLD;
                     k->long_hold_cnt = 0;
@@ -93,6 +94,7 @@ void Key_Scan(void)
                     msg.key   = (IndevTypeDef)i;
                     msg.event = KEY_EVENT_LONG_HOLD;
                     osMessageQueuePut(KeyEventQueueHandle, &msg, 0, 0);
+                    WakeUp();   // 唤醒设备
 
                     k->long_hold_cnt = 0;
                 }
@@ -108,6 +110,7 @@ void Key_Scan(void)
                 msg.key   = (IndevTypeDef)i;
                 msg.event = KEY_EVENT_CLICK;
                 osMessageQueuePut(KeyEventQueueHandle, &msg, 0, 0);
+                WakeUp();   // 唤醒设备
             }
 
             // 回到空闲状态

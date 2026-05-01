@@ -35,26 +35,18 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="c3042b8d-9838-4020-bfd1-dbce9002cc5a" name="更改" comment="更新了CDC">
-      <change afterPath="$PROJECT_DIR$/UserCode/Task/APP/SerialCoreTask/SerialCoreTask.c" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/UserCode/Task/APP/SerialCoreTask/SerialCoreTask.h" afterDir="false" />
+    <list default="true" id="c3042b8d-9838-4020-bfd1-dbce9002cc5a" name="更改" comment="完成了通过CDC与上位机通信">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Core/Src/freertos.c" beforeDir="false" afterPath="$PROJECT_DIR$/Core/Src/freertos.c" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Core/Src/main.c" beforeDir="false" afterPath="$PROJECT_DIR$/Core/Src/main.c" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/FATFS/ffconf.h" beforeDir="false" afterPath="$PROJECT_DIR$/FATFS/ffconf.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/FATFS/ffsystem.c" beforeDir="false" afterPath="$PROJECT_DIR$/FATFS/ffsystem.c" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/USB_DEVICE/App/usbd_cdc_if.c" beforeDir="false" afterPath="$PROJECT_DIR$/USB_DEVICE/App/usbd_cdc_if.c" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/USB_DEVICE/App/usbd_cdc_if.h" beforeDir="false" afterPath="$PROJECT_DIR$/USB_DEVICE/App/usbd_cdc_if.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/UserCode/Callback/cb_process.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Callback/cb_process.c" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/UserCode/Manager/UserDefineManage.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Manager/UserDefineManage.c" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/UserCode/Manager/UserDefineManage.h" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Manager/UserDefineManage.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/UserCode/Task/APP/LvglCoreTask.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/APP/LvglCoreTask.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Drivers/Indev_Drivers/Encoder.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Drivers/Indev_Drivers/Encoder.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Drivers/Indev_Drivers/Keys.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Drivers/Indev_Drivers/Keys.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Drivers/TFT_LCD/ST7789.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Drivers/TFT_LCD/ST7789.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Task/APP/AwgTask.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/APP/AwgTask.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Task/APP/DpsCoreTask.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/APP/DpsCoreTask.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Task/InitTask.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/InitTask.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Task/SensorTask.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/SensorTask.c" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/UserCode/Task/UserTask.h" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/UserTask.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/UserCode/os_handles.h" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/os_handles.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/XM_Power_Kit_V7.ioc" beforeDir="false" afterPath="$PROJECT_DIR$/XM_Power_Kit_V7.ioc" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lvgl/porting/lv_port_fs.c" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/lvgl/porting/lv_port_fs.h" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/lvgl/src/extra/libs/fsdrv/lv_fs_fatfs.c" beforeDir="false" afterPath="$PROJECT_DIR$/lvgl/src/extra/libs/fsdrv/lv_fs_fatfs.c" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -216,7 +208,26 @@
       <workItem from="1776495284244" duration="1309000" />
       <workItem from="1776499242437" duration="10215000" />
       <workItem from="1776528314845" duration="20764000" />
-      <workItem from="1776602562873" duration="1238000" />
+      <workItem from="1776602562873" duration="1876000" />
+      <workItem from="1776615246787" duration="819000" />
+      <workItem from="1776658530058" duration="178000" />
+      <workItem from="1776662517335" duration="2136000" />
+      <workItem from="1776702877158" duration="2336000" />
+      <workItem from="1776758100177" duration="2593000" />
+      <workItem from="1776921565007" duration="81000" />
+      <workItem from="1776922055157" duration="649000" />
+      <workItem from="1776923982091" duration="219000" />
+      <workItem from="1776931475164" duration="2497000" />
+      <workItem from="1777024196706" duration="201000" />
+      <workItem from="1777190100152" duration="452000" />
+      <workItem from="1777190581308" duration="116000" />
+      <workItem from="1777287760217" duration="511000" />
+      <workItem from="1777305440066" duration="446000" />
+      <workItem from="1777351920763" duration="625000" />
+      <workItem from="1777360446549" duration="2456000" />
+      <workItem from="1777379552069" duration="2651000" />
+      <workItem from="1777438810989" duration="1418000" />
+      <workItem from="1777608698756" duration="2614000" />
     </task>
     <task id="LOCAL-00001" summary="完成了示波器主体功能">
       <option name="closed" value="true" />
@@ -298,7 +309,15 @@
       <option name="project" value="LOCAL" />
       <updated>1776505818695</updated>
     </task>
-    <option name="localTasksCounter" value="11" />
+    <task id="LOCAL-00011" summary="完成了通过CDC与上位机通信">
+      <option name="closed" value="true" />
+      <created>1776611341690</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1776611341690</updated>
+    </task>
+    <option name="localTasksCounter" value="12" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -331,7 +350,8 @@
     <MESSAGE value="将USB切换为虚拟串口" />
     <MESSAGE value="跟新了系统版本" />
     <MESSAGE value="更新了CDC" />
-    <option name="LAST_COMMIT_MESSAGE" value="更新了CDC" />
+    <MESSAGE value="完成了通过CDC与上位机通信" />
+    <option name="LAST_COMMIT_MESSAGE" value="完成了通过CDC与上位机通信" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

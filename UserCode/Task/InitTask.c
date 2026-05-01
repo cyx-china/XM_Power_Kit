@@ -193,10 +193,20 @@ static bool Sys_Init(void) {
   // 设置屏幕亮度
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * UserParam.Screen_Brightness / 100);
 
+  // 设置睡眠时间
+  SleepCounter = UserParam.Screen_Sleeptime;
+
   // 设置蜂鸣器音量
   __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, ((UserParam.Beezer_Volume - 1) / 2));
 
   DpsRelease_ON();
+
+  // 更新屏幕显示颜色
+  if (UserParam.Screen_ShowFlip == 0) {
+    LCD_WR_CMD(0x21);        // 开启颜色翻转
+  } else {
+    LCD_WR_CMD(0x20);        // 关闭颜色翻转
+  }
 
   WaveGen_DC(1000, 0, 0, 0);      // 生成0V
   return pass;

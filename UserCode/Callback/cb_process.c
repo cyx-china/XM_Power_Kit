@@ -60,6 +60,9 @@ static const uint16_t g_SleepTimeMap[6] = {0, 60, 300, 600, 1800, 3600};
 // 屏幕休眠时间下拉框回调
 void Setting_screen_sleeptime_process(uint16_t id)
 {
+    IsSleeping = false;
+    SleepCounter = g_SleepTimeMap[id];
+
     UserParam.Screen_Sleeptime = g_SleepTimeMap[id];
     IsValueChanged = true;
 }
@@ -82,15 +85,21 @@ void Setting_screen_bright_process(void) {
 
 // 屏幕显示方向回调
 void Setting_screen_direct_process(int status) {
+    // if (status == 0) {
+    //     LCD_WR_CMD(0x36);        // 显示方向设置（MY/MX/MV/ML控制）
+    //     LCD_WR_DATA(0x60);                // 正向
+    // } else {
+    //     LCD_WR_CMD(0x36);        // 显示方向设置（MY/MX/MV/ML控制）
+    //     LCD_WR_DATA(0xA0);                // 反向
+    // }
+
     if (status == 0) {
-        LCD_WR_CMD(0x36);        // 显示方向设置（MY/MX/MV/ML控制）
-        LCD_WR_DATA(0x60);                // 正向
+        LCD_WR_CMD(0x21);        // 开启颜色翻转
     } else {
-        LCD_WR_CMD(0x36);        // 显示方向设置（MY/MX/MV/ML控制）
-        LCD_WR_DATA(0xA0);                // 反向
+        LCD_WR_CMD(0x20);        // 关闭颜色翻转
     }
 
-    lv_obj_invalidate(lv_scr_act());      // 标记全屏为脏，刷新全屏
+    //lv_obj_invalidate(lv_scr_act());      // 标记全屏为脏，刷新全屏
 
     // 更新UserParam
     UserParam.Screen_ShowFlip = status;

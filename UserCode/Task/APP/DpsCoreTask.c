@@ -48,6 +48,7 @@ typedef enum {
     PAGE_VOLT_DIGIT,    // 电压数位编辑页面
     PAGE_CURR_DIGIT,    // 电流数位编辑页面
     PAGE_QUICK_MENU,    // 快速设置菜单页面
+    PAGE_MAIN_GRAPH,    // 主界面曲线显示页面
     PAGE_NUM            // 页面总数
 } DPS_AppPage_t;
 
@@ -242,25 +243,23 @@ static void UpdateLableValues(void); // 更新界面数值显示
 
 // 页面处理函数
 void dps_main_page_handler(KeyEventMsg_t msg);  // 主界面按键处理
-void volt_digit_handler(KeyEventMsg_t msg); // 电压数位编辑按键处理
-void curr_digit_handler(KeyEventMsg_t msg); // 电流数位编辑按键处理
-void quick_menu_handler(KeyEventMsg_t msg); // 快速设置菜单按键处理
+void volt_digit_handler(KeyEventMsg_t msg);     // 电压数位编辑按键处理
+void curr_digit_handler(KeyEventMsg_t msg);     // 电流数位编辑按键处理
+void quick_menu_handler(KeyEventMsg_t msg);     // 快速设置菜单按键处理
+void dps_graph_handler(KeyEventMsg_t msg);      // 曲线显示界面按键处理
+
+// 页面刷新函数
+void dps_main_page_refresh_handler(void);       // 主界面刷新函数
+void dsp_graph_page_refresh_handler(void);      // 曲线界面刷新函数
 
 // 格式化工具函数
 int float_to_fixed_digits(float value, uint8_t target_digits, char *buf);
-
 void formatFloatMessage(float voltage, float current, char *message);
-
 void formatTempMessage(float temp, char *message);
-
 void formatOutputMessage(float value, char *message);
-
 int float_to_fixed_00_00(float value, char *buf);
-
 int float_to_0000_000Wh(float value, char *buf);
-
 int seconds_to_hms_format(uint32_t time, char *buf);
-
 int uint8_to_000_percent(uint8_t value, char *buf);
 
 // ADC相关函数
@@ -287,6 +286,20 @@ static void (*page_handlers[PAGE_NUM])(KeyEventMsg_t) = {
     [PAGE_VOLT_DIGIT] = volt_digit_handler,
     [PAGE_CURR_DIGIT] = curr_digit_handler,
     [PAGE_QUICK_MENU] = quick_menu_handler,
+    [PAGE_MAIN_GRAPH] = dps_graph_handler
+};
+
+/* ========================== 页面刷新函数回调表 ========================== */
+/**
+ * @brief 页面刷新函数表驱动
+ * @note  索引对应AppPage_t枚举，快速映射页面与刷新函数
+ */
+static void (*page_refreshers[PAGE_NUM])(void) = {
+    [PAGE_MAIN] = dps_main_page_refresh_handler,
+    [PAGE_VOLT_DIGIT] = dps_main_page_refresh_handler,
+    [PAGE_CURR_DIGIT] = dps_main_page_refresh_handler,
+    [PAGE_QUICK_MENU] = dps_main_page_refresh_handler,
+    [PAGE_MAIN_GRAPH] = dsp_graph_page_refresh_handler
 };
 
 /* ========================== 通用辅助函数实现 ========================== */
@@ -762,25 +775,8 @@ void Start_DpsCoreTask(void *argument) {
         if (osMessageQueueGet(KeyEventQueueHandle, &DPS_Keymsg, NULL, 0) == osOK)
             page_handlers[current_page](DPS_Keymsg);
 
-        // 每100ms更新一次界面数值（15×10ms）
-        if (widgets_update_time_count >= 15) {
-            widgets_update_time_count = 0;
-            UpdateLableValues();
-        }
-
-        // 每1秒更新一次运行时间（100×10ms）
-        if (Time_update_time_count >= 100) {
-            Time_update_time_count = 0;
-            running_time++;
-            seconds_to_hms_format(running_time, TimeMsg);
-            lcd_draw_string(33, 215, TimeMsg, &KaiTi16x20, 0xFFFF, 0x31e8, -3);
-        }
-        // 每1s更新一次风扇状态（100×10ms）
-        if (Fan_update_time_count >= 100) {
-            Fan_update_time_count = 0;
-            uint8_to_000_percent(Fan_Duty_Cycle, FanMsg);
-            lcd_draw_string(262, 5, FanMsg, &KaiTi16x20, 0xef7d, 0x31e8, -4);
-        }
+        // 界面刷新函数分发
+        page_refreshers[current_page]();
 
         // 任务延时（10ms）
         osDelay(10);
@@ -1114,6 +1110,19 @@ void dps_main_page_handler(KeyEventMsg_t msg) {
         osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
         return;
     }
+    // 单击设置键，切换到曲线显示界面
+    else if (msg.key == KEY_MODE && msg.event == KEY_EVENT_CLICK) {
+        current_page = PAGE_MAIN_GRAPH;
+        previous_page = PAGE_MAIN;
+
+
+        StartBeezer(0);
+        return;
+    }
+
+
+
+
     // 无匹配按键事件：直接返回
     else return;
 
@@ -1434,7 +1443,6 @@ void Resume_DpsCoreTask(void) {
 void Start_PIDTask(void *argument) {
     osThreadSuspend(PIDTaskHandle);     // 任务启动后先挂起，等待Resume触发
 
-    // 无限循环（RTOS任务核心逻辑）
     for (;;) {
         // 仅当电源开启时执行PID运算和DAC更新
         if (IsPowerOn == true) {
@@ -1446,3 +1454,83 @@ void Start_PIDTask(void *argument) {
         osDelay(1); // 任务周期1ms
     }
 }
+
+// ========================= 曲线显示页面 ======================== //
+
+// 曲线显示界面按键处理
+void dps_graph_handler(KeyEventMsg_t msg) {
+    if (msg.key == KEY_MODE && msg.event == KEY_EVENT_CLICK) {
+        // 按键按下，切换到主界面
+        current_page = PAGE_MAIN;
+        DrawDpsMainBasicElement();  // 绘制主界面
+    }
+    else if (msg.key == KEY_SET && msg.event == KEY_EVENT_LONG_PRESS) {
+        IsPowerOn = !IsPowerOn;
+        if (IsPowerOn) {
+            DpsPower_ON();
+            osDelay(10);
+            DpsRelease_OFF();
+            DpsGnd_ON();
+            DpsDc_ON();
+        } else {
+            DpsPower_OFF();
+            DpsRelease_ON();
+            osDelay(80);
+            DpsDc_OFF();
+            DpsGnd_OFF();
+        }
+    }
+    else{return;}
+
+    StartBeezer(0);
+}
+
+void dps_main_page_refresh_handler(void) {
+    // 每150ms更新一次界面数值（15×10ms） // 8帧/s
+    if (widgets_update_time_count >= 15) {
+        widgets_update_time_count = 0;
+        UpdateLableValues();
+    }
+
+    // 每1秒更新一次运行时间（100×10ms）
+    if (Time_update_time_count >= 100) {
+        Time_update_time_count = 0;
+        running_time++;
+        seconds_to_hms_format(running_time, TimeMsg);
+        lcd_draw_string(33, 215, TimeMsg, &KaiTi16x20, 0xFFFF, 0x31e8, -3);
+    }
+    // 每1s更新一次风扇状态（100×10ms）
+    if (Fan_update_time_count >= 100) {
+        Fan_update_time_count = 0;
+        uint8_to_000_percent(Fan_Duty_Cycle, FanMsg);
+        lcd_draw_string(262, 5, FanMsg, &KaiTi16x20, 0xef7d, 0x31e8, -4);
+    }
+}
+
+
+void dsp_graph_page_refresh_handler(void) {
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -28,6 +28,7 @@
 #include "UserDefineManage.h"
 
 static void FAN_Regulation(void);
+static void SleepingProcess(void);
 
 // ===================== 设备句柄 ===================//
 
@@ -44,6 +45,9 @@ volatile float Input_Current = 0.00f;    // 输入电流
 volatile float Input_Power   = 0.00f;    // 输入功率
 
 volatile uint8_t Fan_Duty_Cycle = 0;    // 风扇占空比
+
+volatile bool IsSleeping = false;       // 是否处于睡眠状态
+volatile int32_t SleepCounter = 0;      // 睡眠计数器
 // ===================== 任务函数 ===================//
 
 void Start_SensorTask(void *argument){
@@ -51,8 +55,9 @@ void Start_SensorTask(void *argument){
     for(;;)
     {
         counter++;
-        if(counter > 8) {   // 每1s调控一次风扇
+        if(counter > 8) {   // 每1s调控一次风扇,以及睡眠检测
             FAN_Regulation();
+            SleepingProcess();
             counter = 0;
         }
 
@@ -101,9 +106,22 @@ static void FAN_Regulation(void) {
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, ARR);
 }
 
+static void SleepingProcess(void) {
+    if (IsSleeping || UserParam.Screen_Sleeptime == 0){return;}    // 已经在睡眠模式或关闭休眠，直接返回
 
+    SleepCounter --;            // 睡眠计数器减 1
+    if (SleepCounter <= 0){     // 睡眠计数器小于等于0，进入睡眠模式
+        IsSleeping = true;
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * 10 / 100);  // 将屏幕亮度设置为10 %
+        SleepCounter = UserParam.Screen_Sleeptime;  //  重置睡眠计数器
+    }
+}
 
+void WakeUp(void) {
+    if (!IsSleeping){return;}    // 不在睡眠模式，直接返回
 
-
+    IsSleeping = false;
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * UserParam.Screen_Brightness / 100);  // 恢复屏幕亮度
+}
 
 

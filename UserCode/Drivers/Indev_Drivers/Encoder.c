@@ -214,10 +214,14 @@ void encoder_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
                                                          // 否则会吞事件，因此直接读电平传过去就行了
     data->enc_diff = (int16_t)diff;
     data->state = is_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-    if (diff != 0) {StartBeezer((0));}
+    if (diff != 0) {
+        StartBeezer(0);
+        WakeUp();                // 唤醒
+    }
     if (is_pressed == 0 && last_btn_state == 1)
     {
         StartBeezer(0);  // 按键按下 → 只响一次
+        WakeUp();                // 唤醒
     }
     last_btn_state = is_pressed;
 }
@@ -246,5 +250,6 @@ void Encoder_Scan(void)
         }
 
         osMessageQueuePut(KeyEventQueueHandle, &msg, 0, 0);
+        WakeUp();   // 唤醒设备
     }
 }

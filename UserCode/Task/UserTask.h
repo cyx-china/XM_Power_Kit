@@ -34,8 +34,8 @@ extern DMA_HandleTypeDef hdma_adc1;
 extern DMA_HandleTypeDef hdma_adc2;
 extern DMA_HandleTypeDef hdma_adc3;
 
-#define SYS_VERSION_CODE        "STM32F407VE.260415.Rel.0002"
-#define VERSION_STR             "Rel.0002"  // 固件版本号
+#define SYS_VERSION_CODE        "STM32F407VE.260501.Rel.0003"
+#define VERSION_STR             "Rel.0003"  // 固件版本号
 
 extern char Sys_Version[30];
 /*==================== InitTask ===================*/
@@ -51,6 +51,11 @@ extern volatile float Input_Power;      // 输入功率
 extern volatile float DCDC_Temperature;    // DCDC 温度
 
 extern volatile uint8_t Fan_Duty_Cycle;    // 风扇占空比
+
+extern volatile bool IsSleeping;            // 是否处于睡眠状态
+extern volatile int32_t SleepCounter;       // 睡眠计数器
+
+void WakeUp(void);
 /*================= LcdFlushTask ================*/
 typedef enum {
     REFRESH_TYPE_LVGL = 0,    // LVGL刷新
