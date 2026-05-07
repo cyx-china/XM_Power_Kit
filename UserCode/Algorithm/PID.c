@@ -39,7 +39,8 @@ PID pid_controller = {0};
 
 void PID_Init(void) {
     pid_controller.mode          = 0;           // 初始为 CV模式
-    pid_controller.hysteresis    = 0.02f;       // 死区电流
+    pid_controller.hysteresis_A  = 0.02f;       // 死区电流
+    pid_controller.hysteresis_V  = 0.05f;       // 死区电压
     pid_controller.integral_max  = 200.0f;      // 积分项最大值
     pid_controller.integral_min  = -200.0f;     // 积分项最小值
     pid_controller.result        = 0.0f;        // CC模式PID增量
@@ -55,8 +56,8 @@ void PID_Init(void) {
 
 uint16_t PID_Calculate(float measured_current, float measured_voltage) {
     // 模式切换逻辑
-    float cc_enter_threshold = Target_Current + pid_controller.hysteresis;  // 进入CC模式的电流 ： 目标电流 + 死区电流
-    float cc_exit_threshold  = Target_Current - pid_controller.hysteresis;  // 退出CC模式的电流 ： 目标电流 - 死区电流
+    float cc_enter_threshold = Target_Current + pid_controller.hysteresis_A;  // 进入CC模式的电流 ： 目标电流 + 死区电流
+    float cc_exit_threshold  = Target_Current - pid_controller.hysteresis_A;  // 退出CC模式的电流 ： 目标电流 - 死区电流
     cc_enter_threshold = fminf(cc_enter_threshold, MAX_OUTPUT_CURRENT);     // 限幅
     cc_exit_threshold  = fmaxf(cc_exit_threshold, MIN_OUTPUT_CURRENT);
 
@@ -71,7 +72,8 @@ uint16_t PID_Calculate(float measured_current, float measured_voltage) {
             cv_adjust_timer = 0;
         }
     } else { // CC→CV
-        if (measured_current <= cc_exit_threshold) {
+        bool voltage_exceed = (measured_voltage >= (Target_Voltage + pid_controller.hysteresis_V));
+        if ((measured_current <= cc_exit_threshold) || (voltage_exceed)) {
             pid_controller.mode = 0;
             PowerMode = false;
             cv_adjust_cnt = 0;

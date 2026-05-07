@@ -15,7 +15,8 @@
 
 typedef struct {
     uint8_t mode;                           // 0 = CV, 1 = CC
-    float hysteresis;                       // 电流回差（A）
+    float hysteresis_A;                     // 电流回差（A）
+    float hysteresis_V;                     // 电压回差（V）
     float integral_max;                     // CC 积分限幅正向
     float integral_min;                     // CC 积分限幅负向
     float result;                           // 本次计算的增量（仅 CC 使用）
