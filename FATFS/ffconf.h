@@ -10,10 +10,10 @@
 /---------------------------------------------------------------------------*/
 
 #define FF_FS_READONLY      0       /* 读写都支持 */
-#define FF_FS_MINIMIZE      1       /* 禁用stat/getfree/unlink/mkdir/truncate/rename */
+#define FF_FS_MINIMIZE      0
 #define FF_USE_FIND         0       /* 不需模式搜索 */
 #define FF_USE_MKFS         0       /* 不需格式化 */
-#define FF_USE_FASTSEEK     1       /* LVGLseek频繁，保留 */
+#define FF_USE_FASTSEEK     1       /* LVGL seek频繁，保留 */
 #define FF_USE_EXPAND       0
 #define FF_USE_CHMOD        0
 #define FF_USE_LABEL        0
@@ -48,7 +48,7 @@
 /---------------------------------------------------------------------------*/
 
 #define FF_FS_TINY          1       /* 文件对象只含有必要成员 */
-#define FF_FS_EXFAT         0       /* Flash通常FAT32，不需exFAT */
+#define FF_FS_EXFAT         0       /* Flash通常不需exFAT */
 
 #define FF_FS_NORTC         1       /* 无RTC，所有文件时间戳固定 */
 #define FF_NORTC_MON        1
@@ -58,8 +58,7 @@
 #define FF_FS_CRTIME        0
 #define FF_FS_NOFSINFO      0
 #define FF_FS_LOCK          3
-#define FF_FS_REENTRANT     0
-#define _SYNC_t             SemaphoreHandle_t
-#define FF_FS_TIMEOUT       pdMS_TO_TICKS(1000)
+#define FF_FS_REENTRANT     1
+#define FF_FS_TIMEOUT       1000
 
 /*--- End of configuration options ---*/
