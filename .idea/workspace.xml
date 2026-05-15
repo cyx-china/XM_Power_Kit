@@ -35,9 +35,9 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="c3042b8d-9838-4020-bfd1-dbce9002cc5a" name="更改" comment="更新了颜色翻转与休眠功能">
+    <list default="true" id="c3042b8d-9838-4020-bfd1-dbce9002cc5a" name="更改" comment="修复了校准/上位机写入导致FATFS错乱的BUG">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/FATFS/ffconf.h" beforeDir="false" afterPath="$PROJECT_DIR$/FATFS/ffconf.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/UserCode/Algorithm/PID.c" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Algorithm/PID.c" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/UserCode/Task/UserTask.h" beforeDir="false" afterPath="$PROJECT_DIR$/UserCode/Task/UserTask.h" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -222,7 +222,10 @@
       <workItem from="1777608698756" duration="3478000" />
       <workItem from="1777977114617" duration="1033000" />
       <workItem from="1778138330094" duration="8000" />
-      <workItem from="1778499814849" duration="32000" />
+      <workItem from="1778499814849" duration="92000" />
+      <workItem from="1778562012150" duration="1766000" />
+      <workItem from="1778744347795" duration="1523000" />
+      <workItem from="1778755586947" duration="3356000" />
     </task>
     <task id="LOCAL-00001" summary="完成了示波器主体功能">
       <option name="closed" value="true" />
@@ -320,7 +323,15 @@
       <option name="project" value="LOCAL" />
       <updated>1777611346135</updated>
     </task>
-    <option name="localTasksCounter" value="13" />
+    <task id="LOCAL-00013" summary="修复了校准/上位机写入导致FATFS错乱的BUG">
+      <option name="closed" value="true" />
+      <created>1778499890465</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1778499890465</updated>
+    </task>
+    <option name="localTasksCounter" value="14" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -355,7 +366,8 @@
     <MESSAGE value="更新了CDC" />
     <MESSAGE value="完成了通过CDC与上位机通信" />
     <MESSAGE value="更新了颜色翻转与休眠功能" />
-    <option name="LAST_COMMIT_MESSAGE" value="更新了颜色翻转与休眠功能" />
+    <MESSAGE value="修复了校准/上位机写入导致FATFS错乱的BUG" />
+    <option name="LAST_COMMIT_MESSAGE" value="修复了校准/上位机写入导致FATFS错乱的BUG" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

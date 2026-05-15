@@ -30,8 +30,8 @@
 extern ADC_HandleTypeDef hadc1;
 extern DMA_HandleTypeDef hdma_adc1;
 
-#define SYS_VERSION_CODE        "STM32F407VE.260505.Rel.0005"
-#define VERSION_STR             "Rel.0005"  // 固件版本号
+#define SYS_VERSION_CODE        "STM32F407VE.260505.Rel.0006"
+#define VERSION_STR             "Rel.0006"  // 固件版本号
 
 extern char Sys_Version[30];
 /*==================== InitTask ===================*/

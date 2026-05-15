@@ -12,6 +12,10 @@ volatile float Target_Current = 2.0f;       // 目标电流
 // 静态计数器：防抖+调节限速
 static uint8_t cv_adjust_cnt = 0;          // 防抖计数器
 static uint8_t cv_adjust_timer = 0;        // 调节限速计数器（记录中断次数）
+static uint8_t cc_exit_delay_cnt = 0;
+static float    Target_Current_Prev = 0.0f;    // 记录上一次CC模式下的设定值
+#define CC_EXIT_DELAY_THRESHOLD 100        // 连续 100ms（100次PID调用）才确认退出
+bool cc_extend_mode = false;               // CC下电流调整模式，0表减小，1表增大
 
 void SetTargetVoltage(float Voltage) {
     // 目标电压限幅
@@ -32,6 +36,9 @@ void SetTargetVoltage(float Voltage) {
 }
 
 void SetTargetCurrent(float Current) {
+    if (Current > Target_Current_Prev){cc_extend_mode = false;}
+    else {cc_extend_mode = true;}
+    Target_Current_Prev = Current;
     Target_Current = Current;
 }
 
@@ -39,7 +46,7 @@ PID pid_controller = {0};
 
 void PID_Init(void) {
     pid_controller.mode          = 0;           // 初始为 CV模式
-    pid_controller.hysteresis_A  = 0.02f;       // 死区电流
+    pid_controller.hysteresis_A  = 0.05f;       // 死区电流
     pid_controller.hysteresis_V  = 0.05f;       // 死区电压
     pid_controller.integral_max  = 200.0f;      // 积分项最大值
     pid_controller.integral_min  = -200.0f;     // 积分项最小值
@@ -52,6 +59,7 @@ void PID_Init(void) {
     // 初始化计数器
     cv_adjust_cnt = 0;
     cv_adjust_timer = 0;
+    Target_Current_Prev = 0.0f;
 }
 
 uint16_t PID_Calculate(float measured_current, float measured_voltage) {
@@ -72,17 +80,26 @@ uint16_t PID_Calculate(float measured_current, float measured_voltage) {
             cv_adjust_timer = 0;
         }
     } else { // CC→CV
+        // 检测退出条件
         bool voltage_exceed = (measured_voltage >= (Target_Voltage + pid_controller.hysteresis_V));
-        if ((measured_current <= cc_exit_threshold) || (voltage_exceed)) {
-            pid_controller.mode = 0;
-            PowerMode = false;
-            cv_adjust_cnt = 0;
-            cv_adjust_timer = 0;
-            // 切回CV时初始化基准DAC
-            float compensated_voltage = fmaxf(fminf(Target_Voltage, MAX_OUTPUT_VOLTAGE), MIN_OUTPUT_VOLTAGE);
-            pid_controller.current_dac = (uint16_t)roundf(
-                UserParam.DPS_Voltage_DAC_Coefficient * compensated_voltage + UserParam.DPS_Voltage_DAC_Constant
-            );
+        bool current_below_exit = (measured_current <= cc_exit_threshold);
+
+        if (current_below_exit || voltage_exceed) {
+            cc_exit_delay_cnt++;
+            if (cc_exit_delay_cnt >= CC_EXIT_DELAY_THRESHOLD) {
+                // 确认退出
+                pid_controller.mode = 0;
+                PowerMode = false;
+                cv_adjust_cnt = 0;
+                cv_adjust_timer = 0;
+                float compensated_voltage = fmaxf(fminf(Target_Voltage, MAX_OUTPUT_VOLTAGE), MIN_OUTPUT_VOLTAGE);
+                pid_controller.current_dac = (uint16_t)roundf(
+                    UserParam.DPS_Voltage_DAC_Coefficient * compensated_voltage + UserParam.DPS_Voltage_DAC_Constant);
+                cc_exit_delay_cnt = 0;  // 重置计数器
+            }
+        } else {
+            // 条件不满足，立即清零计数器
+            cc_exit_delay_cnt = 0;
         }
     }
 
@@ -133,7 +150,8 @@ uint16_t PID_Calculate(float measured_current, float measured_voltage) {
         target_dac = (target_dac < 0)    ? 0    : target_dac;
 
     } else { // CC模式 ——  增量式PID计算
-        float error = measured_current - Target_Current + 0.01f;
+        float temp = cc_extend_mode ? 0.01f : -0.01f;
+        float error = measured_current - Target_Current + temp;
         float increment = UserParam.DPS_Loop_P * (error - pid_controller.prev_error)
                         + UserParam.DPS_Loop_I * error
                         + UserParam.DPS_Loop_D * (error - 2.0f * pid_controller.prev_error + pid_controller.prev_prev_error);
