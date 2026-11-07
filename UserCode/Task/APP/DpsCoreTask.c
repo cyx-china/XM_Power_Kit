@@ -30,6 +30,7 @@
 #include "SwitchManager.h"
 #include "UserTask.h"
 #include "PID.h"
+#include "format.h"
 
 /* ========================== 宏定义 ========================== */
 /**
@@ -280,14 +281,9 @@ void dps_main_page_refresh_handler(void);       // 主界面刷新函数
 void dsp_graph_page_refresh_handler(void);      // 曲线界面刷新函数
 
 // 格式化工具函数
-int float_to_fixed_digits(float value, uint8_t target_digits, char *buf);
 void formatFloatMessage(float voltage, float current, char *message);
 void formatTempMessage(float temp, char *message);
 void formatOutputMessage(float value, char *message);
-int float_to_fixed_00_00(float value, char *buf);
-int float_to_0000_000Wh(double value, char *buf);
-int seconds_to_hms_format(uint32_t time, char *buf);
-int uint8_to_000_percent(uint8_t value, char *buf);
 
 // ADC相关函数
 void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc);  // ADC转换完成回调
@@ -299,7 +295,6 @@ void Start_DpsCoreTask(void *argument);                     // DPS核心任务�
 void Start_PIDTask(void *argument);                         // PID运算子任务入口
 
 // 通用辅助函数
-static void append_padded_uint(char **p, uint32_t val, uint8_t width);              // 无符号数补0追加到字符串
 static void digit_page_handler(KeyEventMsg_t msg, const DigitEditContext_t *ctx);   // 数位编辑通用处理
 static void apply_quick_set_by_index(uint8_t index);                                // 应用指定索引的快速设置参数
 
@@ -329,109 +324,7 @@ static void (*page_refreshers[PAGE_NUM])(void) = {
     [PAGE_MAIN_GRAPH] = dsp_graph_page_refresh_handler
 };
 
-/* ========================== 通用辅助函数实现 ========================== */
-/**
- * @brief  无符号整数按指定宽度补0后追加到字符串
- * @param  p: 字符串指针的指针（指向待追加位置）
- * @param  val: 待处理的无符号整数
- * @param  width: 目标宽度（不足补0，超过保留原数）
- * @retval 无
- * @note   val为0时直接填充width个0，确保输出字符串长度符合宽度要求
- */
-static void append_padded_uint(char **p, uint32_t val, uint8_t width) {
-    char tmp[16];
-    uint8_t n = 0;
-
-    // 数值为0时直接填充指定宽度的0
-    if (val == 0) {
-        for (uint8_t i = 0; i < width; i++) *(*p)++ = '0';
-        return;
-    }
-
-    // 拆分数字到临时缓冲区（逆序）
-    while (val > 0) {
-        tmp[n++] = (val % 10) + '0';
-        val /= 10;
-    }
-
-    // 补0到指定宽度
-    while (n < width) tmp[n++] = '0';
-
-    // 逆序写回目标字符串
-    while (n--) *(*p)++ = tmp[n];
-}
-
 /* ========================== 格式化工具函数实现 ========================== */
-/**
- * @brief  将浮点数格式化为指定位数的字符串（自动调整小数位）
- * @param  value: 待格式化的浮点数
- * @param  target_digits: 目标总位数（2~5）
- * @param  buf: 输出字符串缓冲区
- * @retval 输出字符串长度
- * @note   自动根据数值大小调整小数位数，确保显示精度
- */
-int float_to_fixed_digits(float value, uint8_t target_digits, char *buf) {
-    // 边界值保护
-    if (target_digits < 2) target_digits = 2;
-    if (target_digits > 5) target_digits = 5;
-    if (value < 0) value = -value;
-
-    // 数值上限保护
-    float maxv[] = {0, 0, 99.9f, 999.f, 9999.f, 99999.f};
-    if (value > maxv[target_digits]) value = maxv[target_digits];
-
-    char *p = buf;
-    int dec_digits;
-
-    // 根据数值大小确定小数位数
-    if (value >= 100.f) dec_digits = (target_digits >= 4) ? (target_digits - 3) : 0;
-    else if (value >= 10.f) dec_digits = target_digits - 2;
-    else dec_digits = target_digits - 1;
-    if (dec_digits < 1) dec_digits = 1;
-
-    // 放大数值为整数处理
-    float scale = 1.0f;
-    for (int i = 0; i < dec_digits; i++) scale *= 10.0f;
-    uint32_t ival = (uint32_t) (value * scale + 0.5f);
-    uint32_t int_part = ival / (uint32_t) scale;
-    uint32_t frac_part = ival % (uint32_t) scale;
-
-    // 进位处理：数值超过阈值时减少小数位
-    uint32_t carry_threshold = (value >= 100.f) ? 1000 : (value >= 10.f ? 100 : 10);
-    if (int_part >= carry_threshold && dec_digits > 1) {
-        dec_digits--;
-        frac_part /= 10;
-    }
-
-    // 写入整数部分
-    if (int_part == 0) *p++ = '0';
-    else {
-        char tmp[8];
-        int n = 0;
-        uint32_t t = int_part;
-        do {
-            tmp[n++] = (t % 10) + '0';
-            t /= 10;
-        } while (t > 0);
-        while (n--) *p++ = tmp[n];
-    }
-
-    // 写入小数点
-    *p++ = '.';
-
-    // 写入小数部分
-    char frac_buf[6];
-    for (int i = 0; i < dec_digits; i++) {
-        frac_buf[i] = (frac_part % 10) + '0';
-        frac_part /= 10;
-    }
-    for (int i = dec_digits - 1; i >= 0; i--) *p++ = frac_buf[i];
-
-    // 字符串结束符
-    *p = '\0';
-    return (int) (p - buf);
-}
-
 /**
  * @brief  格式化电压+电流为显示字符串（格式：XX.XXV XX.XXA）
  * @param  voltage: 电压值（V）
@@ -441,10 +334,10 @@ int float_to_fixed_digits(float value, uint8_t target_digits, char *buf) {
  */
 void formatFloatMessage(float voltage, float current, char *message) {
     char *p = message;
-    p += float_to_fixed_digits(voltage, 3, p);
+    p += fmt_fixed_digits(voltage, 3, p);
     *p++ = 'V';
     *p++ = ' ';
-    p += float_to_fixed_digits(current, 3, p);
+    p += fmt_fixed_digits(current, 3, p);
     *p++ = 'A';
     *p = '\0';
 }
@@ -457,7 +350,7 @@ void formatFloatMessage(float voltage, float current, char *message) {
  */
 void formatTempMessage(float temp, char *message) {
     char *p = message;
-    p += float_to_fixed_digits(temp, 3, p);
+    p += fmt_fixed_digits(temp, 3, p);
     *p++ = 'C';
     *p = '\0';
 }
@@ -470,114 +363,11 @@ void formatTempMessage(float temp, char *message) {
  */
 void formatOutputMessage(float value, char *message) {
     char *p = message;
-    p += float_to_fixed_digits(value, 4, p);
+    p += fmt_fixed_digits(value, 4, p);
     *p = '\0';
 }
 
 /**
- * @brief  将浮点数格式化为XX.XX格式的字符串（固定2位小数）
- * @param  value: 待格式化数值（V/A）
- * @param  buf: 输出字符串缓冲区
- * @retval 输出字符串长度（固定5）
- * @note   数值范围限制：0.01 ~ MAX_OUTPUT_VOLTAGE
- */
-int float_to_fixed_00_00(float value, char *buf) {
-    // 边界值保护
-    if (value < 0.01f) value = 0.01f;
-    if (value > MAX_OUTPUT_VOLTAGE) value = MAX_OUTPUT_VOLTAGE;
-
-    // 转换为百分位整数
-    uint16_t ival = (uint16_t) (value * 100.0f + 0.5f);
-    char *p = buf;
-
-    // 写入整数部分（2位补0）
-    append_padded_uint(&p, ival / 100, 2);
-    *p++ = '.';
-
-    // 写入小数部分（2位补0）
-    append_padded_uint(&p, ival % 100, 2);
-    *p = '\0';
-
-    return 5;
-}
-
-/**
- * @brief  将能量值格式化为XXXX.XXXWh格式的字符串
- * @param  value: 能量值（Wh）
- * @param  buf: 输出字符串缓冲区
- * @retval 输出字符串长度（固定9）
- * @note   数值范围限制：0 ~ 9999.999
- */
-int float_to_0000_000Wh(double value, char *buf) {
-    // 边界值保护
-    if (value < 0) value = -value;
-    if (value > 9999.999) value = 9999.999;
-
-    // 转换为毫瓦时整数（用 double 运算，否则 9999 量级上 float 的最小步进已达 1mWh）
-    uint32_t ival = (uint32_t) (value * 1000.0 + 0.5);
-    char *p = buf;
-
-    // 写入整数部分（4位补0）
-    append_padded_uint(&p, ival / 1000, 4);
-    *p++ = '.';
-
-    // 写入小数部分（3位补0）
-    append_padded_uint(&p, ival % 1000, 3);
-    *p++ = 'W';
-    *p++ = 'h';
-    *p = '\0';
-
-    return 9;
-}
-
-/**
- * @brief  将秒数格式化为XXX:XX:XX格式的时间字符串
- * @param  time: 时长（秒）
- * @param  buf: 输出字符串缓冲区
- * @retval 成功返回8，失败返回-1
- * @note   小时数上限999，超过则固定为999:59:59
- */
-int seconds_to_hms_format(uint32_t time, char *buf) {
-    if (!buf) return -1;
-
-    // 拆分时分秒
-    uint32_t h = time / 3600, m = (time % 3600) / 60, s = time % 60;
-
-    // 小时数上限保护
-    if (h > 999) {
-        h = 999;
-        m = 59;
-        s = 59;
-    }
-
-    char *p = buf;
-    append_padded_uint(&p, h, 3);
-    *p++ = ':';
-    append_padded_uint(&p, m, 2);
-    *p++ = ':';
-    append_padded_uint(&p, s, 2);
-    *p = '\0';
-
-    return 8;
-}
-
-/**
- * @brief  将uint8_t数值格式化为XXX%格式的百分比字符串
- * @param  value: 百分比值（0~100）
- * @param  buf: 输出字符串缓冲区
- * @retval 成功返回4，失败返回-1
- */
-int uint8_to_000_percent(uint8_t value, char *buf) {
-    if (!buf) return -1;
-
-    char *p = buf;
-    append_padded_uint(&p, value, 3);
-    *p++ = '%';
-    *p = '\0';
-
-    return 4;
-}
-
 /* ========================== ADC相关函数实现 ========================== */
 /**
  * @brief  按 TIM8 的实际配置刷新能量积分步长
@@ -713,7 +503,7 @@ static void digit_page_handler(KeyEventMsg_t msg, const DigitEditContext_t *ctx)
     else if (msg.event == ENCODER_EVENT_RIGHT) {
         *ctx->pTarget = fminf(*ctx->pTarget + 0.01f * dps_pow10_table[*pCurrent],
                               (ctx == &volt_ctx ? MAX_OUTPUT_VOLTAGE : MAX_OUTPUT_CURRENT));
-        float_to_fixed_00_00(*ctx->pTarget, ctx->pSetMsg);
+        fmt_fixed_00_00(*ctx->pTarget, MAX_OUTPUT_VOLTAGE, ctx->pSetMsg);
         lcd_draw_string(197, ctx->yValue, ctx->pSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
         if (ctx == &volt_ctx) SetTargetVoltage(*ctx->pTarget);
         else SetTargetCurrent(*ctx->pTarget);
@@ -725,7 +515,7 @@ static void digit_page_handler(KeyEventMsg_t msg, const DigitEditContext_t *ctx)
     else if (msg.event == ENCODER_EVENT_LEFT) {
         *ctx->pTarget = fmaxf(*ctx->pTarget - 0.01f * dps_pow10_table[*pCurrent],
                               (ctx == &volt_ctx ? MIN_OUTPUT_VOLTAGE : MIN_OUTPUT_CURRENT));
-        float_to_fixed_00_00(*ctx->pTarget, ctx->pSetMsg);
+        fmt_fixed_00_00(*ctx->pTarget, MAX_OUTPUT_VOLTAGE, ctx->pSetMsg);
         lcd_draw_string(197, ctx->yValue, ctx->pSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
         if (ctx == &volt_ctx) SetTargetVoltage(*ctx->pTarget);
         else SetTargetCurrent(*ctx->pTarget);
@@ -1070,7 +860,7 @@ static void UpdateLableValues(void) {
 
     // 更新能量显示（仅电源开启时）
     if (IsPowerOn) {
-        float_to_0000_000Wh(DPS_GetEnergy(), EnergyMsg);
+        fmt_energy_wh(DPS_GetEnergy(), EnergyMsg);
         lcd_draw_string(188, 215, EnergyMsg, &KaiTi16x20, 0xFFFF, 0x31e8, -3);
     }
 
@@ -1215,12 +1005,12 @@ void quick_menu_handler(KeyEventMsg_t msg) {
         previous_page = PAGE_QUICK_MENU;
 
         // 更新电压设置显示和进度条
-        float_to_fixed_00_00(Target_Voltage, VoltageSetMsg);
+        fmt_fixed_00_00(Target_Voltage, MAX_OUTPUT_VOLTAGE, VoltageSetMsg);
         lcd_draw_string(197, 54, VoltageSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
         DrawVoltageBar(Target_Voltage);
 
         // 更新电流设置显示和进度条
-        float_to_fixed_00_00(Target_Current, Current_SetMsg);
+        fmt_fixed_00_00(Target_Current, MAX_OUTPUT_VOLTAGE, Current_SetMsg);
         lcd_draw_string(197, 106, Current_SetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
         DrawCurrentBar(Target_Current);
 
@@ -1240,9 +1030,9 @@ void quick_menu_handler(KeyEventMsg_t msg) {
         previous_page = PAGE_QUICK_MENU;
 
         // 恢复电压/电流设置显示
-        float_to_fixed_00_00(Target_Voltage, VoltageSetMsg);
+        fmt_fixed_00_00(Target_Voltage, MAX_OUTPUT_VOLTAGE, VoltageSetMsg);
         lcd_draw_string(197, 54, VoltageSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
-        float_to_fixed_00_00(Target_Current, Current_SetMsg);
+        fmt_fixed_00_00(Target_Current, MAX_OUTPUT_VOLTAGE, Current_SetMsg);
         lcd_draw_string(197, 106, Current_SetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
 
         // 恢复主界面输出数据刷新
@@ -1545,13 +1335,13 @@ void dps_main_page_refresh_handler(void) {
     if (Time_update_time_count >= 100) {
         Time_update_time_count = 0;
         running_time++;
-        seconds_to_hms_format(running_time, TimeMsg);
+        fmt_hms(running_time, TimeMsg);
         lcd_draw_string(33, 215, TimeMsg, &KaiTi16x20, 0xFFFF, 0x31e8, -3);
     }
     // 每1s更新一次风扇状态（100×10ms）
     if (Fan_update_time_count >= 100) {
         Fan_update_time_count = 0;
-        uint8_to_000_percent(Fan_Duty_Cycle, FanMsg);
+        fmt_percent_u8(Fan_Duty_Cycle, FanMsg);
         lcd_draw_string(262, 5, FanMsg, &KaiTi16x20, 0xef7d, 0x31e8, -4);
     }
 }

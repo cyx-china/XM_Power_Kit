@@ -19,6 +19,7 @@
 
 /* ============================ 头文件包含 ============================ */
 #include "DsoCoreTask.h"
+#include "format.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -847,20 +848,20 @@ static void format_frequency(float freq_khz, char *buffer, size_t buffer_size) {
     // <10KHz：保留3位小数
     if (freq_khz < 10.0f) {
         rounded = roundf(freq_khz * 1000.0f) / 1000.0f;
-        snprintf(buffer, buffer_size, "%.3fKHz", rounded);
+        fmt_fixed_unit(buffer, buffer_size, rounded, 3, 0, 0, "KHz");
         return;
     }
 
     // 10~100KHz：保留2位小数，整数补零到2位
     if (freq_khz < 100.0f) {
         rounded = roundf(freq_khz * 100.0f) / 100.0f;
-        snprintf(buffer, buffer_size, "%05.2fKHz", rounded);
+        fmt_fixed_unit(buffer, buffer_size, rounded, 2, 5, FMT_ZERO_PAD, "KHz");
         return;
     }
 
     // ≥100KHz：保留1位小数，整数补零到3位
     rounded = roundf(freq_khz * 10.0f) / 10.0f;
-    snprintf(buffer, buffer_size, "%05.1fKHz", rounded);
+    fmt_fixed_unit(buffer, buffer_size, rounded, 1, 5, FMT_ZERO_PAD, "KHz");
 }
 
 /**
@@ -876,7 +877,7 @@ static void format_percentage(float value, char *buffer, size_t buffer_size) {
     // <10%：保留2位小数
     if (value < 10.0f) {
         rounded = roundf(value * 100.0f) / 100.0f;
-        snprintf(buffer, buffer_size, "%.2f%%", rounded);
+        fmt_fixed_unit(buffer, buffer_size, rounded, 2, 0, 0, "%");
         return;
     }
 
@@ -886,7 +887,7 @@ static void format_percentage(float value, char *buffer, size_t buffer_size) {
     if (rounded >= 100.0f - 1e-6f) {
         snprintf(buffer, buffer_size, "100%%");
     } else {
-        snprintf(buffer, buffer_size, "%04.1f%%", rounded);
+        fmt_fixed_unit(buffer, buffer_size, rounded, 1, 4, FMT_ZERO_PAD, "%");
     }
 }
 
@@ -907,21 +908,21 @@ static void format_voltage(float voltage_v, char *buffer, size_t buffer_size) {
         // <10mV：保留3位小数
         if (value < 10.0f) {
             rounded = roundf(value * 1000.0f) / 1000.0f;
-            snprintf(buffer, buffer_size, "%.3fmV", rounded);
+            fmt_fixed_unit(buffer, buffer_size, rounded, 3, 0, 0, "mV");
             return;
         }
 
         // 10~100mV：保留2位小数，整数补零到2位
         if (value < 100.0f) {
             rounded = roundf(value * 100.0f) / 100.0f;
-            snprintf(buffer, buffer_size, "%05.2fmV", rounded);
+            fmt_fixed_unit(buffer, buffer_size, rounded, 2, 5, FMT_ZERO_PAD, "mV");
             return;
         }
 
         // 100~1000mV：保留1位小数，整数补零到3位
         rounded = roundf(value * 10.0f) / 10.0f;
         if (rounded < 1000.0f) {
-            snprintf(buffer, buffer_size, "%05.1fmV", rounded);
+            fmt_fixed_unit(buffer, buffer_size, rounded, 1, 5, FMT_ZERO_PAD, "mV");
             return;
         }
 
@@ -935,13 +936,13 @@ static void format_voltage(float voltage_v, char *buffer, size_t buffer_size) {
     // 1~10V：保留3位小数
     if (value < 10.0f) {
         rounded = roundf(value * 1000.0f) / 1000.0f;
-        snprintf(buffer, buffer_size, "%.3fV", rounded);
+        fmt_fixed_unit(buffer, buffer_size, rounded, 3, 0, 0, "V");
         return;
     }
 
     // ≥10V：保留2位小数，整数补零到2位
     rounded = roundf(value * 100.0f) / 100.0f;
-    snprintf(buffer, buffer_size, "%05.2fV", rounded);
+    fmt_fixed_unit(buffer, buffer_size, rounded, 2, 5, FMT_ZERO_PAD, "V");
 }
 
 /* ============================ 硬件初始化/反初始化函数 ============================ */

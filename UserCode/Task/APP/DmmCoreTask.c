@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "format.h"
 #include <stdlib.h>
 #include <math.h>
 
@@ -278,22 +279,11 @@ static void DrawDmmMainBasicElement(void) {
  *         2. 千分位提取：绝对值×1000后取个位，修正浮点误差
  */
 int FormatFloatWithThousandth(float num, char *formatted_buf, char *thousandth_buf) {
-    // 空指针校验
     if (formatted_buf == NULL || thousandth_buf == NULL) {
         return -1;
     }
-
-    // 格式化为主字符串（±00.00）
-    snprintf(formatted_buf, 8, "%+06.2f", num);
-
-    // 提取千分位（修正浮点误差）
-    double scaled = fabs(num) * 1000.0 + 1e-6;
-    int thousandth_digit = (int)scaled % 10;
-
-    // 转换为字符并补结束符
-    thousandth_buf[0] = '0' + thousandth_digit;
-    thousandth_buf[1] = '\0';
-
+    // ±00.00 + 千分位（第 3 位小数）
+    fmt_fixed_ex(formatted_buf, 8, num, 2, 6, FMT_SIGN | FMT_ZERO_PAD, thousandth_buf, 1);
     return 0;
 }
 
@@ -307,22 +297,11 @@ int FormatFloatWithThousandth(float num, char *formatted_buf, char *thousandth_b
  *         2. 万分位提取：绝对值×10000后取个位，修正浮点误差
  */
 int FormatFloatWithTenThousandth(float num, char *formatted_buf, char *tenthousandth_buf) {
-    // 空指针校验
     if (formatted_buf == NULL || tenthousandth_buf == NULL) {
         return -1;
     }
-
-    // 格式化为主字符串（±0.000）
-    snprintf(formatted_buf, 8, "%+06.3f", num);
-
-    // 提取万分位（修正浮点误差）
-    double scaled = fabs(num) * 10000.0 + 1e-7;
-    int tenthousandth_digit = (int)scaled % 10;
-
-    // 转换为字符并补结束符
-    tenthousandth_buf[0] = '0' + tenthousandth_digit;
-    tenthousandth_buf[1] = '\0';
-
+    // ±0.000 + 万分位（第 4 位小数）
+    fmt_fixed_ex(formatted_buf, 8, num, 3, 6, FMT_SIGN | FMT_ZERO_PAD, tenthousandth_buf, 1);
     return 0;
 }
 
@@ -336,22 +315,11 @@ int FormatFloatWithTenThousandth(float num, char *formatted_buf, char *tenthousa
  *         2. 百分位提取：绝对值×100后取个位，修正浮点误差
  */
 int FormatFloatWithHundredth(float num, char *formatted_buf, char *hundredth_buf) {
-    // 空指针校验
     if (formatted_buf == NULL || hundredth_buf == NULL) {
         return -1;
     }
-
-    // 格式化为主字符串（0000.0）
-    snprintf(formatted_buf, 8, "%06.1f", num);
-
-    // 提取百分位（修正浮点误差）
-    double scaled = fabs(num) * 100.0 + 1e-5;
-    int hundredth_digit = (int)scaled % 10;
-
-    // 转换为字符并补结束符
-    hundredth_buf[0] = '0' + hundredth_digit;
-    hundredth_buf[1] = '\0';
-
+    // 0000.0 + 百分位（第 2 位小数）
+    fmt_fixed_ex(formatted_buf, 8, num, 1, 6, FMT_ZERO_PAD, hundredth_buf, 1);
     return 0;
 }
 
@@ -365,27 +333,11 @@ int FormatFloatWithHundredth(float num, char *formatted_buf, char *hundredth_buf
  *         2. 千/万分位提取：分别×1000/10000后取个位，修正浮点误差
  */
 int FormatFloatWithTwoDigits(float num, char *formatted_buf, char *digits_buf) {
-    // 空指针校验
     if (formatted_buf == NULL || digits_buf == NULL) {
         return -1;
     }
-
-    // 格式化为主字符串（00.00）
-    snprintf(formatted_buf, 8, "%05.2f", num);
-
-    // 提取千分位
-    double scaled_thou = fabs(num) * 1000.0 + 1e-7;
-    int thousandth_digit = (int)scaled_thou % 10;
-    digits_buf[0] = '0' + thousandth_digit;
-
-    // 提取万分位
-    double scaled_ten_thou = fabs(num) * 10000.0 + 1e-7;
-    int tenthousandth_digit = (int)scaled_ten_thou % 10;
-    digits_buf[1] = '0' + tenthousandth_digit;
-
-    // 补字符串结束符
-    digits_buf[2] = '\0';
-
+    // 00.00 + 千分位/万分位
+    fmt_fixed_ex(formatted_buf, 8, num, 2, 5, FMT_ZERO_PAD, digits_buf, 2);
     return 0;
 }
 

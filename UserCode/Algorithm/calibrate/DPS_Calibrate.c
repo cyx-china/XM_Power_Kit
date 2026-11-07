@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include "format.h"
 #include <stdio.h>
 #include <tgmath.h>
 
@@ -253,7 +254,7 @@ static void DpsCal_Origin_Current_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_round_rect(220,200,305,231,8,0x632C,0);
             lcd_draw_string(25,208,"电压系数:", &yahei16x16,0xFFFF,0x18c6,1);
             // 更新编辑框数据
-            snprintf(DpsVoltageDisplayMsg, sizeof(DpsVoltageDisplayMsg), "%05.2f", UserParam.DPS_Voltage_Factor);
+            fmt_fixed(DpsVoltageDisplayMsg, sizeof(DpsVoltageDisplayMsg), UserParam.DPS_Voltage_Factor, 2, 5, FMT_ZERO_PAD);
             lcd_draw_string(110,207,DpsVoltageDisplayMsg, &yahei18x18,0xFFFF,0x18c6,0);
             // 更新数据显示单位
             lcd_draw_string(256,118,"V", &KaiTi16x20,0xeb0c,0x0000,0);
@@ -326,7 +327,7 @@ static void DpsCal_Display_Voltage_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_string(256,118,"A", &KaiTi16x20,0x5cbd,0x0000,0);
             
             lcd_draw_string(25,208,"电流系数:", &yahei16x16,0xFFFF,0x18c6,1);
-            snprintf(DpsCurrentDisplayMsg, sizeof(DpsCurrentDisplayMsg), "%05.2f", UserParam.DPS_Current_Factor);
+            fmt_fixed(DpsCurrentDisplayMsg, sizeof(DpsCurrentDisplayMsg), UserParam.DPS_Current_Factor, 2, 5, FMT_ZERO_PAD);
             lcd_draw_string(110,207,DpsCurrentDisplayMsg, &yahei18x18,0xFFFF,0x18c6,0);
             
             lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
@@ -364,7 +365,7 @@ static void DpsCal_Display_Voltage_Edit_handler(KeyEventMsg_t msg) {
     }
     else {return;}
     StartBeezer(0);
-    snprintf(DpsVoltageDisplayMsg, sizeof(DpsVoltageDisplayMsg), "%05.2f", UserParam.DPS_Voltage_Factor);
+    fmt_fixed(DpsVoltageDisplayMsg, sizeof(DpsVoltageDisplayMsg), UserParam.DPS_Voltage_Factor, 2, 5, FMT_ZERO_PAD);
     lcd_draw_string(110,207,DpsVoltageDisplayMsg, &yahei18x18,0xFFFF,0x18c6,0);
 }
 
@@ -437,7 +438,7 @@ static void DpsCal_Display_Current_Edit_handler(KeyEventMsg_t msg) {
     }
     else {return;}
     StartBeezer(0);
-    snprintf(DpsCurrentDisplayMsg, sizeof(DpsCurrentDisplayMsg), "%05.2f", UserParam.DPS_Current_Factor);
+    fmt_fixed(DpsCurrentDisplayMsg, sizeof(DpsCurrentDisplayMsg), UserParam.DPS_Current_Factor, 2, 5, FMT_ZERO_PAD);
     lcd_draw_string(110,207,DpsCurrentDisplayMsg, &yahei18x18,0xFFFF,0x18c6,0);
 }
 
@@ -517,19 +518,19 @@ static void DpsCal_Output_Main_handler(KeyEventMsg_t msg) {
 
 // 更新电压显示 (+0.000)
 static void Refresh_DpsCal_Origin_Voltage(void) {
-    snprintf(Current_Voltage_str, sizeof(Current_Voltage_str), "%+06.3f", Voltage);
+    fmt_fixed(Current_Voltage_str, sizeof(Current_Voltage_str), Voltage, 3, 6, FMT_SIGN | FMT_ZERO_PAD);
     lcd_draw_string(58,90,Current_Voltage_str, &DIN_Medium32x48,0xeb0c,0x0000,2);
 }
 
 // 更新电流显示 (+0.000)
 static void Refresh_DpsCal_Origin_Current(void) {
-    snprintf(Current_Current_str, sizeof(Current_Current_str), "%+06.3f", Current_PID);
+    fmt_fixed(Current_Current_str, sizeof(Current_Current_str), Current_PID, 3, 6, FMT_SIGN | FMT_ZERO_PAD);
     lcd_draw_string(58,90,Current_Current_str, &DIN_Medium32x48,0x5cbd,0x0000,2);
 }
 
 // 更新电压显示 (00.00)
 static void Refresh_DpsCal_Display_Voltage(void) {
-    snprintf(Current_Voltage_str, sizeof(Current_Voltage_str), "%+06.2f", Voltage);
+    fmt_fixed(Current_Voltage_str, sizeof(Current_Voltage_str), Voltage, 2, 6, FMT_SIGN | FMT_ZERO_PAD);
     lcd_draw_string(58,90,Current_Voltage_str, &DIN_Medium32x48,0xeb0c,0x0000,2);
 }
 

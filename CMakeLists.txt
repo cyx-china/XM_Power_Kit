@@ -124,7 +124,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 )
 
 
-# 添加浮点数支持（_printf_float 由 %f 的实际使用间接引入，无需 -u 强制链接）
+# 浮点打印：全工程禁用 printf 系函数的 %f（统一走 UserCode/Utils/format.h 的定点格式化），
+# 因此不再需要 -u _printf_float（该选项会把 _printf_float/_dtoa_r 整套代码链进镜像，约 4KB）。
 set(CMAKE_SYSTEM_PROCESSOR cortex-m4)
 set(MCU_FLAGS "-mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard")
 

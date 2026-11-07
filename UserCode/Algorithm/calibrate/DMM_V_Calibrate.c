@@ -1,4 +1,5 @@
 #include "DMM_V_Calibrate.h"
+#include "format.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include "lcd_draw_api.h"
@@ -151,7 +152,7 @@ static void DmmVCal_Origin_Main_handler(KeyEventMsg_t msg)
             lcd_draw_string(25,208,"正接系数:", &yahei16x16,0xFFFF,0x18c6,1);
 
             // 更新编辑框数据
-            snprintf(Dmm_V_Positive_Msg, sizeof(Dmm_V_Positive_Msg), "%05.2f", UserParam.DMM_Voltage_Factor_R);
+            fmt_fixed(Dmm_V_Positive_Msg, sizeof(Dmm_V_Positive_Msg), UserParam.DMM_Voltage_Factor_R, 2, 5, FMT_ZERO_PAD);
             lcd_draw_string(110,207,Dmm_V_Positive_Msg, &yahei18x18,0xFFFF,0x18c6,0);
 
             // 更新进度框
@@ -245,7 +246,7 @@ static void DmmVCal_Positive_Main_handler(KeyEventMsg_t msg)
             lcd_draw_string(25,208,"反接系数:", &yahei16x16,0xFFFF,0x18c6,1);
 
             // 更新编辑框数据
-            snprintf(Dmm_V_Positive_Msg, sizeof(Dmm_V_Positive_Msg), "%05.2f", UserParam.DMM_Voltage_Factor_B);
+            fmt_fixed(Dmm_V_Positive_Msg, sizeof(Dmm_V_Positive_Msg), UserParam.DMM_Voltage_Factor_B, 2, 5, FMT_ZERO_PAD);
             lcd_draw_string(110,207,Dmm_V_Positive_Msg, &yahei18x18,0xFFFF,0x18c6,0);
 
             // 更新进度框
@@ -300,7 +301,7 @@ static void DmmVCal_Positive_Edit_handler(KeyEventMsg_t msg)
     }
 
     StartBeezer(0);
-    snprintf(Dmm_V_Positive_Msg, sizeof(Dmm_V_Positive_Msg), "%05.2f", UserParam.DMM_Voltage_Factor_R);
+    fmt_fixed(Dmm_V_Positive_Msg, sizeof(Dmm_V_Positive_Msg), UserParam.DMM_Voltage_Factor_R, 2, 5, FMT_ZERO_PAD);
     lcd_draw_string(110,207,Dmm_V_Positive_Msg, &yahei18x18,0xFFFF,0x18c6,0);
 }
 
@@ -379,7 +380,7 @@ static void DmmVCal_Negative_Edit_handler(KeyEventMsg_t msg)
     }
 
     StartBeezer(0);
-    snprintf(Dmm_V_Negative_Msg, sizeof(Dmm_V_Negative_Msg), "%05.2f", UserParam.DMM_Voltage_Factor_B);
+    fmt_fixed(Dmm_V_Negative_Msg, sizeof(Dmm_V_Negative_Msg), UserParam.DMM_Voltage_Factor_B, 2, 5, FMT_ZERO_PAD);
     lcd_draw_string(110,207,Dmm_V_Negative_Msg, &yahei18x18,0xFFFF,0x18c6,0);
 }
 

@@ -1,4 +1,5 @@
 #include "DMM_A_Calibrate.h"
+#include "format.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include "lcd_draw_api.h"
@@ -150,7 +151,7 @@ static void DmmACal_Origin_Main_handler(KeyEventMsg_t msg)
             lcd_draw_string(25, 208, "电流系数:", &yahei16x16, 0xFFFF, 0x18c6, 1);
 
             // 更新编辑框数据
-            snprintf(Dmm_A_coefficient_Msg, sizeof(Dmm_A_coefficient_Msg), "%05.2f", UserParam.DMM_Current_Factor);
+            fmt_fixed(Dmm_A_coefficient_Msg, sizeof(Dmm_A_coefficient_Msg), UserParam.DMM_Current_Factor, 2, 5, FMT_ZERO_PAD);
             lcd_draw_string(110, 207, Dmm_A_coefficient_Msg, &yahei18x18, 0xFFFF, 0x18c6, 0);
 
             lcd_draw_round_rect(18, 47, 108, 73, 8, 0x632C, 1);
@@ -278,6 +279,6 @@ static void DmmACal_Coefficient_Edit_handler(KeyEventMsg_t msg)
     }
 
     StartBeezer(0);
-    snprintf(Dmm_A_coefficient_Msg, sizeof(Dmm_A_coefficient_Msg), "%05.2f", UserParam.DMM_Current_Factor);
+    fmt_fixed(Dmm_A_coefficient_Msg, sizeof(Dmm_A_coefficient_Msg), UserParam.DMM_Current_Factor, 2, 5, FMT_ZERO_PAD);
     lcd_draw_string(110, 207, Dmm_A_coefficient_Msg, &yahei18x18, 0xFFFF, 0x18c6, 0);
 }

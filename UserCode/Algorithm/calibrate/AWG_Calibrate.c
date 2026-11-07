@@ -1,4 +1,5 @@
 #include "AWG_Calibrate.h"
+#include "format.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -103,11 +104,11 @@ static void AwgCal_Origin_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_round_rect(15,200,212,231,8,0x07E0,0);
             lcd_draw_round_rect(220,200,305,231,8,0x632C,0);
             lcd_draw_string(25,208,"输出系数:", &yahei16x16,0xFFFF,0x18c6,1);
-            snprintf(AwgAmpMsg, sizeof(AwgAmpMsg), "%.3f", UserParam.DDS_Factor);
+            fmt_fixed(AwgAmpMsg, sizeof(AwgAmpMsg), UserParam.DDS_Factor, 3, 0, 0);
             lcd_draw_string(110,207,AwgAmpMsg, &yahei18x18,0xFFFF,0x18c6,2);
 
-            lcd_draw_string(25,165,"请接万用表，使数值接近0.15。", &yahei16x16,0xdf3c,0x29a7,1);
-            WaveGen_DC(1000, 0, 0.15f, 0);      // 生成1V
+            lcd_draw_string(25,165,"请接万用表，使数值接近1V。", &yahei16x16,0xdf3c,0x29a7,1);
+            WaveGen_DC(1000, 0, 1.0f, 0);      // 生成1V
 
             lcd_draw_round_rect(18,47,108,73,8,0x632C,1);
             lcd_draw_string(28, 52, "原点校准", &yahei16x16, 0xDEFB, 0x632C, 2);
@@ -199,10 +200,10 @@ static void AwgCal_Output_Edit_handler(KeyEventMsg_t msg) {
     }
     else {return;}
     StartBeezer(0);
-    snprintf(AwgAmpMsg, sizeof(AwgAmpMsg), "%.3f", UserParam.DDS_Factor);
+    fmt_fixed(AwgAmpMsg, sizeof(AwgAmpMsg), UserParam.DDS_Factor, 3, 0, 0);
     lcd_draw_string(110,207,AwgAmpMsg, &yahei18x18,0xFFFF,0x18c6,2);
 
-    WaveGen_DC(1000, 0, 0.15f, 0);      // 生成1V
+    WaveGen_DC(1000, 0, 1.0f, 0);
 
 }
 

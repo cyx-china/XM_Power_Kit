@@ -7,6 +7,7 @@
 ******************************************************************************/
 
 #include "INA226_Driver.h"
+#include "format.h"
 #include <stdio.h>
 #include <string.h>
 #include "i2c.h"
@@ -190,15 +191,22 @@ void PrintINA226Data(INA226_HandleTypeDef* dev, UART_HandleTypeDef* huart) {
     uint16_t raw_power = INA226_ReadRegister(dev, INA226_POWER_REG);
     uint16_t raw_config = INA226_ReadRegister(dev, INA226_CONFIG_REG);
     uint16_t raw_calibration = INA226_ReadRegister(dev, INA226_CALIB_REG);
-    uint16_t raw_mask_enable = INA226_ReadRegister(dev, INA226_MASK_ENABLE_REG);
+    uint16_t raw_mask_enable = INA226_ReadRegister(dev, INA226_MASK_ENABLE_REG);
+
+    // 定点格式化（不用 %f，避免引入 _printf_float 整套浮点打印代码）
+    char bus_v_str[12], shunt_v_str[12], cur_str[12], pwr_str[12];
+    fmt_fixed(bus_v_str, sizeof(bus_v_str), bus_voltage, 3, 0, 0);
+    fmt_fixed(shunt_v_str, sizeof(shunt_v_str), shunt_voltage, 6, 0, 0);
+    fmt_fixed(cur_str, sizeof(cur_str), current, 3, 0, 0);
+    fmt_fixed(pwr_str, sizeof(pwr_str), power, 3, 0, 0);
 
     sprintf(buffer,
         "INA226 Data:\r\n"
         "--------------------------------\r\n"
-        "Bus Voltage:    %.3f V  (Raw: 0x%04X @ 0x%02X)\r\n"
-        "Shunt Voltage:  %.6f V  (Raw: 0x%04X @ 0x%02X)\r\n"
-        "Current:        %.3f A  (Raw: 0x%04X @ 0x%02X)\r\n"
-        "Power:          %.3f W  (Raw: 0x%04X @ 0x%02X)\r\n"
+        "Bus Voltage:    %s V  (Raw: 0x%04X @ 0x%02X)\r\n"
+        "Shunt Voltage:  %s V  (Raw: 0x%04X @ 0x%02X)\r\n"
+        "Current:        %s A  (Raw: 0x%04X @ 0x%02X)\r\n"
+        "Power:          %s W  (Raw: 0x%04X @ 0x%02X)\r\n"
         "Overflow:       %s\r\n"
         "\r\n"
         "Configuration:  0x%04X @ 0x%02X\r\n"
@@ -206,10 +214,10 @@ void PrintINA226Data(INA226_HandleTypeDef* dev, UART_HandleTypeDef* huart) {
         "Mask/Enable:    0x%04X @ 0x%02X\r\n"
         "--------------------------------\r\n\r\n",
 
-        bus_voltage,     raw_bus_voltage,     INA226_BUS_VOLTAGE_REG,
-        shunt_voltage,   raw_shunt_voltage,   INA226_SHUNT_VOLTAGE_REG,
-        current,         raw_current,         INA226_CURRENT_REG,
-        power,           raw_power,           INA226_POWER_REG,
+        bus_v_str,       raw_bus_voltage,     INA226_BUS_VOLTAGE_REG,
+        shunt_v_str,     raw_shunt_voltage,   INA226_SHUNT_VOLTAGE_REG,
+        cur_str,         raw_current,         INA226_CURRENT_REG,
+        pwr_str,         raw_power,           INA226_POWER_REG,
         overflow ? "YES" : "NO",
         raw_config,      INA226_CONFIG_REG,
         raw_calibration, INA226_CALIB_REG,

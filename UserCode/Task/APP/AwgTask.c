@@ -18,6 +18,7 @@
   */
 
 #include <inttypes.h>
+#include "format.h"
 #include <stdio.h>
 #include "lcd_draw_api.h"
 #include "UserTask.h"
@@ -774,7 +775,7 @@ void amp_digit_handler(KeyEventMsg_t msg) {
                        : (AmpValue - 0.01f * awg_pow10_table[amp_digit_current]);
 
         // 更新振幅显示字符串
-        snprintf(amp_str, sizeof(amp_str), "%.2f", AmpValue);
+        fmt_fixed(amp_str, sizeof(amp_str), AmpValue, 2, 0, 0);
         lcd_draw_string(188, PARAM_ROW_START_Y + 2 * PARAM_ROW_HEIGHT, amp_str, &yahei16x16,
                         COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
 
@@ -793,7 +794,7 @@ void amp_digit_handler(KeyEventMsg_t msg) {
                        : (AmpValue + 0.01f * awg_pow10_table[amp_digit_current]);
 
         // 更新振幅显示字符串
-        snprintf(amp_str, sizeof(amp_str), "%.2f", AmpValue);
+        fmt_fixed(amp_str, sizeof(amp_str), AmpValue, 2, 0, 0);
         lcd_draw_string(188, PARAM_ROW_START_Y + 2 * PARAM_ROW_HEIGHT, amp_str, &yahei16x16,
                         COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
 
@@ -852,7 +853,7 @@ void bias_digit_handler(KeyEventMsg_t msg) {
                         : (BiasValue - 0.01f * awg_pow10_table[bias_digit_current]);
 
         // 更新偏置显示字符串
-        snprintf(bias_str, sizeof(bias_str), "%+.2f", BiasValue);
+        fmt_fixed(bias_str, sizeof(bias_str), BiasValue, 2, 0, FMT_SIGN);
         lcd_draw_string(175, PARAM_ROW_START_Y + 3 * PARAM_ROW_HEIGHT, bias_str, &yahei16x16,
                         COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
 
@@ -871,7 +872,7 @@ void bias_digit_handler(KeyEventMsg_t msg) {
                         : (BiasValue + 0.01f * awg_pow10_table[bias_digit_current]);
 
         // 更新偏置显示字符串
-        snprintf(bias_str, sizeof(bias_str), "%+.2f", BiasValue);
+        fmt_fixed(bias_str, sizeof(bias_str), BiasValue, 2, 0, FMT_SIGN);
         lcd_draw_string(175, PARAM_ROW_START_Y + 3 * PARAM_ROW_HEIGHT, bias_str, &yahei16x16,
                         COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
 

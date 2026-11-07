@@ -1,4 +1,5 @@
 #include "DSO_Calibrate.h"
+#include "format.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -61,7 +62,7 @@ static void (*DsoCalPage_handlers[DsoCal_Page_Num])(KeyEventMsg_t) = {
 
 
 void DSO_Calibrate_Refresh(void) {
-    snprintf(Current_Voltage_str, sizeof(Current_Voltage_str), "%+06.3f", DSO_CAL_VOLTAGE);
+    fmt_fixed(Current_Voltage_str, sizeof(Current_Voltage_str), DSO_CAL_VOLTAGE, 3, 6, FMT_SIGN | FMT_ZERO_PAD);
     lcd_draw_string(58,90,Current_Voltage_str, &DIN_Medium32x48,0xeb0c,0x0000,2);
 }
 
@@ -161,7 +162,7 @@ static void CalibrateSingleStep(const CalStep_t *step) {
             else if (DSO_AVG_ADC_VAL < 128) *(step->original_param) += 1;
         }
 
-        snprintf(Current_Voltage_str, sizeof(Current_Voltage_str), "%+06.3f", DSO_CAL_VOLTAGE);
+        fmt_fixed(Current_Voltage_str, sizeof(Current_Voltage_str), DSO_CAL_VOLTAGE, 3, 6, FMT_SIGN | FMT_ZERO_PAD);
         lcd_draw_string(58,90,Current_Voltage_str, &DIN_Medium32x48,0xeb0c,0x0000,2);
         osDelay(100);
     }
@@ -229,7 +230,7 @@ static void DsoCal_Divider_Main_handler(KeyEventMsg_t msg) {
             WaveGen_DC(1000,0,1.5f,0);  // 生成1.5V的
             osDelay(1000);
 
-            snprintf(Current_Voltage_str, sizeof(Current_Voltage_str), "%+06.3f", DSO_CAL_VOLTAGE);
+            fmt_fixed(Current_Voltage_str, sizeof(Current_Voltage_str), DSO_CAL_VOLTAGE, 3, 6, FMT_SIGN | FMT_ZERO_PAD);
             lcd_draw_string(58,90,Current_Voltage_str, &DIN_Medium32x48,0xeb0c,0x0000,2);
 
             float voltage = DSO_CAL_VOLTAGE - 1.65f;    // 记录x1时的电压
@@ -332,7 +333,7 @@ static void CalibrateSingleGainStep(const GainCalStep_t *step) {
     *(step->gain_param) = actual_gain;
 
     // 8. 显示电压和放大倍数
-    snprintf(Current_Voltage_str, sizeof(Current_Voltage_str), "%+06.3f", (float)DSO_AVG_ADC_VAL * 3.3f / 255.0f);
+    fmt_fixed(Current_Voltage_str, sizeof(Current_Voltage_str), (float)DSO_AVG_ADC_VAL * 3.3f / 255.0f, 3, 6, FMT_SIGN | FMT_ZERO_PAD);
     lcd_draw_string(58, 90, Current_Voltage_str, &DIN_Medium32x48, 0xeb0c, 0x0000, 2);
 
     // 9. 显示「校准完成」
