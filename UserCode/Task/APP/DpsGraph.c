@@ -375,7 +375,7 @@ static void draw_value_tag(uint8_t ci) {
         if (y < (int16_t)PANE_Y(ci)) y = (int16_t)PANE_Y(ci);
     }
 
-    lcd_draw_string(x, (uint16_t)y, text, tag_font, desc->color, bg, 0);
+    lcd_draw_string(x- 6, (uint16_t)y, text, tag_font, desc->color, bg, 1);
 }
 
 /* ========================== 整帧渲染 ========================== */
