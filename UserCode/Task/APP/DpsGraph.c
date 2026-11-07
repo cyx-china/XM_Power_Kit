@@ -40,6 +40,11 @@
 #define BLOCK_ROWS          (CHART_BOTTOM - CHART_TOP + 1)  /* 130 行 */
 #define GRID_DIV            5                               /* 横向 5 等分，每格 2 秒 */
 
+/* 一列一点：采样点数必须等于绘图区列数，否则曲线滚动时要重采样，历史形状会跟着变 */
+#if (DPS_GRAPH_SAMPLE_NUM) != (PLOT_X1 - PLOT_X0 + 1)
+#error "DPS_GRAPH_SAMPLE_NUM 必须等于绘图区列数 PLOT_W"
+#endif
+
 /* ========================== 颜色 ========================== */
 #define COL_BG              0x1082      /* 绘图区底色 */
 #define COL_PLOT_BG         0x18E3      /* 小图底槽 */
@@ -78,7 +83,7 @@ static const CurveDesc_t curve_desc[DPS_CURVE_NUM] = {
 
 static DpsSample_t samples[DPS_GRAPH_SAMPLE_NUM];
 static uint16_t sample_head = 0;    /* 下一个写入位置 */
-static uint16_t sample_count = 0;   /* 有效点数（最大 250） */
+static uint16_t sample_count = 0;   /* 有效点数（最大 DPS_GRAPH_SAMPLE_NUM） */
 
 static Axis_t axis[DPS_CURVE_NUM];
 static char shown_lbl_hi[DPS_CURVE_NUM][8];
@@ -222,6 +227,10 @@ static void axis_update(uint8_t ci, float ref, uint8_t use_ref) {
     mn -= span * 0.06f;
     mx += span * 0.06f;
 
+    /* 电压/电流/功率均非负：下限先钳到 0，否则余量把 mn 压成负数后会一直
+       满足"mn < ax->lo"，导致每帧都重算量程（看着没变但白白跑一遍） */
+    if (mn < 0.0f) mn = 0.0f;
+
     /* 取整到 1/2/5 步长 */
     float step = nice_step((mx - mn) / 3.0f);
     float lo = floorf(mn / step) * step;
@@ -235,11 +244,13 @@ static void axis_update(uint8_t ci, float ref, uint8_t use_ref) {
     if (!ax->valid) {
         apply = 1;
     } else if (mx > ax->hi || mn < ax->lo) {
-        apply = 1;                                  /* 曲线要超出量程 */
+        apply = 1;                                  /* 曲线要超出量程：立刻放宽 */
     } else {
         float cur_span = ax->hi - ax->lo;
-        /* 现有量程两端都比需要的宽 35% 以上：收缩一档 */
-        if ((ax->hi - hi) > cur_span * 0.35f && (lo - ax->lo) > cur_span * 0.35f) apply = 1;
+        /* 新量程明显更窄（不足当前 60%）时收紧一档。
+           不能要求"上下两端各缩 35%"：电压/电流/功率都非负，下限常被钳到 0，
+           下限永远缩不动，量程就只会放大不会回落（15V 调到 1V 后卡在 0~15V） */
+        if (((hi - lo) < cur_span * 0.6f) && (hi <= ax->hi) && (lo >= ax->lo)) apply = 1;
     }
 
     if (!apply) return;
@@ -252,24 +263,16 @@ static void axis_update(uint8_t ci, float ref, uint8_t use_ref) {
 }
 
 /* ========================== 坐标换算 ========================== */
-/* 屏幕列 -> 采样索引（小数，便于线性插值）；返回 <0 表示该列还没有数据 */
-static float column_index(uint16_t col) {
-    if (sample_count < 2) return -1.0f;
+/* 屏幕列 -> 采样索引：一列一点（最新点在最右列），返回负数表示该列还没有数据。
+   整数映射是关键：新点进缓冲时整条曲线只向左平移 1 像素，形状不变；
+   若在列与点之间做小数插值，每帧相位不同，历史曲线就会一直"蠕动"。 */
+static int16_t column_index(uint16_t col) {
+    if (sample_count == 0) return -1;
 
-    float age = (float)(PLOT_W - 1 - col) * (float)(DPS_GRAPH_SAMPLE_NUM - 1) / (float)(PLOT_W - 1);
-    return (float)(sample_count - 1) - age;
-}
-
-static float sample_interp(float idx_f, uint8_t ci) {
-    uint16_t i0 = (uint16_t)idx_f;
-    float frac = idx_f - (float)i0;
-
-    if (i0 >= sample_count) i0 = (uint16_t)(sample_count - 1);
-    float v0 = sample_value(sample_at(i0), ci);
-    if (frac <= 0.0f || (uint16_t)(i0 + 1) >= sample_count) return v0;
-
-    float v1 = sample_value(sample_at((uint16_t)(i0 + 1)), ci);
-    return v0 + (v1 - v0) * frac;
+    int16_t idx = (int16_t)((int16_t)(sample_count - 1) - (int16_t)(PLOT_W - 1 - col));
+    if (idx < 0) return -1;
+    if (idx >= (int16_t)sample_count) idx = (int16_t)(sample_count - 1);
+    return idx;
 }
 
 static int16_t value_to_y(uint8_t ci, float v) {
@@ -314,6 +317,63 @@ static void labels_refresh(void) {
     labels_drawn = 1;
 }
 
+/* ========================== 当前值标签 ========================== */
+/**
+ * @brief  在小图里标出最新采样值
+ * @note   横向固定在右侧（宽度只随数字位数变，不随曲线漂移），
+ *         纵向跟随最新点的 y：默认贴在曲线末端上方，上方越界时改画到曲线下方。
+ *         放在 render_curves() 之后调用，块 DMA 已阻塞完成，文字一定压在本帧像素之上。
+ */
+static void draw_value_tag(uint8_t ci) {
+    if (sample_count == 0 || !axis[ci].valid) return;
+
+    const CurveDesc_t *desc = &curve_desc[ci];
+    float v = sample_value(sample_at((uint16_t)(sample_count - 1)), ci);
+
+    /* 单位与纵轴刻度保持一致：量程上限小于 1 时用 mV/mA/mW */
+    uint8_t use_milli = (axis[ci].hi < 1.0f) ? 1 : 0;
+    char text[12];
+    int len = fmt_fixed_digits(v * (use_milli ? 1000.0f : 1.0f), 4, text);
+
+    const char *unit = use_milli ? desc->unit_milli : desc->unit;
+    while (*unit && len < (int)sizeof(text) - 1) text[len++] = *unit++;
+    text[len] = '\0';
+
+    uint16_t w = text_width(text);
+    uint16_t x = (uint16_t)(PLOT_X1 - 2 - w);
+    if (x < PLOT_X0) x = PLOT_X0;
+
+    uint16_t fh = NotoMono10x14.font_height;
+
+    int16_t y_now = value_to_y(ci, v);
+    int16_t y_hi = y_now;       /* 标签会盖住右侧这段曲线：取段内最高点（y 最小） */
+    int16_t y_lo = y_now;       /* 段内最低点（y 最大） */
+
+    for (uint16_t col = (uint16_t)(x - PLOT_X0); col < PLOT_W; col++) {
+        int16_t idx = column_index(col);
+        if (idx < 0) continue;
+
+        int16_t yc = value_to_y(ci, sample_value(sample_at((uint16_t)idx), ci));
+        if (yc < y_hi) y_hi = yc;
+        if (yc > y_lo) y_lo = yc;
+    }
+
+    int16_t y = (int16_t)(y_hi - (int16_t)fh - 2);
+    uint16_t bg = COL_PLOT_BG;
+
+    if (y < (int16_t)(PANE_Y(ci) + 1)) {
+        /* 上方顶出小图：改画到曲线下方，用面积填充色做底减少突兀感 */
+        y = (int16_t)(y_lo + 3);
+        bg = (uint16_t)((desc->color >> 2) & 0x39E7);
+
+        if (y > (int16_t)(PANE_BOTTOM(ci) - (int16_t)fh))
+            y = (int16_t)(PANE_BOTTOM(ci) - (int16_t)fh);
+        if (y < (int16_t)PANE_Y(ci)) y = (int16_t)PANE_Y(ci);
+    }
+
+    lcd_draw_string(x, (uint16_t)y, text, &NotoMono10x14, desc->color, bg, 0);
+}
+
 /* ========================== 整帧渲染 ========================== */
 static void render_curves(float tgt_v, float tgt_c, uint8_t power_on) {
     int16_t prev_y[DPS_CURVE_NUM];
@@ -344,17 +404,17 @@ static void render_curves(float tgt_v, float tgt_c, uint8_t power_on) {
         /* ---- 3. 逐列合成三条曲线 ---- */
         for (uint16_t x = 0; x < w; x++) {
             uint16_t col = (uint16_t)(bx + x);
-            float idx_f = column_index(col);
+            int16_t idx = column_index(col);
 
             for (uint8_t ci = 0; ci < DPS_CURVE_NUM; ci++) {
-                if (idx_f < 0.0f) {
+                if (idx < 0) {
                     prev_y[ci] = -1;
                     continue;
                 }
 
                 uint16_t ryb = (uint16_t)(PANE_BOTTOM(ci) - CHART_TOP - 1);
                 uint16_t fill = (uint16_t)((curve_desc[ci].color >> 2) & 0x39E7);
-                int16_t y = value_to_y(ci, sample_interp(idx_f, ci));
+                int16_t y = value_to_y(ci, sample_value(sample_at((uint16_t)idx), ci));
                 uint16_t ry = (uint16_t)(y - CHART_TOP);
 
                 /* 面积填充：曲线下方填深色，让曲线更醒目 */
@@ -432,4 +492,8 @@ void DpsGraph_DrawFrame(float target_voltage, float target_current, uint8_t powe
 
     labels_refresh();
     render_curves(target_voltage, target_current, power_on);
+
+    /* 曲线画完再压最新值标签：render_curves 里每块 lcd_draw_data 都阻塞到 DMA 完成，
+       所以这三段文字一定落在本帧所有像素之上，不会被块缓冲盖掉 */
+    for (uint8_t ci = 0; ci < DPS_CURVE_NUM; ci++) draw_value_tag(ci);
 }

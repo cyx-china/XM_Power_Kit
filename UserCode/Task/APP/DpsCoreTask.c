@@ -40,11 +40,7 @@
  */
 #define MS_TO_HOUR (1.0 / 3600000.0)     // 用 double：能量是小量累加，float 会丢精度
 
-/**
- * @brief 曲线采样周期（毫秒）
- * @note  按系统节拍固定 40ms 取一点：25Hz × 10s = 250 点，正好铺满一屏
- */
-#define DPS_GRAPH_SAMPLE_PERIOD_MS (DPS_GRAPH_SAMPLE_DIV * 10U)
+/* 曲线采样周期 DPS_GRAPH_SAMPLE_PERIOD_MS 定义在 DpsGraph.h（一列一点，266 点 ≈ 10 秒） */
 
 /**
  * @brief 能量积分的默认步长（小时）
@@ -738,7 +734,7 @@ void Start_DpsCoreTask(void *argument) {
         // 风扇状态更新计时
         Fan_update_time_count ++;
 
-        // 曲线采样：按系统节拍固定 40ms 取一点（25Hz → 10 秒窗口共 250 点）
+        // 曲线采样：按系统节拍约 38ms 取一点（266 点 ≈ 10 秒，一列一点）
         // 用节拍而不是循环计数：界面刷新耗时会拖慢循环，否则 10 秒窗口会变成十几秒
         uint32_t graph_now_tick = osKernelGetTickCount();
         if ((uint32_t) (graph_now_tick - graph_sample_tick) >= DPS_GRAPH_SAMPLE_PERIOD_MS) {
