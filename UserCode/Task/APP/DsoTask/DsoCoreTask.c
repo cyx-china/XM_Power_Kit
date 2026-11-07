@@ -37,9 +37,18 @@
 // ADC环形缓冲区：存储ADC采样的原始数据，采用环形结构循环存储
 static uint8_t DSO_ADC_BUFFER[DSO_Buffer_Size] = {0};
 
+// 帧内临时缓冲：raw_sorted_buf 与 grid_buffer 在同一帧内是先后使用、生命周期不重叠的
+// （排序→插值/FFT 用 raw_sorted_buf；之后刷新波形用 grid_buffer），合并进同一个 union 省 2881 字节 RAM
+typedef union {
+    uint8_t  raw[SORTED_BUF_SIZE];      // 排序后的原始采样点，供插值与 FFT 使用
+    uint16_t grid[1608];                // 波形刷新贴图（每列 8 像素 × 201 行）
+} DsoFrameScratch_t;
+
+static DsoFrameScratch_t dso_scratch;
+
 // 排序后的原始采样点缓冲区
 // [0..1439] 触发点前的1440个采样点 | [1440] 触发点 | [1441..2880] 触发点后的1440个采样点
-static uint8_t raw_sorted_buf[SORTED_BUF_SIZE];
+#define raw_sorted_buf  (dso_scratch.raw)
 
 // 时基拉伸/缩放处理后的缓冲区（高时基下通过插值扩展数据）
 static uint8_t stretched_buf[SORTED_BUF_SIZE];
@@ -47,8 +56,8 @@ static uint8_t stretched_buf[SORTED_BUF_SIZE];
 // 显示点缓冲区：存储最终用于LCD绘制的波形数据（经过峰值抽取处理）
 static uint8_t DSO_SAMPLE_SHOW_BUFFER[DSO_ShowBuffer_Deep] = {0};
 
-// 网格/波形刷新缓冲区
-static uint16_t grid_buffer[1608] = {0};
+// 网格/波形刷新缓冲区（与 raw_sorted_buf 共用同一块内存，见上方 union 定义）
+#define grid_buffer     (dso_scratch.grid)
 
 /* ============================ 全局变量定义 ============================ */
 // ---------------- 触发相关状态标志位 ----------------

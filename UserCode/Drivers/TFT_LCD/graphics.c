@@ -89,7 +89,6 @@ static FIL *gfx_file_get(const char *path) {
     return &file_handles[slot].fil;
 }
 // -------------------------- 定义&声明 -------------------------- //
-static uint16_t FLUSH_BUFFER[LCD_FILL_BLOCK_COUNT];
 static inline uint16_t alpha_blend_565(uint16_t fg, uint16_t bg, uint8_t alpha_0255);
 // -------------------------- 辅助函数 -------------------------- //
 // 内联函数，用于快速将一段内存填充为相同数据（需确保缓冲区大小是8的倍数！）
@@ -112,20 +111,23 @@ __STATIC_FORCEINLINE void fast_fill_uint16(uint16_t *dst, uint16_t val, uint32_t
 
 // 向矩形内填充相同的颜色（支持横线） 使用DMA加速
 static void LCD_FillWindow(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color) {
+    // 复用刷屏缓冲（原实现另有一个 2KB 的专用填充缓冲，这里复用 pixel_flush_buf 省下 2KB RAM；
+    // 填充与字模绘制都是同步完成，不会互相踩踏）
+    const uint32_t block = GFX_FLUSH_PIXELS;
     uint32_t pixel_num = (x2 - x1 + 1) * (y2 - y1 + 1); // 计算需要填充的像素数量
-    uint16_t page_count = (pixel_num / LCD_FILL_BLOCK_COUNT); // 计算需要的分页数量
+    uint32_t page_count = (pixel_num / block);          // 计算需要的分页数量
     // 根据像素数量，选择是否需要填充整个缓冲区
-    fast_fill_uint16(FLUSH_BUFFER, color, LCD_FILL_BLOCK_COUNT);
+    fast_fill_uint16(pixel_flush_buf, color, block);
     // 选中填充区域
     LCD_SET_WINDOWS(x1, y1, x2, y2);
     // 刷写完整页
-    for (uint16_t i = 0; i < page_count; i++) {
-        LCD_FLUSH_DMA((uint32_t) FLUSH_BUFFER,LCD_FILL_BLOCK_COUNT);
+    for (uint32_t i = 0; i < page_count; i++) {
+        LCD_FLUSH_DMA((uint32_t) pixel_flush_buf, block);
     }
     // 处理剩余像素
-    uint16_t pixel_left = pixel_num % LCD_FILL_BLOCK_COUNT;
+    uint32_t pixel_left = pixel_num % block;
     if (pixel_left > 0) {
-        LCD_FLUSH_DMA((uint32_t) FLUSH_BUFFER, pixel_left);
+        LCD_FLUSH_DMA((uint32_t) pixel_flush_buf, pixel_left);
     }
 }
 

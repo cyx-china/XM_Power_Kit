@@ -1281,13 +1281,27 @@ void Resume_DpsCoreTask(void) {
 void Start_PIDTask(void *argument) {
     osThreadSuspend(PIDTaskHandle);     // 任务启动后先挂起，等待Resume触发
 
+    // DAC 写缓存：MCP4725 会保持上次写入的输出，值没变就不必再走一次 I2C 事务。
+    // 原先每 1ms 无条件写一次（400kHz 下 3 字节 ≈ 70µs，约占 7% CPU）。
+    uint16_t last_dac_value = 0;
+    bool     last_dac_valid = false;
+
     for (;;) {
         // 仅当电源开启时执行PID运算和DAC更新
         if (IsPowerOn == true) {
             // 计算电流PID输出值（目标电流-实际电流的闭环调节）
             uint16_t DAC_Value = PID_Calculate(Current_PID,Voltage_PID);
-            // 将PID输出写入DAC（MCP4725），控制输出电流
-            MCP4725_WriteFast(&hmcp4725_DC, DAC_Value, MCP4725_MODE_NORMAL);
+            // 仅在 DAC 值变化（或缓存被外部失效）时才真正写 I2C
+            if ((last_dac_valid == false) || (DAC_Value != last_dac_value) || (pid_dac_force_write != 0)) {
+                if (MCP4725_WriteFast(&hmcp4725_DC, DAC_Value, MCP4725_MODE_NORMAL) == HAL_OK) {
+                    last_dac_value = DAC_Value;
+                    last_dac_valid = true;
+                    pid_dac_force_write = 0;
+                }
+            }
+        } else {
+            // 电源关闭后重新开启时，必须重新写一次
+            last_dac_valid = false;
         }
         osDelay(1); // 任务周期1ms
     }

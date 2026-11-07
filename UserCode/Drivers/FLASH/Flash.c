@@ -42,7 +42,18 @@ volatile bool DMA_TX_Cplt_Flag = false;                 // DMA 发送完成 标�
 volatile bool DMA_RX_Cplt_Flag = false;                 // DMA 接收完成 标志位
 
 /* FLASH写入缓冲区 */
-static uint8_t FLASH_Write_Buffer[FLASH_SECTOR_SIZE];   // FLASH写入缓冲区
+// 擦除的最小单位是 4KB 扇区，但读-改-写只需要按页（256B 的整数倍）分块进行。
+// 缓冲区取 1KB（4 页），比整扇区 4KB 省下 3KB RAM；读取总字节数不变。
+#define FLASH_WRITE_CHUNK_SIZE  1024
+
+#if (FLASH_SECTOR_SIZE % FLASH_WRITE_CHUNK_SIZE) != 0
+#error "FLASH_WRITE_CHUNK_SIZE must be a divisor of FLASH_SECTOR_SIZE"
+#endif
+#if (FLASH_WRITE_CHUNK_SIZE % FLASH_PAGE_SIZE) != 0
+#error "FLASH_WRITE_CHUNK_SIZE must be a multiple of FLASH_PAGE_SIZE"
+#endif
+
+static uint8_t FLASH_Write_Buffer[FLASH_WRITE_CHUNK_SIZE];   // FLASH写入缓冲区
 
 //------------------------- 动态全局参数定义 -------------------------//
 uint32_t FLASH_TOTAL_SIZE     = 0;
@@ -597,44 +608,90 @@ HAL_StatusTypeDef FLASH_Write(uint32_t addr, const uint8_t *data, const uint32_t
         uint32_t write_len = (remaining < DataCanWrite_ThisSector)
                              ? remaining : DataCanWrite_ThisSector;
 
-        // 将此扇区的数据读出到缓冲区
-        HAL_StatusTypeDef status = FLASH_Read(sector_start, FLASH_Write_Buffer, FLASH_SECTOR_SIZE);
-        if (status != HAL_OK) return status;
+        // 本扇区的写入区间在当前扇区内是 [offset, offset + write_len)
+        const bool is_full_sector = (offset == 0) && (write_len == FLASH_SECTOR_SIZE);
+        bool need_erase = false;
 
-        // 对比缓冲区的数据是否全为0xFF
+        // 第一趟：只扫描"本次要写入的区间"，判断是否需要擦除
+        // NOR FLASH 只能把位由 1 写成 0，所以只有当某个目标字节出现 0->1 时才必须擦除；
+        // 这样往已用扇区的空白尾部写数据时就不必再整扇区擦一遍（省下一次约 45ms 的擦除）
+        for (uint32_t chunk = 0; chunk < FLASH_SECTOR_SIZE; chunk += FLASH_WRITE_CHUNK_SIZE)
         {
-            const uint32_t * restrict p = (const uint32_t *)FLASH_Write_Buffer;
-            const uint32_t ff = 0xFFFFFFFFu;
-            uint_fast8_t i = FLASH_SECTOR_SIZE / 32;
-            bool is_all_ff = true;
+            uint32_t io_start = (offset > chunk) ? offset : chunk;
+            uint32_t io_end   = (chunk + FLASH_WRITE_CHUNK_SIZE < offset + write_len)
+                                ? (chunk + FLASH_WRITE_CHUNK_SIZE) : (offset + write_len);
+            if (io_start >= io_end) { continue; }   // 本块不在写入区间内
 
-            do
+            HAL_StatusTypeDef status = FLASH_Read(sector_start + chunk, FLASH_Write_Buffer,
+                                                FLASH_WRITE_CHUNK_SIZE);
+            if (status != HAL_OK) return status;
+
+            const uint8_t *old_data = &FLASH_Write_Buffer[io_start - chunk];
+            const uint8_t *new_data = current_data + (io_start - offset);
+            for (uint32_t b = 0; b < (io_end - io_start); b++)
             {
-                if (p[0] != ff || p[1] != ff || p[2] != ff || p[3] != ff ||
-                    p[4] != ff || p[5] != ff || p[6] != ff || p[7] != ff)
+                if ((old_data[b] & new_data[b]) != new_data[b])
                 {
-                    is_all_ff = false;
+                    need_erase = true;
                     break;
                 }
-                p += 8;
-            } while (--i);
-
-            if (!is_all_ff)
-            {
-                status = FLASH_EraseSector(sector_start);
-                if (status != HAL_OK) return status;
             }
+            if (need_erase) { break; }
         }
 
-        // 将要改写的数据覆盖到缓冲区里
-        memcpy(&FLASH_Write_Buffer[offset], current_data, write_len);
-
-        // 将更新后的缓冲区分页写回FLASH
-        for (uint32_t page = 0; page < (FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE); page++)
+        // 部分覆盖的扇区一旦需要擦除，就必须先把整个 4KB 扇区快照下来再回写，
+        // 而本驱动为省 RAM 只保留 1KB 缓冲，故这种情形直接返回错误（当前的唯一调用者
+        // FATFS disk_write 总是整扇区写入，不会走到这里）
+        if (need_erase && !is_full_sector)
         {
-            uint32_t page_addr = sector_start + page * FLASH_PAGE_SIZE;
-            status = FLASH_WritePage(page_addr, &FLASH_Write_Buffer[page * FLASH_PAGE_SIZE], FLASH_PAGE_SIZE);
+            return HAL_ERROR;
+        }
+
+        if (need_erase)
+        {
+            HAL_StatusTypeDef status = FLASH_EraseSector(sector_start);
             if (status != HAL_OK) return status;
+        }
+
+        // 第二趟：分块写回，每块 1KB（4 页）
+        for (uint32_t chunk = 0; chunk < FLASH_SECTOR_SIZE; chunk += FLASH_WRITE_CHUNK_SIZE)
+        {
+            uint32_t chunk_addr = sector_start + chunk;
+            const uint8_t *chunk_src;
+
+            if (offset <= chunk && (offset + write_len) >= (chunk + FLASH_WRITE_CHUNK_SIZE))
+            {
+                // 整块都被新数据覆盖，直接用源数据，无需读回
+                chunk_src = current_data + (chunk - offset);
+            }
+            else
+            {
+                // 读回该块内容（擦除后为 0xFF，未擦除时为原数据），再把新数据覆盖进去
+                HAL_StatusTypeDef status = FLASH_Read(chunk_addr, FLASH_Write_Buffer,
+                                                    FLASH_WRITE_CHUNK_SIZE);
+                if (status != HAL_OK) return status;
+
+                uint32_t io_start = (offset > chunk) ? offset : chunk;
+                uint32_t io_end   = (chunk + FLASH_WRITE_CHUNK_SIZE < offset + write_len)
+                                    ? (chunk + FLASH_WRITE_CHUNK_SIZE) : (offset + write_len);
+                if (io_start < io_end)
+                {
+                    memcpy(&FLASH_Write_Buffer[io_start - chunk],
+                           current_data + (io_start - offset),
+                           io_end - io_start);
+                }
+                chunk_src = FLASH_Write_Buffer;
+            }
+
+            // 将该块的 4 个页依次写回 FLASH
+            for (uint32_t page = 0; page < (FLASH_WRITE_CHUNK_SIZE / FLASH_PAGE_SIZE); page++)
+            {
+                uint32_t page_addr = chunk_addr + page * FLASH_PAGE_SIZE;
+                HAL_StatusTypeDef status = FLASH_WritePage(page_addr,
+                                                           &chunk_src[page * FLASH_PAGE_SIZE],
+                                                           FLASH_PAGE_SIZE);
+                if (status != HAL_OK) return status;
+            }
         }
 
         // 更新变量

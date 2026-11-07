@@ -7,7 +7,6 @@
 #include "images.h"
 
 // 分块大小，即DMA传输同一颜色时，uint16_t缓冲区的大小
-#define LCD_FILL_BLOCK_COUNT    1024
 
 // 清屏
 void GFX_ClearScreen(uint16_t color);

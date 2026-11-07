@@ -30,6 +30,11 @@ extern PID pid_controller;
 extern volatile float Target_Voltage;       // 目标电压
 extern volatile float Target_Current;       // 目标电流
 
+// DAC 缓存失效标志：PID 任务只在 DAC 值变化时才写 MCP4725（省掉每毫秒一次的 I2C 事务）。
+// 校准等外部代码直接改写过 DAC 后，必须调用 PID_InvalidateDacCache() 让下一次 PID 强制写一次。
+extern volatile uint8_t pid_dac_force_write;
+void PID_InvalidateDacCache(void);
+
 
 
 void PID_Init(void);                                                        // 初始化PID参数

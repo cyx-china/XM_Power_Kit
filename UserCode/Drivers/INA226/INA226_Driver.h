@@ -42,6 +42,7 @@ HAL_StatusTypeDef INA226_Init(INA226_HandleTypeDef* dev,I2C_HandleTypeDef* hi2c,
 float INA226_ReadBusVoltage(INA226_HandleTypeDef* dev);
 float INA226_ReadShuntVoltage(INA226_HandleTypeDef* dev);
 float INA226_ReadCurrent(INA226_HandleTypeDef* dev);
+void INA226_ReadBusVoltageAndCurrent(INA226_HandleTypeDef* dev, float* voltage, float* current);
 float INA226_ReadPower(INA226_HandleTypeDef* dev);
 uint8_t INA226_CheckOverflow(INA226_HandleTypeDef* dev);
 void PrintINA226Data(INA226_HandleTypeDef* dev, UART_HandleTypeDef* huart);

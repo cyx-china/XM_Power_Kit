@@ -91,6 +91,33 @@ float INA226_ReadBusVoltage(INA226_HandleTypeDef* dev) {
 }
 
 /**
+ * @brief  一次事务读取总线电压和电流
+ * @note   INA226 支持寄存器自增读，总线电压(0x02)/功率(0x03)/电流(0x04) 是连续地址，
+ *         因此 6 字节一次读回即可同时得到电压和电流，省掉一次独立的 I2C 事务。
+ * @param  dev: 设备句柄
+ * @param  voltage: 输出总线电压（V）
+ * @param  current: 输出电流（A）
+ * @retval 无（读失败时输出 0）
+ */
+void INA226_ReadBusVoltageAndCurrent(INA226_HandleTypeDef* dev, float* voltage, float* current) {
+    uint8_t data[6];
+
+    if (HAL_I2C_Mem_Read(dev->hi2c, dev->address << 1, INA226_BUS_VOLTAGE_REG,
+                         I2C_MEMADD_SIZE_8BIT, data, 6, 100) != HAL_OK) {
+        *voltage = 0.0f;
+        *current = 0.0f;
+        return;
+    }
+
+    uint16_t raw_voltage = (uint16_t)(((uint16_t)data[0] << 8) | data[1]);   // 0x02 总线电压
+    // data[2]/data[3] 是 0x03 功率寄存器，本函数不需要
+    int16_t  raw_current = (int16_t)(((uint16_t)data[4] << 8) | data[5]);    // 0x04 电流
+
+    *voltage = (float)raw_voltage * 0.00125f;
+    *current = (float)raw_current * dev->current_lsb;
+}
+
+/**
  * @brief  读取分流电压
  * @param  dev: 设备句柄
  * @retval 分流电压（V）

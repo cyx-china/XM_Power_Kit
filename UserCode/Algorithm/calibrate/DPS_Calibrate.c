@@ -132,6 +132,7 @@ void DPS_Calibrate_Enter(void) {
     AdcTim_ON();                                                            // 启动定时器（ADC触发源）
     
     PID_Init();                                 // 初始化PID任务
+    PID_InvalidateDacCache();                   // 校准期间直接写过 DAC，恢复前让 PID 强制重写
     osThreadResume(PIDTaskHandle);              // 恢复PID任务
 }
 

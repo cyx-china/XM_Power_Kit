@@ -44,7 +44,19 @@ void SetTargetCurrent(float Current) {
 
 PID pid_controller = {0};
 
+// DAC 缓存失效标志：置 1 时 PID 任务无条件写一次 MCP4725
+volatile uint8_t pid_dac_force_write = 1;
+
+/**
+ * @brief 使 DAC 缓存失效，下一次 PID 运算会强制写一次 MCP4725
+ * @note  外部（校准流程、上电初始化）直接改写 DAC 后必须调用
+ */
+void PID_InvalidateDacCache(void) {
+    pid_dac_force_write = 1;
+}
+
 void PID_Init(void) {
+    PID_InvalidateDacCache();                   // 初始化后强制写一次 DAC
     pid_controller.mode          = 0;           // 初始为 CV模式
     pid_controller.hysteresis_A  = 0.05f;       // 死区电流
     pid_controller.hysteresis_V  = 0.05f;       // 死区电压
