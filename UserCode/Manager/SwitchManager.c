@@ -5,6 +5,25 @@
 #include "SwitchManager.h"
 
 #include "cmsis_os2.h"
+#include "tim.h"
+
+// ======================= PWM 输出 ======================= //
+// 按定时器实际重装载值换算比较值：percent=100 时输出 arr+1（恒为高电平，即真正的 100%）
+static void PWM_SetDuty(uint32_t channel, uint8_t percent) {
+    if (percent > 100) {
+        percent = 100;
+    }
+    uint32_t arr = __HAL_TIM_GET_AUTORELOAD(&htim1);
+    __HAL_TIM_SET_COMPARE(&htim1, channel, ((arr + 1U) * (uint32_t)percent) / 100U);
+}
+
+void PWM_SetBrightness(uint8_t percent) {
+    PWM_SetDuty(TIM_CHANNEL_2, percent);
+}
+
+void PWM_SetFanDuty(uint8_t percent) {
+    PWM_SetDuty(TIM_CHANNEL_3, percent);
+}
 
 // 示波器
 

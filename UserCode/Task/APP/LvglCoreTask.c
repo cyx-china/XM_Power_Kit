@@ -28,11 +28,10 @@
 #include "lv_port_indev.h"
 #include "os_handles.h"
 
-// 分配 LVGL 内存池 到 CCMRAM 区域
-static uint8_t lvgl_mem_pool[LV_MEM_SIZE] __attribute__((section(".ccmram_lvgl_reserved"), used, aligned(8)));
-
-// PS:此处指定了lvgl的memory pool存放在ccmram的指定位置，以避免和其他内存冲突，你可以查看STM32F407XX_FLASH.ld
-// 详细解释见lv_conf.h中第56行。
+// PS:Lvgl 的 memory pool 直接由 lv_conf.h 的 LV_MEM_ADR 固定指向 CCMRAM(0x10000000)，
+//   在 lv_mem.c 的 lv_init 中通过 lv_tlsf_create_with_pool 建立，不需要在这里再定义数组
+//   （原先的 lvgl_mem_pool 数组没有任何引用，链接时被 --gc-sections 丢弃，属于死代码）。
+//   段布局见 STM32F407XX_FLASH.ld 的 .ccmram_lvgl_reserved。
 
 volatile bool IsLvglRunning = false;        // 指示 LVGL核心任务 是否正在运行
 volatile bool IsLvglJustResumed = false;    // 指示 LVGL核心任务 是否刚刚恢复
@@ -66,8 +65,7 @@ void Start_LvglCoreTask(void *argument) {
             IsLvglJustResumed = false;        // 重置标志位
         }
 
-        lv_task_handler();                   // lvgl的主任务处理
-        lv_timer_handler();                  // lvgl的定时器任务
+        lv_task_handler();                   // lvgl的主任务处理（内部已经调用 lv_timer_handler，不要再调一次）
         osDelay(10);
 
     }

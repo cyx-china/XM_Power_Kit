@@ -1,5 +1,7 @@
 #include "lcd_draw_api.h"
 #include "freertos_os2.h"
+#include "cmsis_os2.h"
+#include <string.h>
 
 #define COORD(x, y)  (((uint32_t)x << 16) | (uint16_t)y)
 
@@ -20,8 +22,15 @@ static osStatus_t lcd_draw_send_cmd(LcdFlushType flush_type,        // 绘制图
         return osErrorNoMemory;
     }
 
-    // 分配GFX_DrawCommand_t内存
-    GFX_DrawCommand_t* cmd = (GFX_DrawCommand_t*)pvPortMalloc(sizeof(GFX_DrawCommand_t));
+    // 字符串必须拷贝到命令块尾部一起分配：
+    // 消息是异步消费的，若只保存调用者的指针，调用者在绘制完成前复用缓冲区就会显示乱码。
+    uint32_t str_len = 0;
+    if (flush_type == DRAW_STRING && str != NULL) {
+        str_len = (uint32_t)strlen(str) + 1U;
+    }
+
+    // 分配GFX_DrawCommand_t内存（字符串紧跟在结构体之后，随命令块一起释放）
+    GFX_DrawCommand_t* cmd = (GFX_DrawCommand_t*)pvPortMalloc(sizeof(GFX_DrawCommand_t) + str_len);
     if (cmd == NULL) {
         vPortFree(msg);
         return osErrorNoMemory;
@@ -38,7 +47,13 @@ static osStatus_t lcd_draw_send_cmd(LcdFlushType flush_type,        // 绘制图
     cmd->param2 = param2;
     cmd->image = image;
     cmd->font = font;
-    cmd->str = str;
+    if (str_len > 0) {
+        char* str_buf = (char*)(cmd + 1);   // 结构体之后的空间
+        memcpy(str_buf, str, str_len);
+        cmd->str = str_buf;
+    } else {
+        cmd->str = NULL;
+    }
 
     // 初始化刷新消息
     memset(msg, 0, sizeof(refresh_msg_t));
@@ -56,7 +71,7 @@ static osStatus_t lcd_draw_send_cmd(LcdFlushType flush_type,        // 绘制图
     }
 
     return ret;
-}           // 你要显示的文字指针
+}
 
 
 // ==================== 对外接口实现 ====================
@@ -122,16 +137,28 @@ osStatus_t lcd_draw_string(uint16_t x, uint16_t y, const char* str,
 // 关于此函数，有无奈之举：此函数用于向选定区域发送已知数据，由于是异步处理，所以要求数据在处理完前都不能更改。
 //  这个函数我只用在了DSO这个APP上，用于刷新波形数据。由于是一列一列的刷新，需要大量的调用。
 //  方法一就是给每一次调用都动态分配一个400字节的内存，但我在短时间内会调用300次，也就是120K内存，显然无法实现。
-//  所以我用了方法二：在调用后会置标志位，直到线程处理完成次刷新任务，才会发送下一个刷新任务，相当于阻塞执行了。
+//  所以我用了方法二：发送后阻塞等待"本次刷新完成"（信号量同步），调用者可以安全复用数据缓冲区。
+//  注意：等待的是本次任务完成的信号，而不是空转查询标志位，不会白占 CPU。
 
 osStatus_t lcd_draw_data(uint16_t x0,uint16_t y0,uint16_t x1,uint16_t y1,uint16_t *data,uint16_t len) {
-    Is_DrawData_Busy = true;
+    // 先清掉上一次可能残留的完成信号（例如上一次等待超时），保证本次等待的是本次传输
+    if (DrawData_Done_SemHandle != NULL) {
+        osSemaphoreAcquire(DrawData_Done_SemHandle, 0);
+    }
 
     uint32_t addr = (uint32_t)data;
     uint16_t addr_h = (uint16_t)(addr >> 16);  // 高16位
     uint16_t addr_l = (uint16_t)(addr & 0xFFFF); // 低16位
-    lcd_draw_send_cmd(DRAW_DATA, COORD(x0, y0), COORD(x1, y1), len, 0, addr_h, addr_l, NULL, NULL,NULL);
-    while (Is_DrawData_Busy){};
+    osStatus_t ret = lcd_draw_send_cmd(DRAW_DATA, COORD(x0, y0), COORD(x1, y1),
+                                       len, 0, addr_h, addr_l, NULL, NULL, NULL);
+    if (ret != osOK) {
+        return ret;     // 入队失败，数据没有被使用，可直接返回
+    }
+
+    // 阻塞等待刷屏线程完成本次 DMA 传输（最多1s，避免异常情况下永久卡死）
+    if (DrawData_Done_SemHandle != NULL) {
+        osSemaphoreAcquire(DrawData_Done_SemHandle, 1000);
+    }
     return osOK;
 }
 

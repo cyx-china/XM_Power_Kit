@@ -23,6 +23,12 @@
 #define AdcTim_ON()         HAL_TIM_Base_Start(&htim8)                                  // 开启定时器(用于ADC)
 #define AdcTim_OFF()        HAL_TIM_Base_Stop(&htim8)                                   // 关闭定时器
 
+// PWM 输出（TIM1：CH2 = 屏幕背光，CH3 = 风扇）
+// 注意：占空比必须按定时器实际的 ARR 换算，不能硬编码 4999，
+//      否则 ARR 改动后占空比会整体偏移（例如 ARR=1999 时 50% 会输出成 100%）。
+void PWM_SetBrightness(uint8_t percent);    // 设置屏幕亮度（0~100 %）
+void PWM_SetFanDuty(uint8_t percent);       // 设置风扇占空比（0~100 %）
+
 // 示波器
 typedef enum {
     Couple_DC = 0,                                  // 直流耦合（保留信号直流分量）

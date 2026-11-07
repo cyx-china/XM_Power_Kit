@@ -25,6 +25,7 @@
 #include "lv_label.h"
 #include "os_handles.h"
 #include "tim.h"
+#include "SwitchManager.h"
 #include "UserDefineManage.h"
 
 static void FAN_Regulation(void);
@@ -61,16 +62,14 @@ void Start_SensorTask(void *argument){
             counter = 0;
         }
 
+        // INA226 与 TMP102 都挂在 I2C1 上，合并为一次加锁，避免反复申请/释放互斥锁
         osMutexAcquire(IIC1_MutexHandle, osWaitForever);
 
         Input_Voltage = INA226_ReadBusVoltage(&hina226_input);
         Input_Current = INA226_ReadCurrent(&hina226_input);
-        Input_Power   = Input_Current * Input_Power;
-
-        osMutexRelease(IIC1_MutexHandle);
-
-        osMutexAcquire(IIC1_MutexHandle, osWaitForever);
+        Input_Power   = Input_Voltage * Input_Current;      // 输入功率 P = U × I
         DCDC_Temperature = TMP102_ReadTemperature(&htmp102_dcdc);
+
         osMutexRelease(IIC1_MutexHandle);
 
         osDelay(125);
@@ -85,13 +84,16 @@ const uint8_t DUTY_MAX     = 100;       // 最高占空比
 
 static uint8_t Fan_GetDutyCycle(float current_temp){
     if (UserParam.Fan_Enable == 0){return 0;}       // 未启用风扇，占空比返回0
-    
-    if (current_temp <= (float)UserParam.Fan_StartTemperture) {return 0;}
+
+    float start_temp = (float)UserParam.Fan_StartTemperature;
+
+    if (start_temp >= TEMP_FULL) {return DUTY_MAX;}   // 参数异常（启转温度≥满速温度）时避免除零
+    if (current_temp <= start_temp) {return 0;}
     if (current_temp >= TEMP_FULL)  {return DUTY_MAX;}
 
-    float temp_range   = TEMP_FULL - (float)UserParam.Fan_StartTemperture;
+    float temp_range   = TEMP_FULL - start_temp;
     float duty_range   = (float)(DUTY_MAX - DUTY_MIN);
-    float temp_percent = (current_temp - (float)UserParam.Fan_StartTemperture) / temp_range;
+    float temp_percent = (current_temp - start_temp) / temp_range;
 
     uint8_t duty = (uint8_t)((float)DUTY_MIN + duty_range * temp_percent + 0.5f);
 
@@ -102,8 +104,7 @@ static uint8_t Fan_GetDutyCycle(float current_temp){
 
 static void FAN_Regulation(void) {
     Fan_Duty_Cycle = Fan_GetDutyCycle(DCDC_Temperature);
-    uint16_t ARR = 4999 * Fan_Duty_Cycle / 100 ;
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, ARR);
+    PWM_SetFanDuty(Fan_Duty_Cycle);     // 按 TIM1 实际 ARR 换算占空比
 }
 
 static void SleepingProcess(void) {
@@ -112,7 +113,7 @@ static void SleepingProcess(void) {
     SleepCounter --;            // 睡眠计数器减 1
     if (SleepCounter <= 0){     // 睡眠计数器小于等于0，进入睡眠模式
         IsSleeping = true;
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * 10 / 100);  // 将屏幕亮度设置为10 %
+        PWM_SetBrightness(10);      // 将屏幕亮度设置为10 %
         SleepCounter = UserParam.Screen_Sleeptime;  //  重置睡眠计数器
     }
 }
@@ -121,7 +122,7 @@ void WakeUp(void) {
     if (!IsSleeping){return;}    // 不在睡眠模式，直接返回
 
     IsSleeping = false;
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * UserParam.Screen_Brightness / 100);  // 恢复屏幕亮度
+    PWM_SetBrightness((uint8_t)UserParam.Screen_Brightness);  // 恢复屏幕亮度
 }
 
 

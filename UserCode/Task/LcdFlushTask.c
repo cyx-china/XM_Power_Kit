@@ -31,12 +31,17 @@
  * 2. 适配手动调用刷新屏幕的需求，根据消息，调用对应的绘制函数
  */
 
-volatile bool Is_DrawData_Busy = false;
-volatile bool IS_DrawData = false;
+// DRAW_DATA 完成信号量：由本任务在 DMA 传输结束后释放，lcd_draw_data() 阻塞等待它
+osSemaphoreId_t DrawData_Done_SemHandle = NULL;
 
 void Start_LcdFlushTask(void *argument) {
     refresh_msg_t* msg = NULL;
     osStatus_t ret;
+
+    // 计数信号量（最大1、初值0）：每次 DRAW_DATA 传输完成释放一次
+    if (DrawData_Done_SemHandle == NULL) {
+        DrawData_Done_SemHandle = osSemaphoreNew(1, 0, NULL);
+    }
 
     for (;;) {
         ret = osMessageQueueGet(LcdMsgQueueHandle, &msg, NULL, osWaitForever);
@@ -46,13 +51,15 @@ void Start_LcdFlushTask(void *argument) {
 
         switch (msg->RefreshType) {
             case REFRESH_TYPE_LVGL:
-                if (msg->area == NULL || msg->color_p == NULL) {
+                if (msg->color_p == NULL ||
+                    msg->area_x2 < msg->area_x1 || msg->area_y2 < msg->area_y1) {
                     lv_disp_flush_ready(&user_disp_drv);
                     goto MEM_FREE;
                 }
 
-                uint32_t pixel_count = (msg->area->x2 - msg->area->x1 + 1) * (msg->area->y2 - msg->area->y1 + 1);
-                LCD_SET_WINDOWS(msg->area->x1, msg->area->y1, msg->area->x2, msg->area->y2);
+                uint32_t pixel_count = (uint32_t)(msg->area_x2 - msg->area_x1 + 1) * (uint32_t)(msg->area_y2 - msg->area_y1 + 1);
+                LCD_SET_WINDOWS((uint16_t)msg->area_x1, (uint16_t)msg->area_y1,
+                                (uint16_t)msg->area_x2, (uint16_t)msg->area_y2);
 
                 LCD_FLUSH_DMA((uint32_t)msg->color_p, pixel_count);
 
@@ -110,13 +117,16 @@ void Start_LcdFlushTask(void *argument) {
                                            cmd->str, cmd->font, cmd->color, cmd->param1, cmd->param2);
                         }
                         break;
-                    case DRAW_DATA:
-                        IS_DrawData = true;
+                    case DRAW_DATA: {
                         LCD_SET_WINDOWS(cmd->start_point >> 16, cmd->start_point & 0xFFFF, cmd->end_point >> 16,
                                         cmd->end_point & 0xFFFF);
                         uint32_t ptr = ((uint32_t)cmd->param1 << 16) | cmd->param2;
-                        LCD_FLUSH_DMA(ptr, cmd->color);
+                        LCD_FLUSH_DMA(ptr, cmd->color);     // 内部阻塞等待 DMA 完成
+                        if (DrawData_Done_SemHandle != NULL) {
+                            osSemaphoreRelease(DrawData_Done_SemHandle);   // 唤醒 lcd_draw_data()
+                        }
                         break;
+                    }
                     case DRAW_IsoscelesTriangle:
                         GFX_DrawIsoscelesTriangle(cmd->start_point >> 16, cmd->start_point & 0xFFFF,cmd->param2,
                             cmd->param1,cmd->color);

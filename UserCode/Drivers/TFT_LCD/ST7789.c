@@ -78,13 +78,8 @@ void LCD_FLUSH_DMA(uint32_t src_addr,uint32_t data_length) {
 
 // FSMC的DMA传输完成中断回调
 void CB_LCD_FSMC_TransmitCpltCallback(DMA_HandleTypeDef *_hdma) {
-    // 释放信号量
+    // 释放信号量（DRAW_DATA 的完成通知由 LcdFlushTask 在本次传输结束后释放，见 lcd_draw_api.c）
     osSemaphoreRelease(LCD_DMA_Cplt_SemHandle);
-
-    if (IS_DrawData) {
-        Is_DrawData_Busy = false;
-        IS_DrawData = false;
-    }
 }
 
 

@@ -8,6 +8,7 @@
 #include "tim.h"
 #include "usbd_cdc_if.h"
 #include "UserDefineManage.h"
+#include "SwitchManager.h"
 
 /*============================================
  * APP选择界面回调函数
@@ -75,8 +76,8 @@ void Setting_screen_bright_process(void) {
     lv_snprintf(buf, sizeof(buf), "%ld%%", slider_val); // slider_val范围是10 ~ 100
     lv_label_set_text(guider_ui.screen_Setting_label_var, buf);
 
-    // 更新屏幕亮度
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * slider_val / 100);
+    // 更新屏幕亮度（按 TIM1 实际 ARR 换算，见 SwitchManager.c）
+    PWM_SetBrightness((uint8_t)slider_val);
 
     // 更新UserParam
     UserParam.Screen_Brightness = slider_val;
@@ -141,7 +142,7 @@ void Setting_fan_temperature_process(void) {
     lv_label_set_text(guider_ui.screen_Setting_label_6, buf);
 
     // 更新UserParam
-    UserParam.Fan_StartTemperture = slider_val;
+    UserParam.Fan_StartTemperature = slider_val;
     IsValueChanged = true;
 }
 
@@ -187,8 +188,8 @@ void inline Load_Setting_params() {
     //更新风扇使能switch
     lv_obj_add_state(guider_ui.screen_Setting_sw_FanEnable, UserParam.Fan_Enable ? LV_STATE_CHECKED : 0);
     //更新风扇启转温度条与标签
-    lv_slider_set_value(guider_ui.screen_Setting_slider_FanStartTemp, UserParam.Fan_StartTemperture, LV_ANIM_OFF);
-    lv_snprintf(buf4, sizeof(buf4), "%d℃", UserParam.Fan_StartTemperture);
+    lv_slider_set_value(guider_ui.screen_Setting_slider_FanStartTemp, UserParam.Fan_StartTemperature, LV_ANIM_OFF);
+    lv_snprintf(buf4, sizeof(buf4), "%d℃", UserParam.Fan_StartTemperature);
     lv_label_set_text(guider_ui.screen_Setting_label_6, buf4);
 }
 

@@ -9,6 +9,7 @@
 #include "os_handles.h"
 #include "freertos_os2.h"
 #include "ff.h"  // FATFS核心头文件
+#include "cmsis_os2.h"
 
 // -------------------------- 全局变量定义 --------------------------
 // 用户自定义参数默认值表
@@ -78,7 +79,7 @@ const UserParamType_t UserParamDefault = {
     .Beezer_Volume        = 100,        // 蜂鸣器音量，这个基本不用改，蜂鸣器又不吵
     .Beezer_Time          = 1,          // 蜂鸣时常，注意，实际时常是10 * 此值 ms，也不必改太，10ms足够了
     .Fan_Enable           = 1,          // 是否启用风扇        (uint16_t)  0/1
-    .Fan_StartTemperture  = 40,         // 风扇启转温度        (uint16_t)  20~50
+    .Fan_StartTemperature  = 40,         // 风扇启转温度        (uint16_t)  20~50
 };
 
 // 实际参数值结构体
@@ -158,16 +159,53 @@ static const ParamDesc_t param_desc_table[Param_Number] = {
     {2, &UserParamDefault.Beezer_Volume,               &UserParam.Beezer_Volume},
     {2, &UserParamDefault.Beezer_Time,                 &UserParam.Beezer_Time},
     {2, &UserParamDefault.Fan_Enable,                  &UserParam.Fan_Enable},
-    {2, &UserParamDefault.Fan_StartTemperture,         &UserParam.Fan_StartTemperture},
+    {2, &UserParamDefault.Fan_StartTemperature,         &UserParam.Fan_StartTemperature},
 };
 
 // -------------------------- 核心函数实现 --------------------------
+/*
+ * 参数备份文件 uparam.bin 的访问保护
+ * 所有参数读写函数共用同一个全局 fil 对象，而 "open → lseek → write → close" 这一整段
+ * 必须原子完成，否则第二个任务的 f_open 会把第一个任务正在使用的文件对象重置掉。
+ * FATFS 的 FF_FS_REENTRANT 只保证单次 f_* 调用互斥，保证不了这里的多步序列。
+ *
+ * 注意：不能用 Flash_Mutex 来保护——FATFS/diskio.c 的底层读写内部也会获取 Flash_Mutex
+ *      （非递归互斥量），在外层再获取会立刻自锁。
+ * 因此这里用一个专门的非递归互斥量，内部实现统一走 *_NoLock 版本，加锁只发生在公开包装里。
+ */
+static osMutexId_t Param_Mutex = NULL;
+
+static HAL_StatusTypeDef UserParam_ResetToDefault_NoLock(void);   // 前置声明：LoadAllValues 内部会调用
+
+// 首次调用发生在 InitTask 的参数加载阶段（此时还没有其它任务访问参数文件），之后不再创建
+static void Param_MutexInit(void)
+{
+    if (Param_Mutex == NULL) {
+        Param_Mutex = osMutexNew(NULL);
+    }
+}
+
+static void Param_Lock(void)
+{
+    Param_MutexInit();
+    if (Param_Mutex != NULL) {
+        osMutexAcquire(Param_Mutex, osWaitForever);
+    }
+}
+
+static void Param_Unlock(void)
+{
+    if (Param_Mutex != NULL) {
+        osMutexRelease(Param_Mutex);
+    }
+}
+
 /**
  * @brief  从配置文件加载所有参数到UserParam结构体
  * @note   加载失败时会自动重置为默认值并写入文件
  * @return HAL_OK = 加载成功，HAL_ERROR = 加载失败
  */
-HAL_StatusTypeDef UserParam_LoadAllValues(void)
+static HAL_StatusTypeDef UserParam_LoadAllValues_NoLock(void)
 {
     // 先赋值默认值，防止加载失败后参数为空
     UserParam = UserParamDefault;
@@ -176,7 +214,7 @@ HAL_StatusTypeDef UserParam_LoadAllValues(void)
     res = f_open(&fil, PARAM_PATH, FA_READ);
     if (res != FR_OK) {
         f_close(&fil);
-        return UserParam_ResetToDefault(); // 打开失败则重置默认值并写入文件
+        return UserParam_ResetToDefault_NoLock(); // 打开失败则重置默认值并写入文件
     }
 
     // 分配缓冲区
@@ -223,7 +261,7 @@ HAL_StatusTypeDef UserParam_LoadAllValues(void)
  * @param  value: 要写入的参数值指针
  * @return HAL_OK = 修改成功，HAL_ERROR = 修改失败
  */
-HAL_StatusTypeDef UserParam_UpdateSingle(UserParamType_e id, const void *value)
+static HAL_StatusTypeDef UserParam_UpdateSingle_NoLock(UserParamType_e id, const void *value)
 {
     //校验参数ID合法性
     if (id >= Param_Number) {
@@ -272,7 +310,7 @@ HAL_StatusTypeDef UserParam_UpdateSingle(UserParamType_e id, const void *value)
  * @note   内存中的UserParam保持原样，仅修改文件中的默认值
  * @return HAL_OK = 重置成功，HAL_ERROR = 写入失败
  */
-HAL_StatusTypeDef UserParam_ResetToDefault(void)
+static HAL_StatusTypeDef UserParam_ResetToDefault_NoLock(void)
 {
     // 打开/创建配置文件（覆盖模式）
     res = f_open(&fil, PARAM_PATH, FA_CREATE_ALWAYS | FA_WRITE);
@@ -318,7 +356,7 @@ HAL_StatusTypeDef UserParam_ResetToDefault(void)
  * @note   与ResetToDefault逻辑一致，但填充的是当前参数值
  * @return HAL_OK = 写入成功，HAL_ERROR = 操作失败
  */
-HAL_StatusTypeDef UserParam_SaveAllValues(void)
+static HAL_StatusTypeDef UserParam_SaveAllValues_NoLock(void)
 {
     // 打开/创建配置文件（覆盖模式）
     res = f_open(&fil, PARAM_PATH, FA_CREATE_ALWAYS | FA_WRITE);
@@ -401,7 +439,7 @@ HAL_StatusTypeDef Process_Default_Data(uint8_t *buf)
  * @note   1. 缓冲区需由调用者提前分配，长度需≥PARAM_TOTAL_BYTES
  *         2. 读取失败时缓冲区内容不保证有效性
  */
-HAL_StatusTypeDef Process_Current_Data(uint8_t* buf)
+static HAL_StatusTypeDef Process_Current_Data_NoLock(uint8_t* buf)
 {
     // 1. 校验缓冲区指针有效性
     if (buf == NULL) {
@@ -441,7 +479,7 @@ HAL_StatusTypeDef Process_Current_Data(uint8_t* buf)
  *         2. 写入长度建议等于PARAM_TOTAL_BYTES（参数总字节数），避免文件数据不完整
  *         3. 依赖FATFS驱动和外部Flash初始化完成
  */
-HAL_StatusTypeDef Write_Current_Data(uint8_t *buf, uint32_t len)
+static HAL_StatusTypeDef Write_Current_Data_NoLock(uint8_t *buf, uint32_t len)
 {
     // 输入参数有效性校验
     // - 缓冲区指针非空
@@ -469,4 +507,53 @@ HAL_StatusTypeDef Write_Current_Data(uint8_t *buf, uint32_t len)
     }
 
     return HAL_OK;
+}
+
+// -------------------------- 对外接口（带互斥锁） --------------------------
+HAL_StatusTypeDef UserParam_LoadAllValues(void)
+{
+    Param_Lock();
+    HAL_StatusTypeDef status = UserParam_LoadAllValues_NoLock();
+    Param_Unlock();
+    return status;
+}
+
+HAL_StatusTypeDef UserParam_UpdateSingle(UserParamType_e id, const void *value)
+{
+    Param_Lock();
+    HAL_StatusTypeDef status = UserParam_UpdateSingle_NoLock(id, value);
+    Param_Unlock();
+    return status;
+}
+
+HAL_StatusTypeDef UserParam_ResetToDefault(void)
+{
+    Param_Lock();
+    HAL_StatusTypeDef status = UserParam_ResetToDefault_NoLock();
+    Param_Unlock();
+    return status;
+}
+
+HAL_StatusTypeDef UserParam_SaveAllValues(void)
+{
+    Param_Lock();
+    HAL_StatusTypeDef status = UserParam_SaveAllValues_NoLock();
+    Param_Unlock();
+    return status;
+}
+
+HAL_StatusTypeDef Process_Current_Data(uint8_t *buf)
+{
+    Param_Lock();
+    HAL_StatusTypeDef status = Process_Current_Data_NoLock(buf);
+    Param_Unlock();
+    return status;
+}
+
+HAL_StatusTypeDef Write_Current_Data(uint8_t *buf, uint32_t len)
+{
+    Param_Lock();
+    HAL_StatusTypeDef status = Write_Current_Data_NoLock(buf, len);
+    Param_Unlock();
+    return status;
 }

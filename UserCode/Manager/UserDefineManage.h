@@ -158,7 +158,7 @@ typedef struct {
     uint16_t Beezer_Volume;               // 蜂鸣器音量          (uint16_t)  0~100
     uint16_t Beezer_Time;                 // 蜂鸣时长           (uint16_t)  10 * n ms
     uint16_t Fan_Enable;                  // 是否启用风扇        (uint16_t)  0/1
-    uint16_t Fan_StartTemperture;         // 风扇启转温度        (uint16_t)  20~50
+    uint16_t Fan_StartTemperature;         // 风扇启转温度        (uint16_t)  20~50
 } UserParamType_t;
 
 extern UserParamType_t UserParam;

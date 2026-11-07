@@ -139,7 +139,7 @@ static bool Sys_Init(void) {
   LCD_Clear(0x0000); // 黑色清屏
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2); // 开启显示
 
-  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, 0); // 设置风扇占空比为0
+  PWM_SetFanDuty(0); // 设置风扇占空比为0
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3); // 开启风扇
 
   // 初始化按键 & 旋转编码器
@@ -159,7 +159,7 @@ static bool Sys_Init(void) {
     pass = false;
   }
 
-  // 初始化 输入INA226  // 最大16A，分流电阻0.05Ω
+  // 初始化 输入INA226  // 额定电流16A，分流电阻0.005Ω（R005，16A时压降80mV，在INA226的±81.92mV量程内）
   if (INA226_Init(&hina226_input, &hi2c1, INPUT_ADDR, 16.0f, 0.005f) != HAL_OK) {
     INA226_pass = false; // INA226初始化失败
     pass = false;
@@ -170,7 +170,7 @@ static bool Sys_Init(void) {
   htmp102_dcdc.dev_addr   = 0x48 << 1;        // 0x90
 
   if (TMP102_Init(&htmp102_dcdc) != HAL_OK) {
-    TMP102_pass = false;;
+    TMP102_pass = false;
     pass = false;
   }
 
@@ -190,8 +190,8 @@ static bool Sys_Init(void) {
     pass = false;
   }
 
-  // 设置屏幕亮度
-  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 4999 * UserParam.Screen_Brightness / 100);
+  // 设置屏幕亮度（按 TIM1 实际 ARR 换算，见 SwitchManager.c）
+  PWM_SetBrightness((uint8_t)UserParam.Screen_Brightness);
 
   // 设置睡眠时间
   SleepCounter = UserParam.Screen_Sleeptime;

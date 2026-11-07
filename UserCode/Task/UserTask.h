@@ -24,6 +24,7 @@
 #include "MCP4725.h"
 #include "lv_svg.h"
 #include "stm32f4xx_hal.h"
+#include "cmsis_os2.h"
 #include "Keys.h"
 
 /*================ PublicExtern ================*/
@@ -91,7 +92,12 @@ typedef struct {
 typedef struct {
     RefreshType RefreshType;    // 刷新类型（LVGL/手动）
     // LVGL所需参数
-    const lv_area_t * area;     // 刷新区域结构体指针
+    // 注意：LVGL 传入的 area 指向它自己的栈上变量，消息是异步消费的，
+    //       保存指针会在刷屏线程使用时早已失效，因此这里直接保存 4 个坐标值。
+    int16_t area_x1;
+    int16_t area_y1;
+    int16_t area_x2;
+    int16_t area_y2;
     lv_color_t * color_p;       // 数据指针
 
     // 手动调用刷新所需参数
@@ -109,8 +115,9 @@ typedef enum {
     Triangle_LEFT
 }Triangle_Direction_e;
 
-extern volatile bool Is_DrawData_Busy;      // 专为了 DRAW_DATA 准备
-extern volatile bool IS_DrawData;
+// DRAW_DATA 的完成信号：由 LCD 刷屏线程在 DMA 传输结束后释放，
+// 供 lcd_draw_data() 等待"本次数据传输完成"（替代原来的忙等标志位）
+extern osSemaphoreId_t DrawData_Done_SemHandle;
 /*================= PageSelectTask ================*/
 // 定义app列表枚举
 typedef enum {

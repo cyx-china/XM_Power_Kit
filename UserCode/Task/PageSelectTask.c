@@ -28,7 +28,7 @@ static void ResumeTask(AppListType APP);
 
 AppListType RunningApp = APP_NONE;
 
-AppListType TargetApp;
+static AppListType TargetApp;        // 最近一次从队列取到的目标 APP（仅本文件使用）
 
 
 void Start_PageSelectTask(void *argument) {
@@ -43,6 +43,15 @@ void Start_PageSelectTask(void *argument) {
 
     for (;;) {
         if (osMessageQueueGet(AppSwitchQueueHandle,&TargetApp,NULL,osWaitForever) != osOK) {
+            TargetApp = APP_NONE;
+            continue;
+        }
+
+        // 切换前先校验目标 APP：
+        // 1) 越界或 APP_NONE 直接丢弃，避免 ResumeTask 查表落空；
+        // 2) 若先把当前 APP 挂起、再发现目标无法运行，就会出现"所有 APP 都挂起"的
+        //    死局（只能复位），因此必须先确认目标合法再挂起当前 APP。
+        if (TargetApp <= APP_NONE || TargetApp > APP_CAL) {
             TargetApp = APP_NONE;
             continue;
         }

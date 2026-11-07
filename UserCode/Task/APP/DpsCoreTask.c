@@ -36,7 +36,13 @@
  * @brief 毫秒转小时系数
  * @note  用于能量计算（能量=功率×时间），1小时=3600000毫秒
  */
-#define MS_TO_HOUR (1.0f / 3600000.0f)
+#define MS_TO_HOUR (1.0 / 3600000.0)     // 用 double：能量是小量累加，float 会丢精度
+
+/**
+ * @brief 能量积分的默认步长（小时）
+ * @note  开机阶段 ADC 尚未配置时使用；实际步长由 DPS_UpdateEnergyPeriod() 按 TIM8 配置刷新
+ */
+#define ENERGY_DT_HOUR_DEFAULT MS_TO_HOUR
 
 /* ========================== 枚举类型定义 ========================== */
 /**
@@ -154,8 +160,29 @@ volatile float Voltage = 0;                  // 实时输出电压（单位：V�
 volatile float Voltage_PID = 0;              // 实时输出电压_PID（单位：V）
 volatile float Current = 0;                  // 实时输出电流_显示（单位：A）
 volatile float Current_PID = 0;              // 实时输出电流_PID（单位：A）  此变量也用于校准
-float Power = 0;                             // 实时输出功率（单位：W）
-float energy = 0;                            // 累计输出能量（单位：Wh）
+volatile float Power = 0;                    // 实时输出功率（单位：W）  在ADC中断中更新
+volatile double energy = 0;                  // 累计输出能量（单位：Wh） 在ADC中断中累加
+                                             // 必须用 double：单次增量只有 ~1e-6 Wh（5W 负载），
+                                             // float 在数值涨到几 Wh 之后的最小步进就大于增量，
+                                             // 加法会被舍入掉，表现为"能量不再增长"。
+
+// 单次 ADC 回调（64 对采样）对应的时长（单位：小时）
+double energy_dt_hour = ENERGY_DT_HOUR_DEFAULT;
+
+/**
+ * @brief  读取累计能量（供任务上下文使用）
+ * @note   double 在 32 位 MCU 上不是原子类型，中断里更新时会分两次写 32 位字，
+ *         任务直接读可能读到"高低半字不同步"的撕裂值，因此这里短暂关中断再读。
+ */
+double DPS_GetEnergy(void) {
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    double value = energy;
+    if (primask == 0U) {
+        __enable_irq();
+    }
+    return value;
+}
 
 uint32_t running_time = 0;                   // 电源运行时长（单位：秒）
 
@@ -258,7 +285,7 @@ void formatFloatMessage(float voltage, float current, char *message);
 void formatTempMessage(float temp, char *message);
 void formatOutputMessage(float value, char *message);
 int float_to_fixed_00_00(float value, char *buf);
-int float_to_0000_000Wh(float value, char *buf);
+int float_to_0000_000Wh(double value, char *buf);
 int seconds_to_hms_format(uint32_t time, char *buf);
 int uint8_to_000_percent(uint8_t value, char *buf);
 
@@ -481,13 +508,13 @@ int float_to_fixed_00_00(float value, char *buf) {
  * @retval 输出字符串长度（固定9）
  * @note   数值范围限制：0 ~ 9999.999
  */
-int float_to_0000_000Wh(float value, char *buf) {
+int float_to_0000_000Wh(double value, char *buf) {
     // 边界值保护
     if (value < 0) value = -value;
-    if (value > 9999.999f) value = 9999.999f;
+    if (value > 9999.999) value = 9999.999;
 
-    // 转换为毫瓦时整数
-    uint32_t ival = (uint32_t) (value * 1000.0f + 0.5f);
+    // 转换为毫瓦时整数（用 double 运算，否则 9999 量级上 float 的最小步进已达 1mWh）
+    uint32_t ival = (uint32_t) (value * 1000.0 + 0.5);
     char *p = buf;
 
     // 写入整数部分（4位补0）
@@ -553,6 +580,26 @@ int uint8_to_000_percent(uint8_t value, char *buf) {
 
 /* ========================== ADC相关函数实现 ========================== */
 /**
+ * @brief  按 TIM8 的实际配置刷新能量积分步长
+ * @note   ADC 回调每处理 64 对采样触发一次，采样间隔 = (PSC+1)*(ARR+1)/TIM8_CLK，
+ *        原先固定用 1ms 的 MS_TO_HOUR 会把能量算高（实际 ≈857µs 一次）。
+ *        TIM8 挂在 APB2 上，APB2 预分频不为 1 时定时器时钟为 PCLK2 的 2 倍。
+ * @retval 无
+ */
+static void DPS_UpdateEnergyPeriod(void) {
+    // 直接读寄存器：PSC/ARR 在运行期被 __HAL_TIM_SET_xxx 改写，Init 结构体里的值并不可靠
+    uint32_t psc = (uint32_t)htim8.Instance->PSC + 1U;
+    uint32_t arr = (uint32_t)htim8.Instance->ARR + 1U;
+
+    uint32_t pclk2 = HAL_RCC_GetPCLK2Freq();
+    uint32_t ppre2 = (RCC->CFGR & RCC_CFGR_PPRE2) >> RCC_CFGR_PPRE2_Pos;
+    uint32_t tim_clk = (ppre2 < 4U) ? pclk2 : (pclk2 * 2U);   // 0xx: 不分频，1xx: HCLK/n -> ×2
+
+    double trigger_period_s = (double)psc * (double)arr / (double)tim_clk;   // 单次触发间隔
+    energy_dt_hour = trigger_period_s * 64.0 / 3600.0;                       // 一次回调 = 64 对采样
+}
+
+/**
  * @brief  ADC转换完成回调函数
  * @param  hadc: ADC句柄指针
  * @retval 无
@@ -608,8 +655,9 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         Power = Voltage * Current;
     }
 
-    // 电源开启时累计能量（功率×时间，时间单位：小时）
-    if (IsPowerOn) energy += Power * MS_TO_HOUR;
+    // 电源开启时累计能量（功率×时间，步长按 TIM8 实际配置换算成小时）
+    // 增量用 double 计算：float 下 5W 负载的增量约 1.2e-6 Wh，累到几 Wh 就会被舍入掉
+    if (IsPowerOn) energy += (double)Power * energy_dt_hour;
 
     AdcTim_ON();                                                             // 开启定时器（ADC触发源）
 }
@@ -1022,7 +1070,7 @@ static void UpdateLableValues(void) {
 
     // 更新能量显示（仅电源开启时）
     if (IsPowerOn) {
-        float_to_0000_000Wh(energy, EnergyMsg);
+        float_to_0000_000Wh(DPS_GetEnergy(), EnergyMsg);
         lcd_draw_string(188, 215, EnergyMsg, &KaiTi16x20, 0xFFFF, 0x31e8, -3);
     }
 
@@ -1418,6 +1466,7 @@ void Resume_DpsCoreTask(void) {
     AdcTim_OFF();
     __HAL_TIM_SET_PRESCALER(&htim8, 0);   // 设定更新频率64Khz
     __HAL_TIM_SET_AUTORELOAD(&htim8, 2249);
+    DPS_UpdateEnergyPeriod();             // 按刚下发的 TIM8 配置刷新能量积分步长
     AdcTim_ON();                                                            // 启动定时器（ADC触发源）
 
     PID_Init();                                                             // 初始化PID控制器

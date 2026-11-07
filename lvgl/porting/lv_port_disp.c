@@ -127,7 +127,11 @@ static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_colo
 
         // 填充消息内容
         msg->RefreshType = REFRESH_TYPE_LVGL;   // 刷新类型为 LVGL
-        msg->area = area;                       // 刷新区域指针
+        // area 是 LVGL 栈上的临时变量，必须拷贝坐标值而不是保存指针
+        msg->area_x1 = (int16_t)area->x1;
+        msg->area_y1 = (int16_t)area->y1;
+        msg->area_x2 = (int16_t)area->x2;
+        msg->area_y2 = (int16_t)area->y2;
         msg->color_p = color_p;                 // 颜色数据指针
         msg->cmd_mem = NULL;                    // 手动刷新命令指针设为NULL
         msg->msg_mem = msg;                     // 消息自身内存指针指向自己，方便后续释放
