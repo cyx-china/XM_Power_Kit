@@ -367,7 +367,6 @@ void formatOutputMessage(float value, char *message) {
     *p = '\0';
 }
 
-/**
 /* ========================== ADC相关函数实现 ========================== */
 /**
  * @brief  按 TIM8 的实际配置刷新能量积分步长

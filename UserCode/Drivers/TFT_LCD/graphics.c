@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 #include "cmsis_os2.h"
 #include "dma.h"
@@ -11,6 +12,82 @@
 #include "ST7789.h"
 #include "font.h"
 #include "os_handles.h"
+// -------------------------- 字体/图片文件句柄常驻缓存 -------------------------- //
+// 一次 f_open 需要多次通过 SPI 读取目录项与 FAT，而文字/图片绘制是最高频的路径，
+// 因此这里把用到的文件常驻打开，绘制时只做 seek/read，不再反复开关文件。
+#define GFX_FILE_CACHE_NUM      4           // 同时常驻打开的文件数（字体/图片）
+#define GFX_IMAGE_MAX_BYTES     1024        // 图片分块读取的缓冲上限（字节）
+#define GFX_FLUSH_PIXELS        1600        // 单次刷屏缓冲最大像素数（32x50 是最大字模）
+
+// 字模灰度缓存：字体文件在 SPI Flash 上，一次 4KB 扇区读取约 0.8ms，
+// 缓存最近用到的字模后，重复刷新同样的数字/文字基本不再访问 Flash。
+#ifndef GFX_GLYPH_CACHE_BYTES
+#define GFX_GLYPH_CACHE_BYTES   6144
+#endif
+#define GFX_GLYPH_CACHE_ENTRIES 24
+
+// RGB565通道拆分/合并宏
+#define RGB565_GET_R(color)    (((color) >> 11) & 0x1F)
+#define RGB565_GET_G(color)    (((color) >> 5)  & 0x3F)
+#define RGB565_GET_B(color)    ((color) & 0x1F)
+#define RGB565_MERGE(r, g, b)  (((r & 0x1F) << 11) | ((g & 0x3F) << 5) | (b & 0x1F))
+
+typedef struct {
+    FIL         fil;
+    const char *path;       // 常驻字符串（字体/图片路径）
+    uint32_t    stamp;      // 最近使用序号，用于淘汰
+    uint8_t     used;
+} GfxFileHandle_t;
+
+typedef struct {
+    const FontInfo *font;
+    uint32_t        offset;     // 字模数据在 glyph_pool 中的偏移
+    uint32_t        stamp;      // 最近使用序号，用于 LRU 淘汰
+    uint16_t        index;      // 字模序号
+    uint16_t        size;       // 字模字节数
+} GfxGlyphEntry_t;
+
+static GfxFileHandle_t  file_handles[GFX_FILE_CACHE_NUM];
+static uint32_t         file_stamp;
+static GfxGlyphEntry_t  glyph_entries[GFX_GLYPH_CACHE_ENTRIES];
+static uint8_t          glyph_pool[GFX_GLYPH_CACHE_BYTES];
+static uint16_t         glyph_pool_used;
+static uint8_t          glyph_count;
+static uint32_t         glyph_stamp;
+static uint16_t         pixel_flush_buf[GFX_FLUSH_PIXELS];    // RGB565 刷屏缓冲
+static uint16_t         blend_lut[256];                       // 灰度→RGB565 混合查表
+static uint16_t         blend_lut_fg, blend_lut_bg;
+static uint8_t          blend_lut_valid;
+
+// -------------------------- 字模/图片文件访问 -------------------------- //
+// 打开（或复用）文件，path 必须是常驻字符串
+static FIL *gfx_file_get(const char *path) {
+    if (path == NULL) { return NULL; }
+
+    for (uint8_t i = 0; i < GFX_FILE_CACHE_NUM; i++) {
+        if (file_handles[i].used && strcmp(file_handles[i].path, path) == 0) {
+            file_handles[i].stamp = ++file_stamp;
+            return &file_handles[i].fil;
+        }
+    }
+
+    // 找空槽，没有空槽就淘汰最久未使用的
+    uint8_t slot = 0;
+    for (uint8_t i = 0; i < GFX_FILE_CACHE_NUM; i++) {
+        if (!file_handles[i].used) { slot = i; break; }
+        if (file_handles[i].stamp < file_handles[slot].stamp) { slot = i; }
+    }
+    if (file_handles[slot].used) {
+        f_close(&file_handles[slot].fil);
+        file_handles[slot].used = 0;
+    }
+    if (f_open(&file_handles[slot].fil, path, FA_READ) != FR_OK) { return NULL; }
+
+    file_handles[slot].path  = path;
+    file_handles[slot].stamp = ++file_stamp;
+    file_handles[slot].used  = 1;
+    return &file_handles[slot].fil;
+}
 // -------------------------- 定义&声明 -------------------------- //
 static uint16_t FLUSH_BUFFER[LCD_FILL_BLOCK_COUNT];
 static inline uint16_t alpha_blend_565(uint16_t fg, uint16_t bg, uint8_t alpha_0255);
@@ -555,33 +632,33 @@ void GFX_DrawIsoscelesTriangle(uint16_t x0, uint16_t y0, uint16_t direction, uin
 
 
 // -------------------------- 图片绘制 -------------------------- //
-#define IMAGE_MAX_BUFFER_SIZE  1024
-
 void GFX_DrawImage(const ImageInfo *pic, uint16_t x, uint16_t y) {
     if (pic == NULL || pic->width == 0 || pic->height == 0) {
         return;
     }
 
     uint32_t total_bytes = (uint32_t) pic->width * pic->height * 2; // 每像素2字节（RGB565）
-    if (total_bytes == 0) return;
+    if (total_bytes == 0) { return; }
 
-    res = f_open(&fil, pic->path, FA_READ);
-    if (res != FR_OK) return;
-
-    if (f_size(&fil) != total_bytes) {
-        f_close(&fil);
+    // 图片只在切页时绘制，不占用字体缓存槽位
+    static FIL image_fil;
+    if (f_open(&image_fil, pic->path, FA_READ) != FR_OK) { return; }
+    if (f_size(&image_fil) != total_bytes) {
+        f_close(&image_fil);
         return;
     }
 
-    // 分配缓冲区（不超过最大限制）
-    uint32_t buffer_size = (total_bytes < IMAGE_MAX_BUFFER_SIZE) ? total_bytes : IMAGE_MAX_BUFFER_SIZE;
-    uint8_t *buffer = malloc(buffer_size);
-    if (buffer == NULL) {
-        f_close(&fil);
-        return;
+    // 复用刷屏缓冲，不再每次 malloc/free
+    uint8_t *buffer = (uint8_t *) pixel_flush_buf;
+    uint32_t row_bytes = (uint32_t) pic->width * 2; // 每行数据字节数
+    uint32_t buffer_size = sizeof(pixel_flush_buf);
+    if (buffer_size > GFX_IMAGE_MAX_BYTES) { buffer_size = GFX_IMAGE_MAX_BYTES; }
+    if (buffer_size < row_bytes) { buffer_size = row_bytes; } // 至少能装下一行
+    if (buffer_size > sizeof(pixel_flush_buf)) {
+        f_close(&image_fil);
+        return; // 图片单行超出缓冲
     }
-
-    uint32_t row_bytes = pic->width * 2;          // 每行数据字节数
+    if (total_bytes < buffer_size) { buffer_size = total_bytes; }
     uint32_t offset = 0;
     uint32_t bytes_left = total_bytes;
     uint16_t cur_y = y;
@@ -594,34 +671,21 @@ void GFX_DrawImage(const ImageInfo *pic, uint16_t x, uint16_t y) {
         if (bytes_this_time > row_bytes) {
             bytes_this_time = (bytes_this_time / row_bytes) * row_bytes;
         }
+        if (bytes_this_time == 0) { bytes_this_time = row_bytes; } // 理论上不会发生
 
-        // 如果调整后为0（理论上不会发生，但为了安全，强制读取一行）
-        if (bytes_this_time == 0) {
-            bytes_this_time = row_bytes;
-        }
+        if (f_lseek(&image_fil, (FSIZE_t) offset) != FR_OK) { break; }
+        if (f_read(&image_fil, buffer, bytes_this_time, &br) != FR_OK || br != bytes_this_time) { break; }
 
-        // 定位到文件偏移并读取数据
-        res = f_lseek(&fil, offset);
-        if (res != FR_OK) break;
-
-        res = f_read(&fil, buffer, bytes_this_time, &br);
-        if (res != FR_OK || br != bytes_this_time) break;
-
-        // 计算本次能绘制的完整行数
-        uint16_t block_height = bytes_this_time / row_bytes;
-
-        // 设置LCD窗口并刷入数据
+        uint16_t block_height = (uint16_t) (bytes_this_time / row_bytes); // 本次能绘制的完整行数
         LCD_SET_WINDOWS(x, cur_y, x + pic->width - 1, cur_y + block_height - 1);
         LCD_FLUSH_DMA((uint32_t) buffer, bytes_this_time / 2); // 像素数 = 字节数/2
 
-        // 更新偏移、剩余字节和当前行
         offset += bytes_this_time;
         bytes_left -= bytes_this_time;
         cur_y += block_height;
     }
 
-    free(buffer);
-    f_close(&fil);
+    f_close(&image_fil);
 }
 // -------------------------- 文字绘制 -------------------------- //
 // 获取utf-8编码的编码有效长度
@@ -639,29 +703,29 @@ static inline uint8_t get_utf8_len(const char *str) {
     return len;
 }
 
-// 在字体映射表中查找字符的索引
+// 在字体映射表中查找字符的索引（先比较首字节，避免大量 memcmp 调用）
 static int16_t find_char_index(const FontInfo *font, const char *string) {
     uint8_t len = get_utf8_len(string);
-    if (len == 0) return 0;
+    if (len == 0) { return -1; }
 
     for (uint16_t i = 0; i < font->font_num; i++) {
-        uint8_t *head = (uint8_t *) font->font_map[i];
-        if (memcmp(head, string, len) == 0) {
-            return i;
-        }
+        const uint8_t *head = (const uint8_t *) font->font_map[i];
+        if (head[0] != (uint8_t) string[0]) { continue; }
+        if (len == 1) { return (int16_t) i; }
+        if (memcmp(head + 1, string + 1, len - 1) == 0) { return (int16_t) i; }
     }
     return -1; // 未找到，返回-1
 }
 
-// RGB565通道拆分/合并宏
-#define RGB565_GET_R(color)    (((color) >> 11) & 0x1F)
-#define RGB565_GET_G(color)    (((color) >> 5)  & 0x3F)
-#define RGB565_GET_B(color)    ((color) & 0x1F)
-#define RGB565_MERGE(r, g, b)  (((r & 0x1F) << 11) | ((g & 0x3F) << 5) | (b & 0x1F))
+// 计算小数点的有效显示宽度（只显示左半边）
+static inline uint8_t get_dot_effective_width(const FontInfo *font) {
+    return (uint8_t) ((font->font_width * 6) / 10 + 1);
+}
 
-// 批量灰度图转RGB565
-static void batch_gray_to_rgb565(const uint8_t *gray_buf, uint16_t *flush_buf, uint32_t pixel_num, uint16_t ftColor,
-                                 uint16_t bgColor) {
+// 预先算好 前景色/背景色 的灰度混合结果，逐像素时只查表，不再做乘除法
+static void gfx_blend_lut_prepare(uint16_t ftColor, uint16_t bgColor) {
+    if (blend_lut_valid && blend_lut_fg == ftColor && blend_lut_bg == bgColor) { return; }
+
     register uint8_t ft_r = RGB565_GET_R(ftColor);
     register uint8_t ft_g = RGB565_GET_G(ftColor);
     register uint8_t ft_b = RGB565_GET_B(ftColor);
@@ -669,191 +733,159 @@ static void batch_gray_to_rgb565(const uint8_t *gray_buf, uint16_t *flush_buf, u
     register uint8_t bg_g = RGB565_GET_G(bgColor);
     register uint8_t bg_b = RGB565_GET_B(bgColor);
 
-    volatile uint32_t i;
-    uint32_t remain = pixel_num % 4; // 处理不能被4整除的剩余像素
-    uint32_t main_num = pixel_num - remain;
-
-    // 主循环：每次处理4个像素，减少循环次数
-    for (i = 0; i < main_num; i += 4) {
-        // 像素1
-        uint8_t g1 = gray_buf[i];
-        uint32_t r1 = bg_r * (255 - g1) + ft_r * g1;
-        uint32_t g1_ = bg_g * (255 - g1) + ft_g * g1;
-        uint32_t b1 = bg_b * (255 - g1) + ft_b * g1;
-        flush_buf[i] = RGB565_MERGE((r1+127)/255, (g1_+127)/255, (b1+127)/255);
-
-        // 像素2
-        uint8_t g2 = gray_buf[i + 1];
-        uint32_t r2 = bg_r * (255 - g2) + ft_r * g2;
-        uint32_t g2_ = bg_g * (255 - g2) + ft_g * g2;
-        uint32_t b2 = bg_b * (255 - g2) + ft_b * g2;
-        flush_buf[i + 1] = RGB565_MERGE((r2+127)/255, (g2_+127)/255, (b2+127)/255);
-
-        // 像素3
-        uint8_t g3 = gray_buf[i + 2];
-        uint32_t r3 = bg_r * (255 - g3) + ft_r * g3;
-        uint32_t g3_ = bg_g * (255 - g3) + ft_g * g3;
-        uint32_t b3 = bg_b * (255 - g3) + ft_b * g3;
-        flush_buf[i + 2] = RGB565_MERGE((r3+127)/255, (g3_+127)/255, (b3+127)/255);
-
-        // 像素4
-        uint8_t g4 = gray_buf[i + 3];
-        uint32_t r4 = bg_r * (255 - g4) + ft_r * g4;
-        uint32_t g4_ = bg_g * (255 - g4) + ft_g * g4;
-        uint32_t b4 = bg_b * (255 - g4) + ft_b * g4;
-        flush_buf[i + 3] = RGB565_MERGE((r4+127)/255, (g4_+127)/255, (b4+127)/255);
+    for (uint32_t g = 0; g < 256; g++) {
+        uint32_t r  = bg_r * (255 - g) + ft_r * g;
+        uint32_t gg = bg_g * (255 - g) + ft_g * g;
+        uint32_t b  = bg_b * (255 - g) + ft_b * g;
+        blend_lut[g] = RGB565_MERGE((r + 127) / 255, (gg + 127) / 255, (b + 127) / 255);
     }
-
-    // 处理剩余像素
-    for (; i < pixel_num; i++) {
-        uint8_t g = gray_buf[i];
-        uint32_t r = bg_r * (255 - g) + ft_r * g;
-        uint32_t g_ = bg_g * (255 - g) + ft_g * g;
-        uint32_t b = bg_b * (255 - g) + ft_b * g;
-        flush_buf[i] = RGB565_MERGE((r+127)/255, (g_+127)/255, (b+127)/255);
-    }
+    blend_lut_fg = ftColor;
+    blend_lut_bg = bgColor;
+    blend_lut_valid = 1;
 }
 
-// 计算小数点的有效显示宽度（左半边：font_width/2 +1）
-static inline uint8_t get_dot_effective_width(const FontInfo *font) {
-    return (font->font_width * 0.6 ) + 1;
+// 淘汰一个缓存项，并把后面的字模数据前移，避免产生碎片
+static void gfx_glyph_remove(uint8_t idx) {
+    uint32_t off = glyph_entries[idx].offset;
+    uint16_t size = glyph_entries[idx].size;
+
+    if (off + size < glyph_pool_used) {
+        memmove(&glyph_pool[off], &glyph_pool[off + size], glyph_pool_used - off - size);
+    }
+    glyph_pool_used -= size;
+
+    for (uint8_t i = 0; i < glyph_count; i++) {
+        if (i != idx && glyph_entries[i].offset > off) {
+            glyph_entries[i].offset -= size;
+        }
+    }
+    for (uint8_t i = idx; i + 1 < glyph_count; i++) {
+        glyph_entries[i] = glyph_entries[i + 1];
+    }
+    glyph_count--;
 }
 
-// 绘制小数点（仅左半边显示）专门优化版本
-static void GFX_DrawDotChar(FIL *FIL, uint16_t x, uint16_t y, const char *ch, const FontInfo *font,
-                            uint16_t ftColor, uint16_t bgColor, uint8_t *gray_buffer, uint16_t *flush_buffer) {
-    int16_t index = find_char_index(font, ch); // 获取字符索引
-    if (index == -1) { return; } // 字符未找到，直接返回
-
-    uint32_t full_pixel_num = font->font_width * font->font_height; // 完整字符像素数
-    uint8_t dot_width = get_dot_effective_width(font); // 小数点有效宽度
-    uint32_t dot_pixel_num = dot_width * font->font_height; // 小数点有效像素数
-
-    if (FIL == NULL || gray_buffer == NULL || flush_buffer == NULL) {
-        return; // 参数检查，确保指针有效
+// 取字模灰度数据（带缓存），返回 font_width*font_height 字节的字模起始地址
+static const uint8_t *gfx_glyph_get(const FontInfo *font, uint16_t index) {
+    for (uint8_t i = 0; i < glyph_count; i++) {
+        if (glyph_entries[i].font == font && glyph_entries[i].index == index) {
+            glyph_entries[i].stamp = ++glyph_stamp;
+            return &glyph_pool[glyph_entries[i].offset];
+        }
     }
 
-    // 从文件中读取完整的小数点字模数据
-    res = f_lseek(FIL, index * full_pixel_num); // 定位到字模数据位置
-    if (res != FR_OK) { return; }
+    uint32_t size = (uint32_t) font->font_width * font->font_height;
+    if (size > GFX_GLYPH_CACHE_BYTES || size > 0xFFFF) { return NULL; }
 
-    res = f_read(FIL, gray_buffer, full_pixel_num, &br); // 读取完整字模数据
-    if (res != FR_OK || br != full_pixel_num) { return; } // 读取失败或字节数不匹配
-
-    // 裁剪灰度数据：仅保留左半边（逐行截取前dot_width个像素）
-    for (uint16_t row = 0; row < font->font_height; row++) {
-        uint8_t *src_row = &gray_buffer[row * font->font_width]; // 源行起始
-        uint8_t *dst_row = &gray_buffer[row * dot_width]; // 目标行起始
-        memcpy(dst_row, src_row, dot_width); // 复制左半边像素
+    // 空间不足时按 LRU 淘汰最久未用的字模
+    while (glyph_count >= GFX_GLYPH_CACHE_ENTRIES ||
+           (uint32_t) glyph_pool_used + size > GFX_GLYPH_CACHE_BYTES) {
+        if (glyph_count == 0) { return NULL; }
+        uint8_t oldest = 0;
+        for (uint8_t i = 1; i < glyph_count; i++) {
+            if (glyph_entries[i].stamp < glyph_entries[oldest].stamp) { oldest = i; }
+        }
+        gfx_glyph_remove(oldest);
     }
 
-    // 灰度转RGB565（仅处理有效像素数）
-    batch_gray_to_rgb565(gray_buffer, flush_buffer, dot_pixel_num, ftColor, bgColor);
+    FIL *fp = gfx_file_get(font->path);
+    if (fp == NULL) { return NULL; }
+    if (f_lseek(fp, (FSIZE_t) index * size) != FR_OK) { return NULL; }
 
-    // 设置LCD窗口（仅左半边区域）并发送数据
-    LCD_SET_WINDOWS(x, y, x + dot_width - 1, y + font->font_height - 1);
-    LCD_FLUSH_DMA((uint32_t) flush_buffer, dot_pixel_num);
+    uint8_t *dst = &glyph_pool[glyph_pool_used];
+    if (f_read(fp, dst, size, &br) != FR_OK || br != size) { return NULL; }
+
+    glyph_entries[glyph_count].font   = font;
+    glyph_entries[glyph_count].index  = index;
+    glyph_entries[glyph_count].offset = glyph_pool_used;
+    glyph_entries[glyph_count].size   = (uint16_t) size;
+    glyph_entries[glyph_count].stamp  = ++glyph_stamp;
+    glyph_count++;
+    glyph_pool_used += (uint16_t) size;
+    return dst;
 }
 
-// 绘制单个字符(作为绘制字符串的底层函数，外部接口为 GFX_DrawString)
-static void GFX_DrawChar(FIL *FIL, uint16_t x, uint16_t y, const char *ch, const FontInfo *font,
-                         uint16_t ftColor, uint16_t bgColor, uint8_t *gray_buffer, uint16_t *flush_buffer) {
-    int16_t index = find_char_index(font, ch); // 获取字符索引
-    if (index == -1) { return; } // 字符未找到，直接返回
+// 绘制单个字模：灰度 → RGB565 → 一次 DMA 刷屏
+static void gfx_draw_glyph(const FontInfo *font, uint16_t index, uint16_t x, uint16_t y, uint8_t is_dot) {
+    const uint8_t *gray = gfx_glyph_get(font, index);
+    if (gray == NULL) { return; }
 
-    uint32_t pixel_num = font->font_width * font->font_height; // 计算像素总数
+    uint16_t width  = font->font_width;
+    uint16_t height = font->font_height;
+    uint16_t draw_w = is_dot ? get_dot_effective_width(font) : width;
+    if (draw_w > width) { draw_w = width; }
 
-    if (FIL == NULL || gray_buffer == NULL || flush_buffer == NULL) {
-        return; // 参数检查，确保指针有效
+    uint32_t pixel_num = (uint32_t) draw_w * height;
+    if (pixel_num > GFX_FLUSH_PIXELS) { return; }
+
+    for (uint16_t row = 0; row < height; row++) {
+        const uint8_t *src = gray + (uint32_t) row * width;
+        uint16_t *dst = pixel_flush_buf + (uint32_t) row * draw_w;
+        uint16_t col = 0;
+        for (; col + 4 <= draw_w; col += 4) {
+            dst[col]     = blend_lut[src[col]];
+            dst[col + 1] = blend_lut[src[col + 1]];
+            dst[col + 2] = blend_lut[src[col + 2]];
+            dst[col + 3] = blend_lut[src[col + 3]];
+        }
+        for (; col < draw_w; col++) {
+            dst[col] = blend_lut[src[col]];
+        }
     }
 
-    // 从文件中读取字模数据到灰度缓冲区
-    res = f_lseek(FIL, index * pixel_num); // 定位到字模数据位置
-    if (res != FR_OK) { return; }
-
-    res = f_read(FIL, gray_buffer, pixel_num, &br); // 读取字模数据
-    if (res != FR_OK || br != pixel_num) { return; } // 读取失败或字节数不匹配
-
-    // 根据灰度数据，融合前景色和背景色生成最终的RGB565数据到Flush_Buffer
-    batch_gray_to_rgb565(gray_buffer, flush_buffer, pixel_num, ftColor, bgColor);
-
-    // 设置LCD窗口并使用DMA发送Flush_Buffer数据到LCD
-    LCD_SET_WINDOWS(x, y, x + font->font_width - 1, y + font->font_height - 1);
-    LCD_FLUSH_DMA((uint32_t) flush_buffer, pixel_num);
+    LCD_SET_WINDOWS(x, y, x + draw_w - 1, y + height - 1);
+    LCD_FLUSH_DMA((uint32_t) pixel_flush_buf, pixel_num);
 }
 
 void GFX_DrawString(uint16_t x, uint16_t y, const char *str, const FontInfo *font,
                     uint16_t ftColor, uint16_t bgColor, int8_t spacing) {
-    if (str == NULL || font == NULL) {
+    if (str == NULL || font == NULL || *str == '\0') {
         return; // 参数检查，确保指针有效
     }
-
-    res = f_open(&fil, font->path, FA_READ);
-    if (res != FR_OK) {
-        return; // 打开字体文件失败
+    if ((uint32_t) font->font_width * font->font_height > GFX_FLUSH_PIXELS) {
+        return; // 字模超出缓冲，避免越界
+    }
+    if (gfx_file_get(font->path) == NULL) {
+        return; // 字体文件不可用
     }
 
-    uint32_t pixel_num = font->font_width * font->font_height;
-    uint8_t *gray_buffer = malloc(pixel_num); // 字模灰度缓冲区
-    uint16_t *flush_buffer = malloc(pixel_num * 2); // RGB565缓冲区
-
-    if (gray_buffer == NULL || flush_buffer == NULL) {
-        f_close(&fil);
-        if (gray_buffer) free(gray_buffer);
-        if (flush_buffer) free(flush_buffer);
-        return; // 内存分配失败
-    }
+    gfx_blend_lut_prepare(ftColor, bgColor);
 
     uint16_t cursor_x = x;
     const char *p = str;
 
     while (*p) {
         uint8_t utf8_len = get_utf8_len(p);
-        if (utf8_len == 0) break; // 无效UTF-8编码，停止处理
+        if (utf8_len == 0) { break; } // 无效UTF-8编码，停止处理
 
-        // 1. 先获取字符索引（提前判断是否找到字符）
         int16_t char_index = find_char_index(font, p);
-        // 2. 判断是否为小数点（.）：仅单字节ASCII 0x2E
         uint8_t is_dot = (utf8_len == 1 && (uint8_t) *p == 0x2E) ? 1 : 0;
-        uint16_t char_step = 0; // 初始化字符步进值
+        uint16_t char_step;
 
-        // 3. 核心逻辑：根据字符是否找到 + 是否为小数点，计算步进值
-        if (char_index == -1) {
-            // 字符未找到：步进值 = 0.7 * 字体宽度 向上取整
-            char_step = (uint16_t) ceil(font->font_width * 0.7f);
+        if (char_index < 0) {
+            char_step = (uint16_t) ((font->font_width * 7 + 9) / 10); // 未收录：按 0.7 倍宽度前进
         } else if (is_dot) {
-            // 小数点：使用原有有效宽度
-            char_step = get_dot_effective_width(font);
+            char_step = get_dot_effective_width(font); // 小数点：只占左半边
         } else {
-            // 普通字符（找到）：使用原有完整宽度
-            char_step = font->font_width;
+            char_step = font->font_width; // 普通字符
         }
 
-        // 4. 仅当字符找到时，才绘制字符
-        if (char_index != -1) {
-            if (is_dot) {
-                GFX_DrawDotChar(&fil, cursor_x, y, p, font, ftColor, bgColor, gray_buffer, flush_buffer);
-            } else {
-                GFX_DrawChar(&fil, cursor_x, y, p, font, ftColor, bgColor, gray_buffer, flush_buffer);
-            }
+        if (char_index >= 0) {
+            gfx_draw_glyph(font, (uint16_t) char_index, cursor_x, y, is_dot);
         }
 
-        // 5. 字体间隔绘制（原有逻辑保留）
+        // 字体间隔绘制
         if (spacing > 0 && *(p + utf8_len) != '\0') {
-            int16_t spacing_x1 = cursor_x + char_step;
-            int16_t spacing_x2 = spacing_x1 + spacing - 1;
+            int16_t spacing_x1 = (int16_t) (cursor_x + char_step);
+            int16_t spacing_x2 = (int16_t) (spacing_x1 + spacing - 1);
             uint16_t spacing_y1 = y;
             uint16_t spacing_y2 = y + font->font_height - 1;
 
             GFX_DrawRect(spacing_x1, spacing_y1, spacing_x2, spacing_y2, bgColor, 1);
         }
 
-        // 6. 移动游标：字符步进值 + 字间距（兼容正负）
-        cursor_x += (char_step + spacing);
+        // 移动游标：字符步进值 + 字间距（兼容正负）
+        cursor_x = (uint16_t) ((int32_t) cursor_x + (int32_t) char_step + spacing);
         p += utf8_len; // 移动到下一个UTF-8字符
     }
-
-    free(gray_buffer);
-    free(flush_buffer);
-    f_close(&fil);
 }

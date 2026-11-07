@@ -34,6 +34,7 @@
 #include "Keys.h"
 #include "SerialCoreTask.h"
 #include "UserTask.h"
+#include "lcd_draw_api.h"
 #include "ST7789.h"
 #include "SwitchManager.h"
 #include "TMP102.h"
@@ -319,6 +320,8 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  // 初始化静态绘图命令池（必须在 osKernelStart() 之前完成）
+  LcdDraw_InitPool();
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */

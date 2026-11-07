@@ -2,8 +2,61 @@
 #include "freertos_os2.h"
 #include "cmsis_os2.h"
 #include <string.h>
+#include <stddef.h>
 
 #define COORD(x, y)  (((uint32_t)x << 16) | (uint16_t)y)
+
+// ==================== 静态绘图命令池 ====================
+// 原来每条图元都要 pvPortMalloc 两次（消息块 + 命令块），刷屏线程画完再 vPortFree 两次。
+// 一次整页重绘会产生上百次分配/释放，既慢又制造堆碎片；队列满时还会静默丢掉图元。
+// 现在改为固定 16 块静态命令池，块由生产者与刷屏线程通过空闲队列传递：
+//   生产者 get 空闲块 -> 填好 -> put 进 LcdMsgQueue
+//   刷屏线程画完 -> LcdDraw_ReleaseMsg() 把块还回空闲队列
+// 池耗尽时生产者最多等待 LCD_CMD_WAIT_MS（刷屏线程优先级 High1，高于所有 APP 任务，
+// 等待期间它必然能继续消费），超时才丢弃，形成自然背压。
+#define LCD_CMD_BLOCK_NUM   16
+#define LCD_CMD_STR_MAX     48
+#define LCD_CMD_WAIT_MS     100
+
+typedef struct {
+    GFX_DrawCommand_t cmd;                  // 绘图命令
+    refresh_msg_t     msg;                  // 刷新消息
+    char              str[LCD_CMD_STR_MAX]; // 字符串缓冲（DRAW_STRING 用）
+} LcdCmdBlock_t;
+
+static LcdCmdBlock_t lcd_cmd_blocks[LCD_CMD_BLOCK_NUM];
+static osMessageQueueId_t lcd_cmd_free_queue = NULL;
+
+/**
+ * @brief 初始化静态绘图命令池（必须在 osKernelStart() 之前调用一次）
+ */
+void LcdDraw_InitPool(void)
+{
+    if (lcd_cmd_free_queue != NULL) {
+        return;
+    }
+    lcd_cmd_free_queue = osMessageQueueNew(LCD_CMD_BLOCK_NUM, sizeof(LcdCmdBlock_t*), NULL);
+    if (lcd_cmd_free_queue == NULL) {
+        return;
+    }
+    for (uint32_t i = 0; i < LCD_CMD_BLOCK_NUM; i++) {
+        LcdCmdBlock_t* blk = &lcd_cmd_blocks[i];
+        (void)osMessageQueuePut(lcd_cmd_free_queue, &blk, 0, 0);
+    }
+}
+
+/**
+ * @brief 把一个池块还给命令池（由刷屏线程在绘制完成后调用）
+ * @param msg 该块内的 refresh_msg_t 指针
+ */
+void LcdDraw_ReleaseMsg(refresh_msg_t* msg)
+{
+    if (msg == NULL || lcd_cmd_free_queue == NULL) {
+        return;
+    }
+    LcdCmdBlock_t* blk = (LcdCmdBlock_t*)((uint8_t*)msg - offsetof(LcdCmdBlock_t, msg));
+    (void)osMessageQueuePut(lcd_cmd_free_queue, &blk, 0, 0);
+}
 
 static osStatus_t lcd_draw_send_cmd(LcdFlushType flush_type,        // 绘制图案的类型
                                     uint32_t start_point,           // 起始点（x,y已结合）
@@ -16,25 +69,18 @@ static osStatus_t lcd_draw_send_cmd(LcdFlushType flush_type,        // 绘制图
                                     const FontInfo* font,           // 字库的句柄
                                     const char* str)
 {
-    // 分配refresh_msg_t内存
-    refresh_msg_t* msg = (refresh_msg_t*)pvPortMalloc(sizeof(refresh_msg_t));
-    if (msg == NULL) {
-        return osErrorNoMemory;
+    // 从静态命令池取一个空闲块（不再动态分配：避免堆碎片，也避免队列满时静默丢图元）
+    if (lcd_cmd_free_queue == NULL) {
+        return osError;
     }
 
-    // 字符串必须拷贝到命令块尾部一起分配：
-    // 消息是异步消费的，若只保存调用者的指针，调用者在绘制完成前复用缓冲区就会显示乱码。
-    uint32_t str_len = 0;
-    if (flush_type == DRAW_STRING && str != NULL) {
-        str_len = (uint32_t)strlen(str) + 1U;
+    LcdCmdBlock_t* blk = NULL;
+    if (osMessageQueueGet(lcd_cmd_free_queue, &blk, NULL, LCD_CMD_WAIT_MS) != osOK || blk == NULL) {
+        return osErrorNoMemory;     // 池已耗尽（刷屏线程异常），本次图元丢弃
     }
 
-    // 分配GFX_DrawCommand_t内存（字符串紧跟在结构体之后，随命令块一起释放）
-    GFX_DrawCommand_t* cmd = (GFX_DrawCommand_t*)pvPortMalloc(sizeof(GFX_DrawCommand_t) + str_len);
-    if (cmd == NULL) {
-        vPortFree(msg);
-        return osErrorNoMemory;
-    }
+    GFX_DrawCommand_t* cmd = &blk->cmd;
+    refresh_msg_t* msg = &blk->msg;
 
     // 初始化绘图命令
     memset(cmd, 0, sizeof(GFX_DrawCommand_t));
@@ -47,27 +93,32 @@ static osStatus_t lcd_draw_send_cmd(LcdFlushType flush_type,        // 绘制图
     cmd->param2 = param2;
     cmd->image = image;
     cmd->font = font;
-    if (str_len > 0) {
-        char* str_buf = (char*)(cmd + 1);   // 结构体之后的空间
-        memcpy(str_buf, str, str_len);
-        cmd->str = str_buf;
+
+    // 字符串必须拷贝到命令块自带的缓冲：
+    // 消息是异步消费的，若只保存调用者的指针，调用者在绘制完成前复用缓冲区就会显示乱码。
+    if (flush_type == DRAW_STRING && str != NULL) {
+        size_t str_len = strlen(str);
+        if (str_len >= LCD_CMD_STR_MAX) {
+            str_len = LCD_CMD_STR_MAX - 1U;
+        }
+        memcpy(blk->str, str, str_len);
+        blk->str[str_len] = '\0';
+        cmd->str = blk->str;
     } else {
         cmd->str = NULL;
     }
 
-    // 初始化刷新消息
+    // 初始化刷新消息（msg_mem / cmd_mem 留空表示这是静态池块）
     memset(msg, 0, sizeof(refresh_msg_t));
     msg->RefreshType = REFRESH_TYPE_MANUAL;
     msg->draw_command = cmd;
-    msg->msg_mem = msg;    // 记录自身内存指针
-    msg->cmd_mem = cmd;    // 记录绘图命令内存指针
+    msg->msg_mem = NULL;
+    msg->cmd_mem = NULL;
 
-    // 发送消息到队列
-    osStatus_t ret = osMessageQueuePut(LcdMsgQueueHandle, &msg, 0, 10);
+    // 发送消息到队列（队列深度 >= 池块数，必然成功；万一失败把块还回池里）
+    osStatus_t ret = osMessageQueuePut(LcdMsgQueueHandle, &msg, 0, 0);
     if (ret != osOK) {
-        // 发送失败，释放内存
-        vPortFree(cmd);
-        vPortFree(msg);
+        (void)osMessageQueuePut(lcd_cmd_free_queue, &blk, 0, 0);
     }
 
     return ret;

@@ -88,4 +88,15 @@ osStatus_t lcd_draw_data(uint16_t x0,uint16_t y0,uint16_t x1,uint16_t y1,uint16_
 
 osStatus_t lcd_draw_IsoscelesTriangle(uint16_t x,uint16_t y,Triangle_Direction_e direction,uint16_t hight,uint16_t color);
 
+/**
+ * @brief 初始化静态绘图命令池（必须在 osKernelStart() 之前调用一次）
+ */
+void LcdDraw_InitPool(void);
+
+/**
+ * @brief 把一个静态池块还给命令池（刷屏线程绘制完成后调用，勿手动调用）
+ * @param msg 该块内的 refresh_msg_t 指针
+ */
+void LcdDraw_ReleaseMsg(refresh_msg_t* msg);
+
 #endif //XM_POWER_KIT_LCD_DRAW_API_H

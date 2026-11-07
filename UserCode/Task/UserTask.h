@@ -127,7 +127,6 @@ typedef enum {
     APP_DSO,        // 示波器
     APP_AWG,        // 任意波发生器
     APP_DMM,        // 万用表
-    APP_USER,       // 用户APP
     APP_CAL         // 校准
 }AppListType;
 

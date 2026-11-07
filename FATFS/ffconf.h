@@ -57,7 +57,7 @@
 
 #define FF_FS_CRTIME        0
 #define FF_FS_NOFSINFO      0
-#define FF_FS_LOCK          3
+#define FF_FS_LOCK          8       /* 图形层常驻打开4个字体/图片文件，留足余量 */
 #define FF_FS_REENTRANT     1
 #define FF_FS_TIMEOUT       1000
 

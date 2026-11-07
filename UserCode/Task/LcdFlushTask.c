@@ -20,6 +20,7 @@
 #include "UserTask.h"
 #include "cmsis_os2.h"
 #include "graphics.h"
+#include "lcd_draw_api.h"
 #include "lv_hal_disp.h"
 #include "lv_port_disp.h"
 #include "os_handles.h"
@@ -140,15 +141,18 @@ void Start_LcdFlushTask(void *argument) {
         }
 
 MEM_FREE:
-        // 释放绘图命令内存（GFX_DrawCommand_t）
-        if (msg->cmd_mem != NULL) {
-            vPortFree((void*)msg->cmd_mem);
-            msg->cmd_mem = NULL;
-        }
-        // 释放消息自身内存（refresh_msg_t）
+        // 消息内存归还：
+        //   msg_mem 非空 = 动态分配的刷新消息（LVGL），需要 free；
+        //   msg_mem 为空 = 静态命令池块（手动绘图），只需还回池里，不能再 free。
         if (msg->msg_mem != NULL) {
+            if (msg->cmd_mem != NULL) {
+                vPortFree((void*)msg->cmd_mem);
+                msg->cmd_mem = NULL;
+            }
             vPortFree((void*)msg->msg_mem);
             msg->msg_mem = NULL;
+        } else {
+            LcdDraw_ReleaseMsg(msg);
         }
         // 清空msg指针
         msg = NULL;
