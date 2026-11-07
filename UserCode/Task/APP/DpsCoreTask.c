@@ -31,6 +31,7 @@
 #include "UserTask.h"
 #include "PID.h"
 #include "format.h"
+#include "DpsGraph.h"
 
 /* ========================== 宏定义 ========================== */
 /**
@@ -38,6 +39,12 @@
  * @note  用于能量计算（能量=功率×时间），1小时=3600000毫秒
  */
 #define MS_TO_HOUR (1.0 / 3600000.0)     // 用 double：能量是小量累加，float 会丢精度
+
+/**
+ * @brief 曲线采样周期（毫秒）
+ * @note  按系统节拍固定 40ms 取一点：25Hz × 10s = 250 点，正好铺满一屏
+ */
+#define DPS_GRAPH_SAMPLE_PERIOD_MS (DPS_GRAPH_SAMPLE_DIV * 10U)
 
 /**
  * @brief 能量积分的默认步长（小时）
@@ -109,17 +116,38 @@ typedef struct {
 } FocusRect_t;
 
 /**
+ * @brief 进度条绘制上下文
+ * @note  主界面和曲线页各有一套进度条，几何/颜色/量程都在这里描述，
+ *        由 DrawBar() 统一绘制，避免为每个进度条写一份重复代码
+ */
+typedef struct {
+    uint16_t x0;                // 轨道左端X坐标
+    uint16_t y0;                // 轨道顶部Y坐标
+    uint16_t x1;                // 轨道右端X坐标
+    uint16_t y1;                // 轨道底部Y坐标
+    uint16_t color;             // 填充色
+    uint16_t bg;                // 轨道底色
+    float max;                  // 满量程值
+    uint8_t last_px;            // 上一次填充像素数（防抖刷新用）
+} BarCtx_t;
+
+/**
  * @brief 数位编辑上下文结构体
- * @note  统一管理电压/电流数位编辑的相关参数
+ * @note  统一管理电压/电流数位编辑的相关参数，主界面与曲线页各一套，
+ *        因此坐标/下划线X表/进度条都以成员变量给出，不再写死在处理函数里
  */
 typedef struct {
     volatile float *pTarget;    // 目标值指针（Voltage/Current）
-    char *pSetMsg;              // 显示字符串缓存指针
-    uint16_t yValue;            // 数值显示Y坐标
-    uint16_t yBar;              // 进度条Y坐标
+    char *pSetMsg;              // 设定值显示字符串缓存指针
+    uint16_t xSet;              // 设定值显示X坐标
+    uint16_t yValue;            // 设定值显示Y坐标
     uint16_t color;             // 编辑态颜色
-    uint8_t yUnderlineBase;     // 下划线Y坐标（数位选择指示）
-    void (*drawBarFunc)(float); // 进度条绘制函数指针
+    uint16_t yUnderlineBase;    // 下划线Y坐标（数位选择指示）
+    const uint16_t *xDigit;     // 4个数位下划线的X坐标表
+    BarCtx_t *bar;              // 对应进度条上下文
+    uint8_t isVoltage;          // 1-电压，0-电流
+    uint8_t isGraph;            // 1-从曲线页进入，0-从主界面进入
+    int8_t spacing;             // 设定值字间距（曲线页字窄，用 1；主界面用 2）
 } DigitEditContext_t;
 
 /**
@@ -208,8 +236,24 @@ FastSetOption_e previous_option = option_1;                 // 快速设置上�
 const float dps_pow10_table[] = {1.0f, 10.0f, 100.0f, 1000.0f}; // 数位权重表（对应百分位到十位）
 
 /* ========================== 静态全局变量 ========================== */
-static uint8_t last_voltage_pixels = 0;     // 上一次电压进度条像素数（用于防抖刷新）
-static uint8_t last_current_pixels = 0;     // 上一次电流进度条像素数（用于防抖刷新）
+// 四套进度条：主界面（宽 130）/曲线页（宽 108，起点避开设定值末位）
+static BarCtx_t volt_bar_main  = {180, 40, 309,  47, 0xeb0c, 0x6a49, MAX_OUTPUT_VOLTAGE, 0};
+static BarCtx_t curr_bar_main  = {180, 93, 309, 100, 0x5cbd, 0x3ace, MAX_OUTPUT_CURRENT, 0};
+static BarCtx_t volt_bar_graph = {208, 43, 315,  50, 0xeb0c, 0x6a49, MAX_OUTPUT_VOLTAGE, 0};
+static BarCtx_t curr_bar_graph = {208, 82, 315,  89, 0x5cbd, 0x3ace, MAX_OUTPUT_CURRENT, 0};
+
+// 曲线页实测值缓存（与主界面的大字号缓存分开，避免互相干扰）
+static char graph_VoltageMsg[7] = {0};
+static char graph_CurrentMsg[7] = {0};
+static char graph_last_VoltageMsg[7] = {0};
+static char graph_last_CurrentMsg[7] = {0};
+static uint8_t graph_chip_on = 0xFF;        // 曲线页状态栏电源开关显示缓存
+static uint8_t graph_chip_mode = 0xFF;      // 曲线页状态栏 CV/CC 显示缓存
+static uint8_t graph_frame_pending = 0;     // 有新样本，等待重绘曲线
+static uint32_t graph_sample_tick = 0;      // 上一次采样时的系统节拍（毫秒）
+
+static MainPageCursor_e graph_cursor_current = Main_Voltage;   // 曲线页当前光标（仅电压/电流）
+static MainPageCursor_e graph_cursor_past = Main_Voltage;      // 曲线页上一次光标
 
 static char last_InputMsg[12] = {0};        // 上一次输入电压/电流显示值（用于对比刷新）
 static char last_TempMsg[6] = {0};          // 上一次温度显示值（用于对比刷新）
@@ -219,11 +263,13 @@ static char last_PowerMsg[7] = {0};         // 上一次输出功率显示值（
 
 /* ========================== 表驱动常量定义 ========================== */
 /**
- * @brief 声明进度条绘制函数
- * @note  这俩声明要提前
+ * @brief 进度条绘制函数声明
+ * @note  要在上下文常量之前声明
  */
-static void DrawVoltageBar(float voltage);  // 电压进度条绘制函数
-static void DrawCurrentBar(float current);  // 电流进度条绘制函数
+static void DrawBar(BarCtx_t *bar, float value);    // 通用进度条绘制
+static void DrawDpsGraphPage(void);                 // 绘制曲线页整页
+static void DrawGraphPowerChip(void);               // 绘制状态栏电源开关/CV-CC
+static void UpdateStatusBarInfo(void);              // 刷新状态栏输入/温度（主界面与曲线页共用）
 
 /**
  * @brief 主界面焦点框表驱动
@@ -236,29 +282,87 @@ static const FocusRect_t main_focus_rects[3] = {
 };
 
 /**
- * @brief 电压编辑上下文常量
+ * @brief 数位下划线X坐标表
+ * @note  顺序：百分位、十分位、个位、十位（与DigitPosition_e对应）
  */
-static const DigitEditContext_t volt_ctx = {
-    &Target_Voltage,    // 目标电压指针
-    VoltageSetMsg,      // 电压设置显示缓存
-    54,                 // 电压值显示Y坐标
-    40,                 // 电压进度条Y坐标
-    0xeb0c,             // 电压编辑态颜色
-    84,                 // 电压下划线基准Y坐标
-    DrawVoltageBar      // 电压进度条绘制函数
+static const uint16_t digit_x_main[4]  = {279, 257, 219, 197};  // 主界面（设定值X=197）
+static const uint16_t digit_x_graph[4] = {183, 162, 127, 106};  // 曲线页（设定值X=106，字间距1）
+
+/**
+ * @brief 曲线页焦点框表驱动
+ * @note  索引对应MainPageCursor_e，曲线页只有电压/电流两项
+ */
+static const FocusRect_t graph_focus_rects[2] = {
+    {100, 37, 6, 29, 3, 0x87d3, 1},     // Voltage: 实心填充焦点框
+    {100, 76, 6, 29, 3, 0x87d3, 1}      // Current: 实心填充焦点框
 };
 
 /**
- * @brief 电流编辑上下文常量
+ * @brief 电压编辑上下文（主界面）
+ */
+static const DigitEditContext_t volt_ctx = {
+    .pTarget        = &Target_Voltage,
+    .pSetMsg        = VoltageSetMsg,
+    .xSet           = 197,
+    .yValue         = 54,
+    .color          = 0xeb0c,
+    .yUnderlineBase = 84,
+    .xDigit         = digit_x_main,
+    .bar            = &volt_bar_main,
+    .isVoltage      = 1,
+    .isGraph        = 0,
+    .spacing        = 2
+};
+
+/**
+ * @brief 电流编辑上下文（主界面）
  */
 static const DigitEditContext_t curr_ctx = {
-    &Target_Current,    // 目标电流指针
-    Current_SetMsg,     // 电流设置显示缓存
-    106,                // 电流值显示Y坐标
-    93,                 // 电流进度条Y坐标
-    0x5cbd,             // 电流编辑态颜色
-    136,                // 电流下划线基准Y坐标
-    DrawCurrentBar      // 电流进度条绘制函数
+    .pTarget        = &Target_Current,
+    .pSetMsg        = Current_SetMsg,
+    .xSet           = 197,
+    .yValue         = 106,
+    .color          = 0x5cbd,
+    .yUnderlineBase = 136,
+    .xDigit         = digit_x_main,
+    .bar            = &curr_bar_main,
+    .isVoltage      = 0,
+    .isGraph        = 0,
+    .spacing        = 2
+};
+
+/**
+ * @brief 电压编辑上下文（曲线页）
+ */
+static const DigitEditContext_t graph_volt_ctx = {
+    .pTarget        = &Target_Voltage,
+    .pSetMsg        = VoltageSetMsg,
+    .xSet           = 106,
+    .yValue         = 37,
+    .color          = 0xeb0c,
+    .yUnderlineBase = 67,
+    .xDigit         = digit_x_graph,
+    .bar            = &volt_bar_graph,
+    .isVoltage      = 1,
+    .isGraph        = 1,
+    .spacing        = 1
+};
+
+/**
+ * @brief 电流编辑上下文（曲线页）
+ */
+static const DigitEditContext_t graph_curr_ctx = {
+    .pTarget        = &Target_Current,
+    .pSetMsg        = Current_SetMsg,
+    .xSet           = 106,
+    .yValue         = 76,
+    .color          = 0x5cbd,
+    .yUnderlineBase = 106,
+    .xDigit         = digit_x_graph,
+    .bar            = &curr_bar_graph,
+    .isVoltage      = 0,
+    .isGraph        = 1,
+    .spacing        = 1
 };
 
 /* ========================== 函数声明 ========================== */
@@ -279,11 +383,13 @@ void dps_graph_handler(KeyEventMsg_t msg);      // 曲线显示界面按键处�
 // 页面刷新函数
 void dps_main_page_refresh_handler(void);       // 主界面刷新函数
 void dsp_graph_page_refresh_handler(void);      // 曲线界面刷新函数
+void dps_digit_page_refresh_handler(void);      // 数位编辑页刷新（按来源页面分派）
 
 // 格式化工具函数
 void formatFloatMessage(float voltage, float current, char *message);
 void formatTempMessage(float temp, char *message);
 void formatOutputMessage(float value, char *message);
+static void formatGraphValue(float value, char unit, char *message);   // 曲线页实测值（数值+单位）
 
 // ADC相关函数
 void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc);  // ADC转换完成回调
@@ -318,8 +424,8 @@ static void (*page_handlers[PAGE_NUM])(KeyEventMsg_t) = {
  */
 static void (*page_refreshers[PAGE_NUM])(void) = {
     [PAGE_MAIN] = dps_main_page_refresh_handler,
-    [PAGE_VOLT_DIGIT] = dps_main_page_refresh_handler,
-    [PAGE_CURR_DIGIT] = dps_main_page_refresh_handler,
+    [PAGE_VOLT_DIGIT] = dps_digit_page_refresh_handler,
+    [PAGE_CURR_DIGIT] = dps_digit_page_refresh_handler,
     [PAGE_QUICK_MENU] = dps_main_page_refresh_handler,
     [PAGE_MAIN_GRAPH] = dsp_graph_page_refresh_handler
 };
@@ -364,6 +470,20 @@ void formatTempMessage(float temp, char *message) {
 void formatOutputMessage(float value, char *message) {
     char *p = message;
     p += fmt_fixed_digits(value, 4, p);
+    *p = '\0';
+}
+
+/**
+ * @brief  格式化曲线页的实测值（格式：XX.XXV，与主界面同样的有效位数）
+ * @param  value: 待格式化数值
+ * @param  unit: 单位字符（V/A）
+ * @param  message: 输出字符串缓冲区（至少 7 字节）
+ * @retval 无
+ */
+static void formatGraphValue(float value, char unit, char *message) {
+    char *p = message;
+    p += fmt_fixed_digits(value, 4, p);
+    *p++ = unit;
     *p = '\0';
 }
 
@@ -460,9 +580,11 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
  * @note   统一处理电压/电流的数位选择、数值调整、返回主界面等逻辑
  */
 static void digit_page_handler(KeyEventMsg_t msg, const DigitEditContext_t *ctx) {
-    // 映射当前/上一次编辑数位（区分电压/电流）
-    DigitPosition_e *pCurrent = (ctx == &volt_ctx) ? &VoltagePosition_Current : &CurrentPosition_Current;
-    DigitPosition_e *pPast = (ctx == &volt_ctx) ? &VoltagePosition_Past : &CurrentPosition_Past;
+    // 映射当前/上一次编辑数位（区分电压/电流），量程上下限也按通道区分
+    DigitPosition_e *pCurrent = ctx->isVoltage ? &VoltagePosition_Current : &CurrentPosition_Current;
+    DigitPosition_e *pPast = ctx->isVoltage ? &VoltagePosition_Past : &CurrentPosition_Past;
+    const float limit_max = ctx->isVoltage ? MAX_OUTPUT_VOLTAGE : MAX_OUTPUT_CURRENT;
+    const float limit_min = ctx->isVoltage ? MIN_OUTPUT_VOLTAGE : MIN_OUTPUT_CURRENT;
 
     // 上移/左按：切换到高位数位
     if (msg.key == KEY_UP || msg.event == ENCODER_EVENT_PRESS_LEFT) {
@@ -500,34 +622,41 @@ static void digit_page_handler(KeyEventMsg_t msg, const DigitEditContext_t *ctx)
     }
     // 右旋转编码器：增加对应数位的数值
     else if (msg.event == ENCODER_EVENT_RIGHT) {
-        *ctx->pTarget = fminf(*ctx->pTarget + 0.01f * dps_pow10_table[*pCurrent],
-                              (ctx == &volt_ctx ? MAX_OUTPUT_VOLTAGE : MAX_OUTPUT_CURRENT));
-        fmt_fixed_00_00(*ctx->pTarget, MAX_OUTPUT_VOLTAGE, ctx->pSetMsg);
-        lcd_draw_string(197, ctx->yValue, ctx->pSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
-        if (ctx == &volt_ctx) SetTargetVoltage(*ctx->pTarget);
+        *ctx->pTarget = fminf(*ctx->pTarget + 0.01f * dps_pow10_table[*pCurrent], limit_max);
+        fmt_fixed_00_00(*ctx->pTarget, limit_max, ctx->pSetMsg);
+        lcd_draw_string(ctx->xSet, ctx->yValue, ctx->pSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, ctx->spacing);
+        if (ctx->isVoltage) SetTargetVoltage(*ctx->pTarget);
         else SetTargetCurrent(*ctx->pTarget);
-        ctx->drawBarFunc(*ctx->pTarget);
+        DrawBar(ctx->bar, *ctx->pTarget);
         StartBeezer(0);
         return;
     }
     // 左旋转编码器：减少对应数位的数值
     else if (msg.event == ENCODER_EVENT_LEFT) {
-        *ctx->pTarget = fmaxf(*ctx->pTarget - 0.01f * dps_pow10_table[*pCurrent],
-                              (ctx == &volt_ctx ? MIN_OUTPUT_VOLTAGE : MIN_OUTPUT_CURRENT));
-        fmt_fixed_00_00(*ctx->pTarget, MAX_OUTPUT_VOLTAGE, ctx->pSetMsg);
-        lcd_draw_string(197, ctx->yValue, ctx->pSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
-        if (ctx == &volt_ctx) SetTargetVoltage(*ctx->pTarget);
+        *ctx->pTarget = fmaxf(*ctx->pTarget - 0.01f * dps_pow10_table[*pCurrent], limit_min);
+        fmt_fixed_00_00(*ctx->pTarget, limit_max, ctx->pSetMsg);
+        lcd_draw_string(ctx->xSet, ctx->yValue, ctx->pSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, ctx->spacing);
+        if (ctx->isVoltage) SetTargetVoltage(*ctx->pTarget);
         else SetTargetCurrent(*ctx->pTarget);
-        ctx->drawBarFunc(*ctx->pTarget);
+        DrawBar(ctx->bar, *ctx->pTarget);
         StartBeezer(0);
         return;
     }
-    // 短按SET/编码器：返回主界面
+    // 短按SET/编码器：返回进入编辑前的页面（主界面或曲线页）
     else if ((msg.key == KEY_SET || msg.key == KEY_ENCODER) && msg.event == KEY_EVENT_CLICK) {
-        current_page = PAGE_MAIN;
-        previous_page = (ctx == &volt_ctx ? PAGE_VOLT_DIGIT : PAGE_CURR_DIGIT);
+        current_page = ctx->isGraph ? PAGE_MAIN_GRAPH : PAGE_MAIN;
+        previous_page = (ctx->isVoltage ? PAGE_VOLT_DIGIT : PAGE_CURR_DIGIT);
         *pCurrent = *pPast = hundredths;
-        lcd_draw_rect(195, ctx->yUnderlineBase, 297, ctx->yUnderlineBase + 5, 0x29a7, 1);
+
+        // 清除数位下划线：按上下文给出的X表算出左右边界
+        uint16_t xs = ctx->xDigit[0];
+        uint16_t xe = (uint16_t) (ctx->xDigit[0] + 16);
+        for (uint8_t i = 1; i < 4; i++) {
+            if (ctx->xDigit[i] < xs) xs = ctx->xDigit[i];
+            if ((uint16_t) (ctx->xDigit[i] + 16) > xe) xe = (uint16_t) (ctx->xDigit[i] + 16);
+        }
+        lcd_draw_rect((uint16_t) (xs - 2), ctx->yUnderlineBase, (uint16_t) (xe + 2),
+                      (uint16_t) (ctx->yUnderlineBase + 5), 0x29a7, 1);
         StartBeezer(0);
         return;
     }
@@ -538,7 +667,7 @@ static void digit_page_handler(KeyEventMsg_t msg, const DigitEditContext_t *ctx)
     StartBeezer(0);
 
     // 数位选择下划线更新（切换选中数位的指示）
-    uint16_t x_pos[4] = {279, 257, 219, 197}; // 百分位/十分位/个位/十位的X坐标
+    const uint16_t *x_pos = ctx->xDigit;    // 百分位/十分位/个位/十位的X坐标
     lcd_draw_round_rect(x_pos[*pPast], ctx->yUnderlineBase, x_pos[*pPast] + 16, ctx->yUnderlineBase + 3, 2, 0x29a7, 1);
     lcd_draw_round_rect(x_pos[*pCurrent], ctx->yUnderlineBase, x_pos[*pCurrent] + 16, ctx->yUnderlineBase + 3, 2,
                         ctx->color, 1);
@@ -550,7 +679,8 @@ static void digit_page_handler(KeyEventMsg_t msg, const DigitEditContext_t *ctx)
  * @retval 无
  */
 void volt_digit_handler(KeyEventMsg_t msg) {
-    digit_page_handler(msg, &volt_ctx);
+    // 从曲线页进入编辑时用曲线页的上下文（坐标/进度条不同）
+    digit_page_handler(msg, (previous_page == PAGE_MAIN_GRAPH) ? &graph_volt_ctx : &volt_ctx);
 }
 
 /**
@@ -559,7 +689,7 @@ void volt_digit_handler(KeyEventMsg_t msg) {
  * @retval 无
  */
 void curr_digit_handler(KeyEventMsg_t msg) {
-    digit_page_handler(msg, &curr_ctx);
+    digit_page_handler(msg, (previous_page == PAGE_MAIN_GRAPH) ? &graph_curr_ctx : &curr_ctx);
 }
 
 /* ========================== 快速设置辅助函数实现 ========================== */
@@ -608,6 +738,15 @@ void Start_DpsCoreTask(void *argument) {
         // 风扇状态更新计时
         Fan_update_time_count ++;
 
+        // 曲线采样：按系统节拍固定 40ms 取一点（25Hz → 10 秒窗口共 250 点）
+        // 用节拍而不是循环计数：界面刷新耗时会拖慢循环，否则 10 秒窗口会变成十几秒
+        uint32_t graph_now_tick = osKernelGetTickCount();
+        if ((uint32_t) (graph_now_tick - graph_sample_tick) >= DPS_GRAPH_SAMPLE_PERIOD_MS) {
+            graph_sample_tick = graph_now_tick;
+            DpsGraph_Sample(Voltage, Current, Power);
+            graph_frame_pending = 1;
+        }
+
         // 读取按键事件并分发到当前页面的处理函数
         if (osMessageQueueGet(KeyEventQueueHandle, &DPS_Keymsg, NULL, 0) == osOK)
             page_handlers[current_page](DPS_Keymsg);
@@ -622,65 +761,30 @@ void Start_DpsCoreTask(void *argument) {
 
 /* ========================== 绘制函数实现 ========================== */
 /**
- * @brief  绘制电压进度条
- * @param  voltage: 目标电压值（V）
+ * @brief  通用进度条绘制（主界面/曲线页共用）
+ * @param  bar: 进度条上下文（几何、颜色、量程）
+ * @param  value: 当前值
  * @retval 无
- * @note   防抖刷新：仅当像素数变化时才重绘，避免频繁刷新
+ * @note   防抖刷新：仅当填充像素数变化时才重绘。
+ *         重画整个轨道后先把 bar->last_px 清 0，可强制重绘一次填充。
  */
-static void DrawVoltageBar(float voltage) {
-    // 计算进度条像素数（最大128像素，对应MAX_OUTPUT_VOLTAGE）
-    uint8_t now = (uint8_t) (128 * (voltage / MAX_OUTPUT_VOLTAGE));
+static void DrawBar(BarCtx_t *bar, float value) {
+    uint16_t span = (uint16_t) (bar->x1 - bar->x0);          // 轨道可用像素宽度
+    uint8_t now = (uint8_t) ((float) span * (value / bar->max));
 
     // 边界值保护
-    if (now > 128) now = 128;
+    if (now > span) now = (uint8_t) span;
     if (now < 8) now = 8;
 
     // 防抖：像素数未变化则不重绘
-    if (now == last_voltage_pixels) return;
+    if (now == bar->last_px) return;
 
-    // 像素数减少：先清空整个进度条再绘制新值
-    if (now < last_voltage_pixels) {
-        lcd_draw_round_rect(180, 40, 309, 47, 4, 0x6a49, 1);
-        lcd_draw_round_rect(180, 40, 180 + now, 47, 4, 0xeb0c, 1);
-    }
-    // 像素数增加：直接绘制新增部分
-    else {
-        lcd_draw_round_rect(180, 40, 180 + now, 47, 4, 0xeb0c, 1);
-    }
+    // 像素数减少：先清空整个轨道再绘制新值（增加时直接覆盖即可）
+    if (now < bar->last_px)
+        lcd_draw_round_rect(bar->x0, bar->y0, bar->x1, bar->y1, 4, bar->bg, 1);
 
-    // 更新上一次像素数
-    last_voltage_pixels = now;
-}
-
-/**
- * @brief  绘制电流进度条
- * @param  current: 目标电流值（A）
- * @retval 无
- * @note   防抖刷新：仅当像素数变化时才重绘，避免频繁刷新
- */
-static void DrawCurrentBar(float current) {
-    // 计算进度条像素数（最大128像素，对应MAX_OUTPUT_CURRENT）
-    uint8_t now = (uint8_t) (128 * (current / MAX_OUTPUT_CURRENT));
-
-    // 边界值保护
-    if (now > 128) now = 128;
-    if (now < 8) now = 8;
-
-    // 防抖：像素数未变化则不重绘
-    if (now == last_current_pixels) return;
-
-    // 像素数减少：先清空整个进度条再绘制新值
-    if (now < last_current_pixels) {
-        lcd_draw_round_rect(180, 93, 309, 100, 4, 0x3ace, 1);
-        lcd_draw_round_rect(180, 93, 180 + now, 100, 4, 0x5cbd, 1);
-    }
-    // 像素数增加：直接重绘
-    else {
-        lcd_draw_round_rect(180, 93, 180 + now, 100, 4, 0x5cbd, 1);
-    }
-
-    // 更新上一次像素数
-    last_current_pixels = now;
+    lcd_draw_round_rect(bar->x0, bar->y0, (uint16_t) (bar->x0 + now), bar->y1, 4, bar->color, 1);
+    bar->last_px = now;
 }
 
 /**
@@ -719,28 +823,41 @@ static void DrawDpsMainBasicElement(void) {
     lcd_draw_string(150, 122, "A", &JetBrainsMono16x22, 0x5cbd, 0x29a7, 0);
     lcd_draw_string(150, 178, "W", &JetBrainsMono16x22, 0xdb3f, 0x29a7, 0);
 
-    // 绘制电压进度条背景和初始值
+    // 绘制电压进度条（先清 0 强制重绘填充，避免轨道重画后填充被防抖跳过）
     lcd_draw_round_rect(180, 40, 309, 47, 4, 0x6a49, 1);
-    DrawVoltageBar(5.0f);
-    lcd_draw_string(197, 54, "05.00", &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
+    volt_bar_main.last_px = 0;
+    DrawBar(&volt_bar_main, Target_Voltage);
+    fmt_fixed_00_00(Target_Voltage, MAX_OUTPUT_VOLTAGE, VoltageSetMsg);
+    lcd_draw_string(197, 54, VoltageSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
 
-    // 绘制电流进度条背景和初始值
+    // 绘制电流进度条
     lcd_draw_round_rect(180, 93, 309, 100, 4, 0x3ace, 1);
-    DrawCurrentBar(2.0f);
-    lcd_draw_string(197, 106, "02.00", &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
-
-    // 绘制初始焦点框（电压项）
-    lcd_draw_round_rect(180, 55, 185, 80, 3, 0x87d3, 1);
+    curr_bar_main.last_px = 0;
+    DrawBar(&curr_bar_main, Target_Current);
+    fmt_fixed_00_00(Target_Current, MAX_OUTPUT_VOLTAGE, Current_SetMsg);
+    lcd_draw_string(197, 106, Current_SetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
 
     // 绘制电源开关/功率模式/快速设置按钮
-    lcd_draw_round_rect(175, 177, 239, 200, 8, 0x632c, 1);
-    lcd_draw_round_rect(247, 177, 311, 200, 8, 0xec10, 1);
+    const uint16_t pwr_bg = IsPowerOn ? 0x9fec : 0x632c;
+    const uint16_t pwr_ft = IsPowerOn ? 0x632c : 0xFFFF;
+    const uint16_t mode_bg = PowerMode ? 0x869f : 0xec10;
+    const uint16_t mode_ft = PowerMode ? 0x632c : 0xef7d;
+
+    lcd_draw_round_rect(175, 177, 239, 200, 8, pwr_bg, 1);
+    lcd_draw_round_rect(247, 177, 311, 200, 8, mode_bg, 1);
     lcd_draw_round_rect(182, 144, 304, 169, 8, 0x4408, 1);
 
-    // 绘制按钮文字
+    // 绘制按钮文字（开关状态与功率模式按当前值绘制，从其它页面返回时不会显示旧状态）
     lcd_draw_string(205, 148, "快速设置", &YPLXT18x18, 0xFFFF, 0x4408, 2);
-    lcd_draw_string(186, 180, "OFF", &JetBrainsMono14x18, 0xFFFF, 0x632c, 2);
-    lcd_draw_string(264, 180, "CV", &JetBrainsMono14x18, 0xFFFF, 0xec10, 5);
+    lcd_draw_string(IsPowerOn ? 193 : 186, 180, IsPowerOn ? "ON" : "OFF",
+                    &JetBrainsMono14x18, pwr_ft, pwr_bg, 2);
+    lcd_draw_string(264, 180, PowerMode ? "CC" : "CV", &JetBrainsMono14x18, mode_ft, mode_bg, 5);
+    PowerMode_last = PowerMode;
+
+    // 绘制当前光标焦点框
+    const FocusRect_t *fr = &main_focus_rects[main_page_cursor_current];
+    lcd_draw_round_rect(fr->x, fr->y, (uint16_t) (fr->x + fr->w), (uint16_t) (fr->y + fr->h),
+                        fr->radius, fr->color, fr->filled);
 
     // 绘制底部时间/能量背景框
     lcd_draw_round_rect(5, 213, 156, 236, 5, 0x31e8, 1);
@@ -750,9 +867,18 @@ static void DrawDpsMainBasicElement(void) {
     lcd_draw_image(9, 216, &img_time_18x18);
     lcd_draw_image(168, 215, &img_energy_16x20);
 
-    // 绘制底部初始数值
-    lcd_draw_string(33, 215, "000:00:00", &KaiTi16x20, 0xFFFF, 0x31e8, -3);
-    lcd_draw_string(188, 215, "0000.000Wh", &KaiTi16x20, 0xFFFF, 0x31e8, -3);
+    // 绘制底部数值（时间/能量按当前值绘制）
+    fmt_hms(running_time, TimeMsg);
+    lcd_draw_string(33, 215, TimeMsg, &KaiTi16x20, 0xFFFF, 0x31e8, -3);
+    fmt_energy_wh(DPS_GetEnergy(), EnergyMsg);
+    lcd_draw_string(188, 215, EnergyMsg, &KaiTi16x20, 0xFFFF, 0x31e8, -3);
+
+    // 界面已回到初始值/当前值，让"变化才刷新"的影子串失效，保证下一帧必定刷新
+    last_InputMsg[0] = '\0';
+    last_TempMsg[0] = '\0';
+    last_VoltageMsg[0] = '\0';
+    last_CurrentMsg[0] = '\0';
+    last_PowerMsg[0] = '\0';
 }
 
 /**
@@ -812,11 +938,11 @@ static void DrawQuickSetPage(void) {
 
 /* ========================== 数值更新函数实现 ========================== */
 /**
- * @brief  更新界面数值显示
+ * @brief  更新状态栏信息（输入电压/电流 + 温度）
  * @retval 无
- * @note   仅当数值变化时才重绘，避免频繁刷新LCD
+ * @note   主界面与曲线页的状态栏几何完全一致，因此这段刷新逻辑共用
  */
-static void UpdateLableValues(void) {
+static void UpdateStatusBarInfo(void) {
     // 更新输入电压/电流显示（仅数值变化时）
     formatFloatMessage(Input_Voltage, Input_Current, InputMsg);
     if (strcmp(InputMsg, last_InputMsg) != 0) {
@@ -831,6 +957,16 @@ static void UpdateLableValues(void) {
         lcd_draw_string(171, 5, TempMsg, &KaiTi16x20, col, 0x31e8, -4);
         strcpy(last_TempMsg, TempMsg);
     }
+}
+
+/**
+ * @brief  更新主界面数值显示
+ * @retval 无
+ * @note   仅当数值变化时才重绘，避免频繁刷新LCD
+ */
+static void UpdateLableValues(void) {
+    // 状态栏（输入电压/电流 + 温度）
+    UpdateStatusBarInfo();
 
     // 更新输出数据显示（仅刷新使能时）
     if (Flush_OutputData) {
@@ -951,8 +1087,8 @@ void dps_main_page_handler(KeyEventMsg_t msg) {
     else if (msg.key == KEY_MODE && msg.event == KEY_EVENT_CLICK) {
         current_page = PAGE_MAIN_GRAPH;
         previous_page = PAGE_MAIN;
-
-
+        graph_cursor_current = graph_cursor_past = Main_Voltage;   // 曲线页只在上两项间移动
+        DrawDpsGraphPage();                                        // 曲线页需要自己画整套界面
         StartBeezer(0);
         return;
     }
@@ -1006,12 +1142,12 @@ void quick_menu_handler(KeyEventMsg_t msg) {
         // 更新电压设置显示和进度条
         fmt_fixed_00_00(Target_Voltage, MAX_OUTPUT_VOLTAGE, VoltageSetMsg);
         lcd_draw_string(197, 54, VoltageSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
-        DrawVoltageBar(Target_Voltage);
+        DrawBar(&volt_bar_main, Target_Voltage);
 
         // 更新电流设置显示和进度条
         fmt_fixed_00_00(Target_Current, MAX_OUTPUT_VOLTAGE, Current_SetMsg);
         lcd_draw_string(197, 106, Current_SetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 2);
-        DrawCurrentBar(Target_Current);
+        DrawBar(&curr_bar_main, Target_Current);
 
         // 恢复主界面输出数据刷新
         lcd_draw_rect(0, 32, 149, 207, 0x29a7, 1);
@@ -1243,6 +1379,10 @@ void Resume_DpsCoreTask(void) {
     Flush_OutputData = true;                                            // 使能输出数据刷新
 
 
+    DpsGraph_Reset();           // 清空曲线采样缓冲
+    graph_sample_tick = osKernelGetTickCount();
+    graph_frame_pending = 1;
+
     DPS_ADC_Init();             // 重新初始化ADC
     DrawDpsMainBasicElement();     // 绘制基础UI界面
     osDelay(150);          // 延时确保UI绘制完成
@@ -1309,13 +1449,135 @@ void Start_PIDTask(void *argument) {
 
 // ========================= 曲线显示页面 ======================== //
 
+/**
+ * @brief  绘制曲线页状态栏右侧的电源开关与功率模式
+ * @note   只在状态变化时重绘；切页时由 DrawDpsGraphPage() 把缓存置为无效
+ */
+static void DrawGraphPowerChip(void) {
+    uint8_t on = IsPowerOn ? 1 : 0;
+    uint8_t mode = PowerMode ? 1 : 0;
+
+    if (on == graph_chip_on && mode == graph_chip_mode) return;
+
+    graph_chip_on = on;
+    graph_chip_mode = mode;
+
+    lcd_draw_round_rect(237, 3, 315, 26, 5, 0x31e8, 1);
+    lcd_draw_string(240, 5, on ? "ON" : "OFF", &JetBrainsMono14x18,
+                    on ? 0x9fec : 0x7bef, 0x31e8, -2);
+    lcd_draw_string(286, 5, mode ? "CC" : "CV", &JetBrainsMono14x18,
+                    mode ? 0xf980 : 0xef7d, 0x31e8, -2);
+}
+
+/**
+ * @brief  刷新曲线页的实测电压/电流（含状态栏上的开关状态）
+ * @retval 无
+ * @note   仅当字符串变化时才重绘，避免 150ms 一次的无效刷新
+ */
+static void UpdateGraphOutputValues(void) {
+    formatGraphValue(Voltage, 'V', graph_VoltageMsg);
+    if (strcmp(graph_VoltageMsg, graph_last_VoltageMsg) != 0) {
+        lcd_draw_string(2, 40, graph_VoltageMsg, &yahei16x20, 0xeb0c, 0x29a7, 0);
+        strcpy(graph_last_VoltageMsg, graph_VoltageMsg);
+    }
+
+    formatGraphValue(Current, 'A', graph_CurrentMsg);
+    if (strcmp(graph_CurrentMsg, graph_last_CurrentMsg) != 0) {
+        lcd_draw_string(2, 79, graph_CurrentMsg, &yahei16x20, 0x5cbd, 0x29a7, 0);
+        strcpy(graph_last_CurrentMsg, graph_CurrentMsg);
+    }
+
+    DrawGraphPowerChip();
+}
+
+/**
+ * @brief  绘制曲线页整页（状态栏 + 电压电流调节区 + 曲线区底图）
+ * @retval 无
+ * @note   曲线本身由 dsp_graph_page_refresh_handler() 在下一拍重绘
+ */
+static void DrawDpsGraphPage(void) {
+    // -------------------- 顶部状态栏（与主界面同一套几何） --------------------
+    lcd_draw_rect(0, 0, 319, 31, 0x2946, 1);
+    lcd_draw_round_rect(5, 3, 139, 26, 5, 0x31e8, 1);
+    lcd_draw_round_rect(146, 3, 230, 26, 5, 0x31e8, 1);
+    lcd_draw_round_rect(237, 3, 315, 26, 5, 0x31e8, 1);
+    lcd_draw_image(7, 5, &img_IN_16x20);
+    lcd_draw_image(150, 5, &img_FIRE_16x20);
+    lcd_draw_string(27, 5, "0.00V 0.00A", &KaiTi16x20, 0xef7d, 0x31e8, -5);
+    lcd_draw_string(171, 5, "00.0C", &KaiTi16x20, 0xef7d, 0x31e8, -4);
+    last_InputMsg[0] = '\0';              // 已画占位值，影子串失效，保证马上就刷新
+    last_TempMsg[0] = '\0';
+    graph_chip_on = 0xFF;                  // 开关/CV-CC 缓存失效，强制重画
+    graph_chip_mode = 0xFF;
+    DrawGraphPowerChip();
+
+    // -------------------- 电压/电流调节区 --------------------
+    lcd_draw_rect(0, 32, 319, 109, 0x29a7, 1);
+
+    // 实测值（16 号雅黑，和主界面单位行同一套字体）
+    formatGraphValue(Voltage, 'V', graph_VoltageMsg);
+    lcd_draw_string(2, 40, graph_VoltageMsg, &yahei16x20, 0xeb0c, 0x29a7, 0);
+    strcpy(graph_last_VoltageMsg, graph_VoltageMsg);
+
+    formatGraphValue(Current, 'A', graph_CurrentMsg);
+    lcd_draw_string(2, 79, graph_CurrentMsg, &yahei16x20, 0x5cbd, 0x29a7, 0);
+    strcpy(graph_last_CurrentMsg, graph_CurrentMsg);
+
+    // 电压设定值 + 进度条
+    fmt_fixed_00_00(Target_Voltage, MAX_OUTPUT_VOLTAGE, VoltageSetMsg);
+    lcd_draw_string(106, 37, VoltageSetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 1);
+    lcd_draw_round_rect(volt_bar_graph.x0, volt_bar_graph.y0, volt_bar_graph.x1, volt_bar_graph.y1,
+                        4, volt_bar_graph.bg, 1);
+    volt_bar_graph.last_px = 0;
+    DrawBar(&volt_bar_graph, Target_Voltage);
+
+    // 电流设定值 + 进度条
+    fmt_fixed_00_00(Target_Current, MAX_OUTPUT_CURRENT, Current_SetMsg);
+    lcd_draw_string(106, 76, Current_SetMsg, &ScreenMatrix20x28, 0xFFFF, 0x29a7, 1);
+    lcd_draw_round_rect(curr_bar_graph.x0, curr_bar_graph.y0, curr_bar_graph.x1, curr_bar_graph.y1,
+                        4, curr_bar_graph.bg, 1);
+    curr_bar_graph.last_px = 0;
+    DrawBar(&curr_bar_graph, Target_Current);
+
+    // 当前光标焦点框
+    const FocusRect_t *fr = &graph_focus_rects[graph_cursor_current];
+    lcd_draw_round_rect(fr->x, fr->y, (uint16_t) (fr->x + fr->w), (uint16_t) (fr->y + fr->h),
+                        fr->radius, fr->color, fr->filled);
+
+    // -------------------- 曲线区 --------------------
+    DpsGraph_DrawChrome();
+    graph_frame_pending = 1;
+}
+
 // 曲线显示界面按键处理
 void dps_graph_handler(KeyEventMsg_t msg) {
-    if (msg.key == KEY_MODE && msg.event == KEY_EVENT_CLICK) {
-        // 按键按下，切换到主界面
-        current_page = PAGE_MAIN;
-        DrawDpsMainBasicElement();  // 绘制主界面
+    // 上移/左按：焦点切到电压
+    if (msg.key == KEY_UP || msg.event == ENCODER_EVENT_LEFT || msg.event == ENCODER_EVENT_PRESS_LEFT) {
+        graph_cursor_past = graph_cursor_current;
+        graph_cursor_current = Main_Voltage;
     }
+    // 下移/右按：焦点切到电流
+    else if (msg.key == KEY_DOWN || msg.event == ENCODER_EVENT_RIGHT || msg.event == ENCODER_EVENT_PRESS_RIGHT) {
+        graph_cursor_past = graph_cursor_current;
+        graph_cursor_current = Main_Current;
+    }
+    // 短按SET/编码器：进入数位编辑（退出后仍回曲线页）
+    else if ((msg.key == KEY_SET || msg.key == KEY_ENCODER) && msg.event == KEY_EVENT_CLICK) {
+        if (graph_cursor_current == Main_Current) {
+            current_page = PAGE_CURR_DIGIT;
+            previous_page = PAGE_MAIN_GRAPH;
+            lcd_draw_round_rect(digit_x_graph[hundredths], 106,
+                                (uint16_t) (digit_x_graph[hundredths] + 16), 109, 2, 0x5cbd, 1);
+        } else {
+            current_page = PAGE_VOLT_DIGIT;
+            previous_page = PAGE_MAIN_GRAPH;
+            lcd_draw_round_rect(digit_x_graph[hundredths], 67,
+                                (uint16_t) (digit_x_graph[hundredths] + 16), 70, 2, 0xeb0c, 1);
+        }
+        StartBeezer(0);
+        return;
+    }
+    // 长按SET：电源开关
     else if (msg.key == KEY_SET && msg.event == KEY_EVENT_LONG_PRESS) {
         IsPowerOn = !IsPowerOn;
         if (IsPowerOn) {
@@ -1331,10 +1593,41 @@ void dps_graph_handler(KeyEventMsg_t msg) {
             DpsDc_OFF();
             DpsGnd_OFF();
         }
+        DrawGraphPowerChip();
+        StartBeezer(0);
+        return;
     }
-    else{return;}
+    // 长按编码器：切换到LVGL APP
+    else if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
+        IsPowerOn = false;
 
+        AppListType APP = APP_LVGL;
+        StartBeezer(0);
+        osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
+        return;
+    }
+    // 单击MODE：回主界面
+    else if (msg.key == KEY_MODE && msg.event == KEY_EVENT_CLICK) {
+        current_page = PAGE_MAIN;
+        previous_page = PAGE_MAIN_GRAPH;
+        DrawDpsMainBasicElement();
+        StartBeezer(0);
+        return;
+    }
+    else {
+        return;
+    }
+
+    // 光标移动有效：蜂鸣提示 + 重画焦点框（表驱动）
     StartBeezer(0);
+    if (graph_cursor_past != graph_cursor_current) {
+        const FocusRect_t *old_r = &graph_focus_rects[graph_cursor_past];
+        const FocusRect_t *new_r = &graph_focus_rects[graph_cursor_current];
+        lcd_draw_round_rect(old_r->x, old_r->y, (uint16_t) (old_r->x + old_r->w),
+                            (uint16_t) (old_r->y + old_r->h), old_r->radius, 0x29a7, old_r->filled);
+        lcd_draw_round_rect(new_r->x, new_r->y, (uint16_t) (new_r->x + new_r->w),
+                            (uint16_t) (new_r->y + new_r->h), new_r->radius, new_r->color, new_r->filled);
+    }
 }
 
 void dps_main_page_refresh_handler(void) {
@@ -1360,8 +1653,42 @@ void dps_main_page_refresh_handler(void) {
 }
 
 
+/**
+ * @brief  曲线页刷新
+ * @note   150ms 刷新一次状态栏/实测值；曲线按采样节拍（25fps）重绘一整帧
+ */
 void dsp_graph_page_refresh_handler(void) {
+    // 每150ms更新一次状态栏与实测值（15×10ms）
+    if (widgets_update_time_count >= 15) {
+        widgets_update_time_count = 0;
+        UpdateStatusBarInfo();
+        UpdateGraphOutputValues();
+    }
 
+    // 时间/风扇计时照常推进，切回主界面时不会一次跳变
+    if (Time_update_time_count >= 100) {
+        Time_update_time_count = 0;
+        if (IsPowerOn) running_time++;
+    }
+    if (Fan_update_time_count >= 100) Fan_update_time_count = 0;
+
+    // 有新样本就重绘一帧
+    if (graph_frame_pending) {
+        graph_frame_pending = 0;
+        DpsGraph_DrawFrame(Target_Voltage, Target_Current, IsPowerOn ? 1 : 0);
+    }
+}
+
+/**
+ * @brief  数位编辑页刷新（按进入编辑前的页面分派）
+ * @note   从曲线页进入编辑时，主界面的大字号刷新会把曲线页画面覆盖掉，必须分开处理
+ */
+void dps_digit_page_refresh_handler(void) {
+    if (previous_page == PAGE_MAIN_GRAPH) {
+        dsp_graph_page_refresh_handler();
+    } else {
+        dps_main_page_refresh_handler();
+    }
 }
 
 
