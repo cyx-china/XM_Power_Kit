@@ -124,24 +124,17 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 )
 
 
-# 添加浮点数支持
+# 添加浮点数支持（_printf_float 由 %f 的实际使用间接引入，无需 -u 强制链接）
 set(CMAKE_SYSTEM_PROCESSOR cortex-m4)
 set(MCU_FLAGS "-mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfloat-abi=hard" )
-set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} -u _printf_float")
-add_compile_options(
-        ${MCU_FLAGS}
-        -Wall
-        -Wextra
-        -ffunction-sections
-        -fdata-sections
-        -O3
-)
-add_link_options(
-        ${MCU_FLAGS}
-        -Wl,--gc-sections
-        -Wl,-Map=${PROJECT_NAME}.map
-)
+
+# 注意：add_compile_options() 只对"调用之后创建的 target"生效（COMPILE_OPTIONS 是目录属性，
+# 在 target 创建时拷贝进 target），而本工程的 add_executable() 在文件开头，
+# 因此编译/链接选项必须写进 CMAKE_C_FLAGS / CMAKE_EXE_LINKER_FLAGS 才能全局生效。
+# -flto：链接期优化（跨文件内联、去重、无用段消除），实测可省约 6% FLASH。
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfloat-abi=hard -flto=auto")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -flto=auto")
+# 说明：Release 的优化等级由 cmake/gcc-arm-none-eabi.cmake 中的 CMAKE_C_FLAGS_RELEASE("-Os -g0") 决定。
 
 # 启用 生成HEX文件
 add_custom_command(

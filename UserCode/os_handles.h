@@ -38,7 +38,6 @@ extern osThreadId_t AwgTaskHandle;                // 任意波形发生器APP任
 extern osThreadId_t CalibrateTaskHandle;          // 校准任务句柄
 extern osThreadId_t DmmCoreTaskHandle;            // 数字万用表APP任务句柄
 extern osThreadId_t DsoCoreTaskHandle;            // 示波器APP任务句柄
-extern osThreadId_t UserCoreTaskHandle;           // 用户自动逸APP任务句柄
 extern osThreadId_t SerialCoreTaskHandle;         // 串口通信APP任务句柄
 // ============================= Mutex_Handles =============================//
 extern osMutexId_t IIC1_MutexHandle;              // IIC1总线互斥锁句柄

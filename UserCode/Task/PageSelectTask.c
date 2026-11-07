@@ -77,7 +77,6 @@ static void SuspendTask(AppListType APP) {
         case APP_DSO:       Suspend_DsoCoreTask();      break;
         case APP_AWG:       Suspend_AwgTask();          break;
         case APP_DMM:       Suspend_DmmTask();          break;
-        case APP_USER:    Suspend_UserCoreTask();     break;
         case APP_CAL:       Suspend_CalibrateTask();    break;
         case APP_NONE:                                  break;
     }
@@ -91,7 +90,6 @@ static void ResumeTask(AppListType APP) {
         case APP_DSO:       Resume_DsoCoreTask();       break;
         case APP_AWG:       Resume_AwgTask();           break;
         case APP_DMM:       Resume_DmmTask();           break;
-        case APP_USER:    Resume_UserCoreTask();      break;
         case APP_CAL:       Resume_CalibrateTask();     break;
         case APP_NONE:                                  break;
     }

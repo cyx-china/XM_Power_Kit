@@ -172,11 +172,5 @@ void Suspend_DmmTask(void);
 void Suspend_DsoCoreTask(void);
 void Resume_DsoCoreTask(void);
 
-/*================ UserCoreTask =================*/
-void Suspend_UserCoreTask(void);
-void Resume_UserCoreTask(void);
-
-#define USE_USER_APP 0      // 是否使用用户APP
-
 #endif //XM_POWER_KIT_USERTASK_H
 

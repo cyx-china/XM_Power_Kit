@@ -33,7 +33,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdarg.h>
-
 #include "ff.h"
 #include "Flash.h"
 #include "lvgl.h"
@@ -116,7 +115,6 @@ int main(void)
   MX_TIM9_Init();
   MX_ADC1_Init();
   MX_DAC_Init();
-  MX_TIM10_Init();
   MX_TIM11_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
@@ -136,7 +134,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    osDelay(10);
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */

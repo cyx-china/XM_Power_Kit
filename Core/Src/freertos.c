@@ -142,13 +142,6 @@ const osThreadAttr_t DsoCoreTask_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for UserCoreTask */
-osThreadId_t UserCoreTaskHandle;
-const osThreadAttr_t UserCoreTask_attributes = {
-  .name = "UserCoreTask",
-  .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
 /* Definitions for SerialCoreTask */
 osThreadId_t SerialCoreTaskHandle;
 const osThreadAttr_t SerialCoreTask_attributes = {
@@ -229,7 +222,6 @@ extern void Start_CalibrateTask(void *argument);
 extern void Start_AwgTask(void *argument);
 extern void Start_DmmCoreTask(void *argument);
 extern void Start_DsoCoreTask(void *argument);
-extern void Start_UserCoreTask(void *argument);
 extern void Start_SerialCoreTask(void *argument);
 
 extern void MX_USB_DEVICE_Init(void);
@@ -365,9 +357,6 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of DsoCoreTask */
   DsoCoreTaskHandle = osThreadNew(Start_DsoCoreTask, NULL, &DsoCoreTask_attributes);
-
-  /* creation of UserCoreTask */
-  UserCoreTaskHandle = osThreadNew(Start_UserCoreTask, NULL, &UserCoreTask_attributes);
 
   /* creation of SerialCoreTask */
   SerialCoreTaskHandle = osThreadNew(Start_SerialCoreTask, NULL, &SerialCoreTask_attributes);

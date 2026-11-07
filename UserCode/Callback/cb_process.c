@@ -40,10 +40,7 @@ void btn_dmm_process(void) {
 
 // 用户APP按钮回调函数
 void btn_user_process(void) {
-#if USE_USER_APP
-    AppListType APP = APP_USER;
-    osMessageQueuePut(AppSwitchQueueHandle,&APP,0,10);
-#endif
+    // 用户 APP 已移除（YourAPP.c）；此空实现仅为兼容 GUI Guider 生成的事件表
 }
 
 // 校准按钮回调函数
