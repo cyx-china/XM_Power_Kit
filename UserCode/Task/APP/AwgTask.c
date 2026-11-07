@@ -210,13 +210,13 @@ ParamCursor_e current_param = Param_Freq;  // 当前选中的参数（初始为�
 ParamCursor_e previous_param = Param_Freq; // 上一个选中的参数（用于对比更新）
 
 // 参数编辑相关
-Freq_Digit_e freq_digit_current = freq_unit;        // 频率当前编辑数位   （初始为个位）
+uint8_t freq_digit_current = freq_unit;             // 频率当前编辑数位   （Freq_Digit_e，初始为个位）
 char freq_str[6] = "01000";                         // 频率显示字符串     （初始值1000Hz）
-Duty_Digit_e duty_digit_current = duty_unit;        // 占空比当前编辑数位 （初始为个位）
+uint8_t duty_digit_current = duty_unit;             // 占空比当前编辑数位 （Duty_Digit_e，初始为个位）
 char duty_str[4] = "050";                           // 占空比显示字符串   （初始值50%）
-Amp_digit_e amp_digit_current = amp_hundredth;      // 振幅当前编辑数位   （初始为百分位）
+uint8_t amp_digit_current = amp_hundredth;          // 振幅当前编辑数位   （Amp_digit_e，初始为百分位）
 char amp_str[5] = "1.00";                           // 振幅显示字符串     （初始值1.00V）
-Bias_digit_e bias_digit_current = bias_hundredth;   // 偏置当前编辑数位   （初始为百分位）
+uint8_t bias_digit_current = bias_hundredth;        // 偏置当前编辑数位   （Bias_digit_e，初始为百分位）
 char bias_str[6] = "+0.00";                         // 偏置显示字符串     （初始值+0.00V）
 
 // 参数数值（实际运算用）
@@ -606,51 +606,119 @@ void param_select_handler(KeyEventMsg_t msg) {
 }
 
 /**
- * @brief 频率参数编辑页按键处理函数
- * @param msg: 按键事件消息
- * @note  处理频率数位选择、数值增减、返回参数选择页等操作
+ * @brief 数位编辑上下文（频率/占空比/振幅/偏置四个编辑页共用同一套按键逻辑）
+ * @note  四个页面的差异只体现在：绑定的参数、数位范围、步进、上下限、显示位置与
+ *        数位示意条的位置，因此统一由 awg_digit_handler() 处理
  */
-void freq_digit_handler(KeyEventMsg_t msg) {
-    // 编码器左转（按下）：切换到更高数位
+typedef struct {
+    float    *value;          // 关联的参数值
+    uint8_t  *digit;          // 当前编辑数位
+    uint8_t   digit_min;      // 最低数位
+    uint8_t   digit_max;      // 最高数位
+    float     step;           // 数位步进（个位对应一个步进，十位为 step*10 ...）
+    float     value_min;      // 参数下限
+    float     value_max;      // 参数上限
+    uint16_t  text_x;         // 数值显示位置
+    uint16_t  text_y;
+    char     *text;           // 数值显示字符串缓冲
+    uint16_t  text_size;
+    uint8_t   text_width;     // 整数显示的最小位数（is_int 时有效）
+    uint8_t   decimals;       // 小数位数（浮点显示时有效）
+    uint8_t   text_flags;     // fmt_fixed 的标志位
+    uint8_t   is_int;         // 1：按整数显示（频率/占空比）
+    uint8_t   prev_page;      // 返回参数选择页时记录的"上一个页面"
+    uint16_t  bar_x1;         // 数位示意条的擦除范围
+    uint16_t  bar_x2;
+    uint16_t  bar_y;
+    const uint8_t *bar_pos;   // 各数位对应示意条的 X 坐标表
+} AwgDigitCtx_t;
+
+// 各页面数位示意条的 X 坐标表（下标即数位）
+static const uint8_t freq_bar_pos[] = {229, 216, 203, 190, 177};   // 个位 ~ 万位
+static const uint8_t duty_bar_pos[] = {216, 203, 190};             // 个位 ~ 百位
+static const uint8_t amp_bar_pos[]  = {221, 208, 187};             // 百分位 ~ 个位
+static const uint8_t bias_bar_pos[] = {221, 208, 187};             // 百分位 ~ 个位
+
+static const AwgDigitCtx_t freq_ctx = {
+    .value = &FreqValue, .digit = &freq_digit_current,
+    .digit_min = freq_unit, .digit_max = freq_ten_thousand,
+    .step = 1.0f, .value_min = 10.0f, .value_max = 50000.0f,
+    .text_x = 177, .text_y = PARAM_ROW_START_Y,
+    .text = freq_str, .text_size = sizeof(freq_str), .text_width = 5,
+    .decimals = 0, .text_flags = 0, .is_int = 1,
+    .prev_page = PAGE_FREQ_DIGIT,
+    .bar_x1 = 177, .bar_x2 = 257, .bar_y = 137, .bar_pos = freq_bar_pos,
+};
+
+static const AwgDigitCtx_t duty_ctx = {
+    .value = &DutyValue, .digit = &duty_digit_current,
+    .digit_min = duty_unit, .digit_max = duty_hundredth,
+    .step = 1.0f, .value_min = 1.0f, .value_max = 100.0f,
+    .text_x = 190, .text_y = PARAM_ROW_START_Y + 1 * PARAM_ROW_HEIGHT,
+    .text = duty_str, .text_size = sizeof(duty_str), .text_width = 3,
+    .decimals = 0, .text_flags = 0, .is_int = 1,
+    .prev_page = PAGE_DUTY_DIGIT,
+    .bar_x1 = 177, .bar_x2 = 257, .bar_y = 166, .bar_pos = duty_bar_pos,
+};
+
+static const AwgDigitCtx_t amp_ctx = {
+    .value = &AmpValue, .digit = &amp_digit_current,
+    .digit_min = amp_hundredth, .digit_max = amp_unit,
+    .step = 0.01f, .value_min = 0.01f, .value_max = 5.00f,
+    .text_x = 188, .text_y = PARAM_ROW_START_Y + 2 * PARAM_ROW_HEIGHT,
+    .text = amp_str, .text_size = sizeof(amp_str), .text_width = 0,
+    .decimals = 2, .text_flags = 0, .is_int = 0,
+    .prev_page = PAGE_AMP_DIGIT,
+    .bar_x1 = 177, .bar_x2 = 257, .bar_y = 195, .bar_pos = amp_bar_pos,
+};
+
+static const AwgDigitCtx_t bias_ctx = {
+    .value = &BiasValue, .digit = &bias_digit_current,
+    .digit_min = bias_hundredth, .digit_max = bias_unit,
+    .step = 0.01f, .value_min = -5.00f, .value_max = 5.00f,
+    .text_x = 175, .text_y = PARAM_ROW_START_Y + 3 * PARAM_ROW_HEIGHT,
+    .text = bias_str, .text_size = sizeof(bias_str), .text_width = 0,
+    .decimals = 2, .text_flags = FMT_SIGN, .is_int = 0,
+    .prev_page = PAGE_BIAS_DIGIT,
+    .bar_x1 = 177, .bar_x2 = 257, .bar_y = 224, .bar_pos = bias_bar_pos,
+};
+
+/**
+ * @brief 数位编辑页通用按键处理（频率/占空比/振幅/偏置共用）
+ * @param msg: 按键事件消息
+ * @param ctx: 该参数对应的编辑上下文
+ * @note  上/下键与编码器按下左右切换数位，编码器旋转按数位步进增减数值，
+ *        确认键返回参数选择页；数值变化且输出开启时实时重绘波形
+ */
+static void awg_digit_handler(KeyEventMsg_t msg, const AwgDigitCtx_t *ctx) {
+    uint8_t digit = *ctx->digit;
+
+    // 切换到更高数位
     if (msg.key == KEY_UP || msg.event == ENCODER_EVENT_PRESS_LEFT) {
-        freq_digit_current = (freq_digit_current < freq_ten_thousand) ? (freq_digit_current + 1) : freq_unit;
+        *ctx->digit = (digit < ctx->digit_max) ? (uint8_t)(digit + 1) : ctx->digit_min;
     }
-    // 编码器右转（按下）：切换到更低数位
+    // 切换到更低数位
     else if (msg.key == KEY_DOWN || msg.event == ENCODER_EVENT_PRESS_RIGHT) {
-        freq_digit_current = (freq_digit_current > freq_unit) ? (freq_digit_current - 1) : freq_ten_thousand;
+        *ctx->digit = (digit > ctx->digit_min) ? (uint8_t)(digit - 1) : ctx->digit_max;
     }
-    // 编码器左转：减少对应数位的数值
-    else if (msg.event == ENCODER_EVENT_LEFT) {
-        // 边界处理：不小于10Hz
-        FreqValue = (FreqValue - awg_pow10_table[freq_digit_current]) < 10
-                        ? 10
-                        : (FreqValue - awg_pow10_table[freq_digit_current]);
+    // 编码器旋转：按当前数位增减数值
+    else if (msg.event == ENCODER_EVENT_LEFT || msg.event == ENCODER_EVENT_RIGHT) {
+        const int8_t dir = (msg.event == ENCODER_EVENT_LEFT) ? -1 : 1;
+        float new_value = *ctx->value + (float)dir * ctx->step * awg_pow10_table[digit];
+        if (new_value < ctx->value_min) { new_value = ctx->value_min; }
+        if (new_value > ctx->value_max) { new_value = ctx->value_max; }
+        *ctx->value = new_value;
 
-        // 更新频率显示字符串
-        snprintf(freq_str, 6, "%05" PRIu32, (uint32_t)FreqValue);
-        lcd_draw_string(177, PARAM_ROW_START_Y, freq_str, &yahei16x16,
-                        COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
-
-        StartBeezer(0); // 蜂鸣器反馈
-        // 输出开启时，实时更新波形
-        if (IsOutputOn == true) {
-            GenerateWave(current_wave);
+        // 更新数值显示字符串
+        if (ctx->is_int) {
+            fmt_u32_padded(ctx->text, ctx->text_size, (uint32_t)new_value, ctx->text_width);
+        } else {
+            fmt_fixed(ctx->text, ctx->text_size, new_value, ctx->decimals, 0, ctx->text_flags);
         }
-        return;
-    }
-    // 编码器右转：增加对应数位的数值
-    else if (msg.event == ENCODER_EVENT_RIGHT) {
-        // 边界处理：不大于50000Hz
-        FreqValue = (FreqValue + awg_pow10_table[freq_digit_current]) > 50000
-                        ? 50000
-                        : (FreqValue + awg_pow10_table[freq_digit_current]);
-
-        // 更新频率显示字符串
-        snprintf(freq_str, 6, "%05" PRIu32, (uint32_t)FreqValue);
-        lcd_draw_string(177, PARAM_ROW_START_Y, freq_str, &yahei16x16,
+        lcd_draw_string(ctx->text_x, ctx->text_y, ctx->text, &yahei16x16,
                         COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
 
-        StartBeezer(0); // 蜂鸣器反馈
+        StartBeezer(0);
         // 输出开启时，实时更新波形
         if (IsOutputOn == true) {
             GenerateWave(current_wave);
@@ -660,9 +728,9 @@ void freq_digit_handler(KeyEventMsg_t msg) {
     // 确认键：返回参数选择页
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
         awg_current_page = PAGE_PARAM_SELECT;
-        awg_previous_page = PAGE_FREQ_DIGIT;
+        awg_previous_page = (AWG_AppPage_t)ctx->prev_page;
         // 清空数位选择示意条
-        lcd_draw_line(177, 137, 257, 137, COLOR_PARAM_BG);
+        lcd_draw_line(ctx->bar_x1, ctx->bar_y, ctx->bar_x2, ctx->bar_y, COLOR_PARAM_BG);
         StartBeezer(0);
         return;
     } else {
@@ -672,242 +740,31 @@ void freq_digit_handler(KeyEventMsg_t msg) {
     // 蜂鸣器反馈
     StartBeezer(0);
 
-    // 清空旧的数位选择示意条
-    lcd_draw_line(177, 137, 257, 137, COLOR_PARAM_BG);
-    // 绘制新的数位选择示意条
-    lcd_draw_line(177 + 13 * (4 - freq_digit_current), 137,
-                  177 + 13 * (4 - freq_digit_current) + 10, 137, 0x87d3);
+    // 清空旧的数位选择示意条，再按新的数位绘制
+    lcd_draw_line(ctx->bar_x1, ctx->bar_y, ctx->bar_x2, ctx->bar_y, COLOR_PARAM_BG);
+    const uint16_t bar_x = ctx->bar_pos[*ctx->digit];
+    lcd_draw_line(bar_x, ctx->bar_y, bar_x + 10, ctx->bar_y, 0x87d3);
 }
+
+/**
+ * @brief 频率参数编辑页按键处理函数
+ */
+void freq_digit_handler(KeyEventMsg_t msg) { awg_digit_handler(msg, &freq_ctx); }
 
 /**
  * @brief 占空比参数编辑页按键处理函数
- * @param msg: 按键事件消息
- * @note  处理占空比数位选择、数值增减、返回参数选择页等操作
  */
-void duty_digit_handler(KeyEventMsg_t msg) {
-    // 编码器左转（按下）：切换到更高数位
-    if (msg.key == KEY_UP || msg.event == ENCODER_EVENT_PRESS_LEFT) {
-        duty_digit_current = (duty_digit_current < duty_hundredth) ? (duty_digit_current + 1) : duty_unit;
-    }
-    // 编码器右转（按下）：切换到更低数位
-    else if (msg.key == KEY_DOWN || msg.event == ENCODER_EVENT_PRESS_RIGHT) {
-        duty_digit_current = (duty_digit_current > duty_unit) ? (duty_digit_current - 1) : duty_hundredth;
-    }
-    // 编码器左转：减少对应数位的数值
-    else if (msg.event == ENCODER_EVENT_LEFT) {
-        // 边界处理：不小于1%
-        DutyValue = (DutyValue - awg_pow10_table[duty_digit_current]) < 1
-                        ? 1
-                        : (DutyValue - awg_pow10_table[duty_digit_current]);
-
-        // 更新占空比显示字符串
-        snprintf(duty_str, 4, "%03" PRIu32, (uint32_t)DutyValue);
-        lcd_draw_string(190, PARAM_ROW_START_Y + 1 * PARAM_ROW_HEIGHT, duty_str, &yahei16x16,
-                        COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
-
-        StartBeezer(0); // 蜂鸣器反馈
-        // 输出开启时，实时更新波形
-        if (IsOutputOn == true) {
-            GenerateWave(current_wave);
-        }
-        return;
-    }
-    // 编码器右转：增加对应数位的数值
-    else if (msg.event == ENCODER_EVENT_RIGHT) {
-        // 边界处理：不大于100%
-        DutyValue = (DutyValue + awg_pow10_table[duty_digit_current]) > 100
-                        ? 100
-                        : (DutyValue + awg_pow10_table[duty_digit_current]);
-
-        // 更新占空比显示字符串
-        snprintf(duty_str, 4, "%03" PRIu32, (uint32_t)DutyValue);
-        lcd_draw_string(190, PARAM_ROW_START_Y + 1 * PARAM_ROW_HEIGHT, duty_str, &yahei16x16,
-                        COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
-
-        StartBeezer(0); // 蜂鸣器反馈
-        // 输出开启时，实时更新波形
-        if (IsOutputOn == true) {
-            GenerateWave(current_wave);
-        }
-        return;
-    }
-    // 确认键：返回参数选择页
-    else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
-        awg_current_page = PAGE_PARAM_SELECT;
-        awg_previous_page = PAGE_DUTY_DIGIT;
-        // 清空数位选择示意条
-        lcd_draw_line(177, 166, 257, 166, COLOR_PARAM_BG);
-        StartBeezer(0);
-        return;
-    } else {
-        return; // 其他按键不处理
-    }
-
-    // 蜂鸣器反馈
-    StartBeezer(0);
-
-    // 清空旧的数位选择示意条
-    lcd_draw_line(177, 166, 257, 166, COLOR_PARAM_BG);
-    // 绘制新的数位选择示意条
-    lcd_draw_line(177 + 13 * (3 - duty_digit_current), 166,
-                  177 + 13 * (3 - duty_digit_current) + 10, 166, 0x87d3);
-}
+void duty_digit_handler(KeyEventMsg_t msg) { awg_digit_handler(msg, &duty_ctx); }
 
 /**
  * @brief 振幅参数编辑页按键处理函数
- * @param msg: 按键事件消息
- * @note  处理振幅数位选择、数值增减、返回参数选择页等操作
  */
-void amp_digit_handler(KeyEventMsg_t msg) {
-    // 编码器左转（按下）：切换到更高数位
-    if (msg.key == KEY_UP || msg.event == ENCODER_EVENT_PRESS_LEFT) {
-        amp_digit_current = (amp_digit_current < amp_unit) ? (amp_digit_current + 1) : amp_hundredth;
-    }
-    // 编码器右转（按下）：切换到更低数位
-    else if (msg.key == KEY_DOWN || msg.event == ENCODER_EVENT_PRESS_RIGHT) {
-        amp_digit_current = (amp_digit_current > amp_hundredth) ? (amp_digit_current - 1) : amp_unit;
-    }
-    // 编码器左转：减少对应数位的数值
-    else if (msg.event == ENCODER_EVENT_LEFT) {
-        // 边界处理：不小于0.01V
-        AmpValue = (AmpValue - 0.01f * awg_pow10_table[amp_digit_current]) < 0.01f
-                       ? 0.01f
-                       : (AmpValue - 0.01f * awg_pow10_table[amp_digit_current]);
-
-        // 更新振幅显示字符串
-        fmt_fixed(amp_str, sizeof(amp_str), AmpValue, 2, 0, 0);
-        lcd_draw_string(188, PARAM_ROW_START_Y + 2 * PARAM_ROW_HEIGHT, amp_str, &yahei16x16,
-                        COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
-
-        StartBeezer(0); // 蜂鸣器反馈
-        // 输出开启时，实时更新波形
-        if (IsOutputOn == true) {
-            GenerateWave(current_wave);
-        }
-        return;
-    }
-    // 编码器右转：增加对应数位的数值
-    else if (msg.event == ENCODER_EVENT_RIGHT) {
-        // 边界处理：不大于5.00V
-        AmpValue = (AmpValue + 0.01f * awg_pow10_table[amp_digit_current]) > 5.00f
-                       ? 5.00f
-                       : (AmpValue + 0.01f * awg_pow10_table[amp_digit_current]);
-
-        // 更新振幅显示字符串
-        fmt_fixed(amp_str, sizeof(amp_str), AmpValue, 2, 0, 0);
-        lcd_draw_string(188, PARAM_ROW_START_Y + 2 * PARAM_ROW_HEIGHT, amp_str, &yahei16x16,
-                        COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
-
-        StartBeezer(0); // 蜂鸣器反馈
-        // 输出开启时，实时更新波形
-        if (IsOutputOn == true) {
-            GenerateWave(current_wave);
-        }
-        return;
-    }
-    // 确认键：返回参数选择页
-    else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
-        awg_current_page = PAGE_PARAM_SELECT;
-        awg_previous_page = PAGE_AMP_DIGIT;
-        // 清空数位选择示意条
-        lcd_draw_line(177, 195, 257, 195, COLOR_PARAM_BG);
-        StartBeezer(0);
-        return;
-    } else {
-        return; // 其他按键不处理
-    }
-
-    // 蜂鸣器反馈
-    StartBeezer(0);
-
-    // 清空旧的数位选择示意条
-    lcd_draw_line(177, 195, 257, 195, COLOR_PARAM_BG);
-    // 绘制新的数位选择示意条
-    if (amp_digit_current == amp_hundredth || amp_digit_current == amp_tenth) {
-        lcd_draw_line(182 + 13 * (3 - amp_digit_current), 195,
-                      182 + 13 * (3 - amp_digit_current) + 10, 195, 0x87d3);
-    } else {
-        lcd_draw_line(182 + 13 * 1 - 8, 195, 182 + 13 * 1 + 10 - 8, 195, 0x87d3);
-    }
-}
+void amp_digit_handler(KeyEventMsg_t msg) { awg_digit_handler(msg, &amp_ctx); }
 
 /**
  * @brief 偏置参数编辑页按键处理函数
- * @param msg: 按键事件消息
- * @note  处理偏置数位选择、数值增减、返回参数选择页等操作
  */
-void bias_digit_handler(KeyEventMsg_t msg) {
-    // 编码器左转（按下）：切换到更高数位
-    if (msg.key == KEY_UP || msg.event == ENCODER_EVENT_PRESS_LEFT) {
-        bias_digit_current = (bias_digit_current < bias_unit) ? (bias_digit_current + 1) : bias_hundredth;
-    }
-    // 编码器右转（按下）：切换到更低数位
-    else if (msg.key == KEY_DOWN || msg.event == ENCODER_EVENT_PRESS_RIGHT) {
-        bias_digit_current = (bias_digit_current > bias_hundredth) ? (bias_digit_current - 1) : bias_unit;
-    }
-    // 编码器左转：减少对应数位的数值
-    else if (msg.event == ENCODER_EVENT_LEFT) {
-        // 边界处理：不小于-5.00V
-        BiasValue = (BiasValue - 0.01f * awg_pow10_table[bias_digit_current]) < -5.00f
-                        ? -5.00f
-                        : (BiasValue - 0.01f * awg_pow10_table[bias_digit_current]);
-
-        // 更新偏置显示字符串
-        fmt_fixed(bias_str, sizeof(bias_str), BiasValue, 2, 0, FMT_SIGN);
-        lcd_draw_string(175, PARAM_ROW_START_Y + 3 * PARAM_ROW_HEIGHT, bias_str, &yahei16x16,
-                        COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
-
-        StartBeezer(0); // 蜂鸣器反馈
-        // 输出开启时，实时更新波形
-        if (IsOutputOn == true) {
-            GenerateWave(current_wave);
-        }
-        return;
-    }
-    // 编码器右转：增加对应数位的数值
-    else if (msg.event == ENCODER_EVENT_RIGHT) {
-        // 边界处理：不大于5.00V
-        BiasValue = (BiasValue + 0.01f * awg_pow10_table[bias_digit_current]) > 5.00f
-                        ? 5.00f
-                        : (BiasValue + 0.01f * awg_pow10_table[bias_digit_current]);
-
-        // 更新偏置显示字符串
-        fmt_fixed(bias_str, sizeof(bias_str), BiasValue, 2, 0, FMT_SIGN);
-        lcd_draw_string(175, PARAM_ROW_START_Y + 3 * PARAM_ROW_HEIGHT, bias_str, &yahei16x16,
-                        COLOR_TEXT_HIGHLIGHT, COLOR_PARAM_BG, -3);
-
-        StartBeezer(0); // 蜂鸣器反馈
-        // 输出开启时，实时更新波形
-        if (IsOutputOn == true) {
-            GenerateWave(current_wave);
-        }
-        return;
-    }
-    // 确认键：返回参数选择页
-    else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
-        awg_current_page = PAGE_PARAM_SELECT;
-        awg_previous_page = PAGE_BIAS_DIGIT;
-        // 清空数位选择示意条
-        lcd_draw_line(177, 224, 257, 224, COLOR_PARAM_BG);
-        StartBeezer(0);
-        return;
-    } else {
-        return; // 其他按键不处理
-    }
-
-    // 蜂鸣器反馈
-    StartBeezer(0);
-
-    // 清空旧的数位选择示意条
-    lcd_draw_line(177, 224, 257, 224, COLOR_PARAM_BG);
-    // 绘制新的数位选择示意条
-    if (bias_digit_current == bias_hundredth || bias_digit_current == bias_tenth) {
-        lcd_draw_line(182 + 13 * (3 - bias_digit_current), 224,
-                      182 + 13 * (3 - bias_digit_current) + 10, 224, 0x87d3);
-    } else {
-        lcd_draw_line(182 + 13 * 1 - 8, 224, 182 + 13 * 1 + 10 - 8, 224, 0x87d3);
-    }
-}
+void bias_digit_handler(KeyEventMsg_t msg) { awg_digit_handler(msg, &bias_ctx); }
 
 /************************ 页面处理函数映射表 ************************/
 static void (*page_handlers[PAGE_NUM])(KeyEventMsg_t) = {
