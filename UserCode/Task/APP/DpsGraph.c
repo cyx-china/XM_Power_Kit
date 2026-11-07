@@ -283,20 +283,21 @@ static int16_t value_to_y(uint8_t ci, float v) {
 }
 
 /* ========================== 刻度文字 ========================== */
-static uint16_t text_width(const char *s) {
+/* 与 graphics.c 的字宽步进保持一致：小数点只占 font_width*6/10+1，其余占 font_width */
+static uint16_t text_width(const FontInfo *font, const char *s) {
     uint16_t w = 0;
-    uint16_t dot_w = (uint16_t)(NotoMono10x14.font_width * 6 / 10 + 1);
+    uint16_t dot_w = (uint16_t)(font->font_width * 6 / 10 + 1);
 
     while (*s) {
         if (*s == '.') w = (uint16_t)(w + dot_w);
-        else w = (uint16_t)(w + NotoMono10x14.font_width);
+        else w = (uint16_t)(w + font->font_width);
         s++;
     }
     return w;
 }
 
 static void draw_label(uint16_t y, const char *text, uint16_t color) {
-    uint16_t w = text_width(text);
+    uint16_t w = text_width(&NotoMono10x14, text);
     uint16_t x = (w < LABEL_RIGHT) ? (uint16_t)(LABEL_RIGHT - w) : 0;
 
     lcd_draw_rect(0, y, LABEL_RIGHT + 1, (uint16_t)(y + NotoMono10x14.font_height - 1), COL_BG, 1);
@@ -339,11 +340,14 @@ static void draw_value_tag(uint8_t ci) {
     while (*unit && len < (int)sizeof(text) - 1) text[len++] = *unit++;
     text[len] = '\0';
 
-    uint16_t w = text_width(text);
+    /* 当前值标签用 5x7 小字模，只有刻度文字的一半大小，尽量少盖住曲线 */
+    const FontInfo *tag_font = &Mono5x7;
+
+    uint16_t w = text_width(tag_font, text);
     uint16_t x = (uint16_t)(PLOT_X1 - 2 - w);
     if (x < PLOT_X0) x = PLOT_X0;
 
-    uint16_t fh = NotoMono10x14.font_height;
+    uint16_t fh = tag_font->font_height;
 
     int16_t y_now = value_to_y(ci, v);
     int16_t y_hi = y_now;       /* 标签会盖住右侧这段曲线：取段内最高点（y 最小） */
@@ -371,7 +375,7 @@ static void draw_value_tag(uint8_t ci) {
         if (y < (int16_t)PANE_Y(ci)) y = (int16_t)PANE_Y(ci);
     }
 
-    lcd_draw_string(x, (uint16_t)y, text, &NotoMono10x14, desc->color, bg, 0);
+    lcd_draw_string(x, (uint16_t)y, text, tag_font, desc->color, bg, 0);
 }
 
 /* ========================== 整帧渲染 ========================== */
