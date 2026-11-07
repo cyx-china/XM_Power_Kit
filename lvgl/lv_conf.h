@@ -69,8 +69,12 @@
 #define LV_USE_USER_DATA    1
 
 /*================== FONT USAGE ==================*/
-#define LV_FONT_MONTSERRAT_16 1
-#define LV_FONT_DEFAULT    &lv_font_montserrat_16
+/* 默认字体复用 GUI Guider 已生成的 montserratMedium_16：
+ * 内置 lv_font_montserrat_16 只为 LV_FONT_DEFAULT 服务，另行链接会多占约 15.8KB FLASH。
+ * lv_conf.h 在此处还看不到 lv_font_t，故用 struct _lv_font_t 前置声明（C 语言标签形式，与 lv_font_t 等价）。 */
+extern const struct _lv_font_t lv_font_montserratMedium_16;
+#define LV_FONT_MONTSERRAT_16 0
+#define LV_FONT_DEFAULT    (&lv_font_montserratMedium_16)
 
 #define LV_FONT_FMT_TXT_LARGE   0
 #define LV_USE_FONT_COMPRESSED  0
