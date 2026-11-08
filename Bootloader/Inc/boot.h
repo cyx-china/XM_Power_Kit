@@ -13,10 +13,10 @@
 #include "stm32f4xx_hal.h"
 
 /* ============================ 分区地址 ============================ */
-#define BOOT_SIZE           (16U * 1024U)      /* bootloader：sector0 */
-#define BOOT_STATE_ADDR     0x08004000U        /* OTA 状态记录：sector1 */
-#define BOOT_APP_ADDR       0x08008000U        /* 应用：sector2 起 */
-#define BOOT_APP_SIZE       (480U * 1024U)     /* sector2~7 共 480KB */
+#define BOOT_SIZE           (48U * 1024U)      /* bootloader：sector0 */
+#define BOOT_STATE_ADDR     0x0800C000U        /* OTA 状态记录：sector1 */
+#define BOOT_APP_ADDR       0x08010000U        /* 应用：sector2 起 */
+#define BOOT_APP_SIZE       (448U * 1024U)     /* sector2~7 共 480KB */
 
 #define BOOT_RAM_START      0x20000000U
 #define BOOT_RAM_END        0x20020000U        /* 128KB SRAM */

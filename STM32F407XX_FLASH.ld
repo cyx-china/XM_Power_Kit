@@ -58,7 +58,7 @@ MEMORY
   CCMRAM (xrw)   : ORIGIN = 0x10000000, LENGTH = 64K
   /* OTA 分区：0x08000000 起 32K 留给 Bootloader，应用从 0x08008000 起
      （sector0/1 = 16K+16K 给 bootloader 与其状态记录，sector2..7 = 480K 给应用） */
-  FLASH (rx)     : ORIGIN = 0x8008000, LENGTH = 480K
+  FLASH (rx)     : ORIGIN = 0x8010000, LENGTH = 448K
 }
 
 /* Highest address of the user mode stack */

@@ -25,7 +25,7 @@
 extern uint32_t _image_end;
 
 #define OTA_CHUNK           512U
-#define OTA_REC_ADDR        0x08004000U
+#define OTA_REC_ADDR        0x0800C000U
 #define OTA_REC_MAGIC       0x374B4D58U      /* 'XMK7' */
 #define OTA_ST_WAIT_BOOTOK  1U               /* bootloader 刚升级完，等应用确认 */
 

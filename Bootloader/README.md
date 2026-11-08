@@ -6,11 +6,11 @@
 
 | 地址 | 大小 | 用途 |
 | --- | --- | --- |
-| `0x08000000` | 16 KB | **Bootloader**（sector 0，本目录） |
-| `0x08004000` | 16 KB | OTA 状态记录（sector 1，只有 bootloader 会写） |
-| `0x08008000` | 480 KB | **应用**（sector 2~7，主工程的链接脚本） |
+| `0x08000000` | 48 KB | **Bootloader**（sector 0~2，本目录） |
+| `0x0800C000` | 16 KB | OTA 状态记录（sector 3，只有 bootloader 会写） |
+| `0x08010000` | 448 KB | **应用**（sector 4~7，主工程的链接脚本） |
 
-应用镜像不能超过 480 KB；目前约 296 KB。
+应用镜像不能超过 448 KB；目前约 296 KB。
 
 ## 外部 Flash 上的文件（FATFS 卷 `0:`）
 
@@ -20,7 +20,7 @@
 | `0:/ota/PREV.BIN` | 升级前那版固件的快照，回滚源 |
 | `0:/ota/BOOTOK.BIN` | 应用启动成功后写入，bootloader 用它确认“新固件能起来” |
 | `0:/ota/REQ.BIN` | 应用写给 bootloader 的升级/回滚请求（带令牌，处理一次即失效） |
-| `0:/font/boot.bin` | bootloader 屏幕用的点阵字库（BFNT 格式） |
+| `0:/font/bootloader/boot.bin` | bootloader 屏幕用的点阵字库（BFNT 格式，可替换；固件里也内嵌了一份，文件缺失/损坏时自动用内嵌的） |
 
 ## 决策流程
 
@@ -52,7 +52,7 @@
 
 ```bash
 python tools/gen_boot_font.py
-# 输出 Bootloader/boot_font.bin，用上位机「文件管理」上传到设备 /font/boot.bin
+# 输出 Bootloader/boot_font.bin（编译时会被打进固件，无需手动上传）
 ```
 
 ## 编译
@@ -70,7 +70,7 @@ cmake --build build/Release
 1. **打包**：新上位机「固件升级」页选 `build/Release/XM_Power_Kit.bin` → 「导出升级包…」
    → 存成 `FW.BIN`（80 字节头 + 镜像）；
 2. **上传**：连上旧固件，用「文件管理」在根目录新建 `/ota`，把 `FW.BIN` 传进去
-   （路径必须是 `0:/ota/FW.BIN`）；顺便把 `Bootloader/boot_font.bin` 传成 `/font/boot.bin`；
+   （路径必须是 `0:/ota/FW.BIN`）；顺便把 字库已经在固件里内嵌，不需要再上传；
 3. **烧 bootloader**：ST-Link 把 `build/Release/Bootloader/XM_Power_Kit_Boot.hex` 烧到 `0x08000000`，
    只烧这 16KB，不要全片擦除（会连同刚刚上传到外部 Flash 的内容一起没事，但内部 Flash 的应用区会被擦掉，
    这正是我们要的）；

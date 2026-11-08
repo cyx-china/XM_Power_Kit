@@ -83,7 +83,7 @@ int main(void)
   /* USER CODE BEGIN 1 */
   /* OTA：应用链接在 0x08008000（前面 32K 是 bootloader），向量表必须跟着搬家，
      且必须在 HAL_Init()（会启动 TIM6 中断）之前完成。 */
-  SCB->VTOR = 0x08008000U;
+  SCB->VTOR = 0x08010000U;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/

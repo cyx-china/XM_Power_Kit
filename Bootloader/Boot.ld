@@ -1,8 +1,9 @@
 /*
  * OTA Bootloader 专用链接脚本
- * 分区：内部 Flash 0x08000000 起 16KB 给 bootloader（第二个 16KB 扇区留给 OTA 状态记录，
- *       不参与链接，所以这里 LENGTH 只给 16K）。
- * 应用分区从 0x08008000 开始，由应用自己的 STM32F407xx_FLASH.ld 负责。
+ * 分区（sector 0~2 共 48KB 给 bootloader，sector 3 留给 OTA 状态记录，不参与链接）：
+ *     0x08000000  48KB  bootloader（本脚本）
+ *     0x0800C000  16KB  OTA 状态记录（sector 3）
+ *     0x08010000 448KB  应用（由应用自己的 STM32F407xx_FLASH.ld 负责）
  */
 ENTRY(Reset_Handler)
 
@@ -13,7 +14,7 @@ _Min_Stack_Size = 0x800;     /* FATFS 的长文件名缓冲在栈上，留 2KB *
 MEMORY
 {
 RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 128K
-FLASH (rx)  : ORIGIN = 0x8000000,  LENGTH = 16K
+FLASH (rx)  : ORIGIN = 0x8000000,  LENGTH = 48K
 }
 
 SECTIONS

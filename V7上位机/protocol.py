@@ -28,8 +28,8 @@ OTA_CHUNK = 432         # 单次升级数据传输量（与 FS 相同，留足�
 OTA_HEAD_SIZE = 80
 OTA_MAGIC = b"XMK7OTA1"
 OTA_BOARD = "XM_Power_Kit_V7"
-OTA_APP_ADDR = 0x08008000
-OTA_APP_MAX = 480 * 1024
+OTA_APP_ADDR = 0x08010000
+OTA_APP_MAX = 448 * 1024
 
 # 偏移不一致时设备回 ST_E_PARAM + 期望偏移，从这里续传
 class OtaResync(Exception):

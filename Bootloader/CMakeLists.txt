@@ -13,8 +13,28 @@ set(HAL_DIR   ${PROJ_DIR}/Drivers/STM32F4xx_HAL_Driver/Src)
 
 file(GLOB BOOT_SOURCES ${BOOT_DIR}/*.c)
 
+# ---------------------------------------------------------------------------
+# 字库固件内嵌
+#   tools/gen_boot_font.py 生成的 boot_font.bin 直接打进 bootloader 的 .rodata，
+#   符号为 _binary_boot_font_bin_start / _end。这样外部 Flash 上没有字库、
+#   或者字库文件损坏时，bootloader 依然能正常显示文字（不会黑屏或只剩进度条）。
+# ---------------------------------------------------------------------------
+set(BOOT_FONT_BIN ${BOOT_DIR}/boot_font.bin)
+set(BOOT_FONT_OBJ ${CMAKE_CURRENT_BINARY_DIR}/boot_font_bin.o)
+
+add_custom_command(
+        OUTPUT ${BOOT_FONT_OBJ}
+        COMMAND ${CMAKE_OBJCOPY} -I binary -O elf32-littlearm -B arm
+                --rename-section .data=.rodata,alloc,load,readonly,data,contents
+                boot_font.bin ${BOOT_FONT_OBJ}
+        DEPENDS ${BOOT_FONT_BIN}
+        WORKING_DIRECTORY ${BOOT_DIR}
+        VERBATIM
+)
+
 add_executable(${BOOT_NAME}
         ${BOOT_SOURCES}
+        ${BOOT_FONT_OBJ}
 
         ${PROJ_DIR}/startup_stm32f407xx.s
         ${PROJ_DIR}/Core/Src/system_stm32f4xx.c

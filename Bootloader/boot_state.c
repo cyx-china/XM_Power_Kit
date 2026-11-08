@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    boot_state.c
- * @brief   OTA 状态记录（内部 Flash sector1 @ 0x08004000）。
+ * @brief   OTA 状态记录（内部 Flash sector3 @ 0x0800C000）。
  *          只有 bootloader 会写这块扇区，应用不碰，避免两边擦除打架。
  ******************************************************************************
  */
@@ -72,7 +72,7 @@ bool Boot_State_Save(const boot_record_t *rec)
     __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR |
                            FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
 
-    if (!Boot_IntFlash_EraseSector(1U))                    /* sector1 = 状态记录 */
+    if (!Boot_IntFlash_EraseSector(3U))                    /* sector3 = 状态记录 */
     {
         ok = false;
     }

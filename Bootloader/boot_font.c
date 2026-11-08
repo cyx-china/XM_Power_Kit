@@ -18,18 +18,24 @@
 #include "ff.h"
 #include <string.h>
 
-#define FONT_PATH       "0:/font/boot.bin"
+#define FONT_PATH       "0:/font/bootloader/boot.bin"   /* 首选：可替换的板载字库 */
+#define FONT_PATH_ALT   "0:/font/boot.bin"              /* 兼容旧位置 */
 #define FONT_BUF_MAX    (16U * 1024U)
 #define FONT_MAX_W      32U
 #define FONT_MAX_H      32U
 
-static uint8_t  s_buf[FONT_BUF_MAX];
-static uint32_t s_len;
+static uint8_t  s_buf[FONT_BUF_MAX];      /* 外部字库文件的读缓冲 */
+static const uint8_t *s_data;            /* 实际使用的字库数据（外部文件或内嵌） */
 static uint32_t s_count;
 static uint32_t s_index_off;
 static uint8_t  s_height;
 static bool     s_ready;
 static uint16_t s_pix[FONT_MAX_W * FONT_MAX_H];
+
+/* 内嵌字库：CMake 用 objcopy -I binary 把 boot_font.bin 打进 .rodata。
+   有它兜底，外部字库缺失或损坏时界面照样完整，不会退化成一个空壳。 */
+extern const uint8_t _binary_boot_font_bin_start[];
+extern const uint8_t _binary_boot_font_bin_end[];
 
 static uint16_t rd16(const uint8_t *p)
 {
@@ -41,43 +47,63 @@ static uint32_t rd32(const uint8_t *p)
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-void Boot_Font_Init(void)
+/* 校验并登记一份字库数据 */
+static bool font_use(const uint8_t *data, uint32_t len)
+{
+    if (data == NULL || len < 16U || memcmp(data, "BFNT", 4U) != 0)
+    {
+        return false;
+    }
+
+    uint8_t  height    = data[5];
+    uint32_t count     = rd32(&data[8]);
+    uint32_t index_off = rd32(&data[12]);
+
+    if (height == 0U || height > FONT_MAX_H || count == 0U ||
+        (index_off + (count * 8U)) > len)
+    {
+        return false;
+    }
+
+    s_height    = height;
+    s_count     = count;
+    s_index_off = index_off;
+    s_data      = data;
+    s_ready     = true;
+    return true;
+}
+
+/* 从外部 Flash 读一份字库文件到 s_buf 并登记 */
+static bool font_load_file(const char *path)
 {
     FIL file;
     UINT read = 0U;
 
-    s_ready = false;
-    s_count = 0U;
-
-    if (f_open(&file, FONT_PATH, FA_READ) != FR_OK)
+    if (f_open(&file, path, FA_READ) != FR_OK)
     {
-        return;
+        return false;
     }
 
-    if (f_read(&file, s_buf, FONT_BUF_MAX, &read) != FR_OK)
-    {
-        (void)f_close(&file);
-        return;
-    }
+    FRESULT res = f_read(&file, s_buf, FONT_BUF_MAX, &read);
     (void)f_close(&file);
 
-    if (read < 16U || memcmp(s_buf, "BFNT", 4U) != 0)
+    return (res == FR_OK) && font_use(s_buf, (uint32_t)read);
+}
+
+void Boot_Font_Init(void)
+{
+    s_ready = false;
+    s_count = 0U;
+    s_data  = NULL;
+
+    /* 外部字库优先（用户可以自己替换），缺失或损坏就用内嵌那份 */
+    if (font_load_file(FONT_PATH) || font_load_file(FONT_PATH_ALT))
     {
         return;
     }
 
-    s_height    = s_buf[5];
-    s_count     = rd32(&s_buf[8]);
-    s_index_off = rd32(&s_buf[12]);
-
-    if (s_height == 0U || s_height > FONT_MAX_H || s_count == 0U ||
-        (s_index_off + (s_count * 8U)) > read)
-    {
-        return;
-    }
-
-    s_len   = read;
-    s_ready = true;
+    (void)font_use(_binary_boot_font_bin_start,
+                   (uint32_t)(_binary_boot_font_bin_end - _binary_boot_font_bin_start));
 }
 
 bool Boot_Font_Ready(void)
@@ -89,7 +115,7 @@ static const uint8_t *find_glyph(uint16_t cp, uint8_t *width, uint8_t *advance)
 {
     for (uint32_t i = 0U; i < s_count; i++)
     {
-        const uint8_t *entry = &s_buf[s_index_off + (i * 8U)];
+        const uint8_t *entry = &s_data[s_index_off + (i * 8U)];
 
         if (rd16(entry) != cp)
         {
@@ -98,7 +124,7 @@ static const uint8_t *find_glyph(uint16_t cp, uint8_t *width, uint8_t *advance)
 
         *width   = entry[2];
         *advance = entry[3];
-        return &s_buf[rd32(&entry[4])];
+        return &s_data[rd32(&entry[4])];
     }
     return NULL;
 }

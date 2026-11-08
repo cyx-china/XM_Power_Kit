@@ -34,8 +34,8 @@
 #define OTA_HEAD_SIZE       80U
 #define OTA_MAGIC           "XMK7OTA1"
 #define OTA_BOARD           "XM_Power_Kit_V7"
-#define OTA_APP_ADDR        0x08008000U
-#define OTA_APP_MAX         (480U * 1024U)
+#define OTA_APP_ADDR        0x08010000U
+#define OTA_APP_MAX         (448U * 1024U)
 
 #define OTA_OP_UPGRADE      1U
 #define OTA_OP_ROLLBACK     2U
