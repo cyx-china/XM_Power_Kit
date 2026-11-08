@@ -23,7 +23,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='XM_Power_Kit_V7_上位机',
+    name='上位机',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

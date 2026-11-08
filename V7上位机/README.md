@@ -10,10 +10,13 @@ pip install -r requirements.txt
 python main.py
 ```
 
-打包成单文件 exe：
+目录里已带打包好的单文件 `上位机.exe`（约 37 MB，双击即用，无需装 Python）。
+改了代码后重新打包：
 
 ```bash
+pip install pyinstaller
 pyinstaller main.spec
+# 产物：dist/上位机.exe
 ```
 
 无硬件自检（验证协议编解码、参数、文件读写逻辑）：
