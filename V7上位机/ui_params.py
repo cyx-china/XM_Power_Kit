@@ -26,6 +26,7 @@ class ParamView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cells = {}                    # pid -> {"cur": item, "def": item, "new": item}
+        self._tables = []                   # 所有分组表格，供整体缩放用
         self._build()
 
     # ------------------------------------------------------------ 界面
@@ -80,6 +81,9 @@ class ParamView(QWidget):
         table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed)
         table.setAlternatingRowColors(True)
 
+        table.verticalHeader().setDefaultSectionSize(30)
+        self._tables.append(table)
+
         hdr = table.horizontalHeader()
         hdr.setSectionResizeMode(_COL_NAME, QHeaderView.Stretch)
         hdr.setSectionResizeMode(_COL_CUR, QHeaderView.Fixed)
@@ -120,7 +124,6 @@ class ParamView(QWidget):
             table.setItem(row, _COL_DEF, def_item)
             table.setItem(row, _COL_NEW, new_item)
             table.setItem(row, _COL_DESC, desc_item)
-            table.setRowHeight(row, 30)
             self._cells[pid] = {"cur": cur_item, "def": def_item, "new": new_item}
 
         wrap = QWidget()
@@ -171,6 +174,17 @@ class ParamView(QWidget):
             if text:
                 cell["cur"].setText(text)
                 cell["new"].setText("")
+
+    def apply_scale(self, scale: float) -> None:
+        """窗口大小变化时同步导航宽度、行高与数值列宽（字号由全局样式负责）"""
+        def px(base: float, minimum: int = 20) -> int:
+            return max(minimum, int(round(base * scale)))
+
+        self.nav.setFixedWidth(px(150, 110))
+        for table in self._tables:
+            table.verticalHeader().setDefaultSectionSize(px(30, 22))
+            for col in (_COL_CUR, _COL_DEF, _COL_NEW):
+                table.setColumnWidth(col, px(120, 80))
 
     def set_busy(self, busy: bool) -> None:
         for b in (self.btn_read_cur, self.btn_read_def, self.btn_write):

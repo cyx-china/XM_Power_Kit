@@ -88,6 +88,7 @@ class FileBrowser(QWidget):
         hdr.setSectionResizeMode(_COL_TYPE, QHeaderView.Fixed)
         self.table.setColumnWidth(_COL_SIZE, 120)
         self.table.setColumnWidth(_COL_TYPE, 100)
+        self.table.verticalHeader().setDefaultSectionSize(28)
         root.addWidget(self.table, 1)
 
         bottom = QHBoxLayout()
@@ -135,7 +136,6 @@ class FileBrowser(QWidget):
             self.table.setItem(row, _COL_NAME, name_item)
             self.table.setItem(row, _COL_SIZE, size_item)
             self.table.setItem(row, _COL_TYPE, type_item)
-            self.table.setRowHeight(row, 28)
 
     def set_capacity(self, total_kb: int, free_kb: int) -> None:
         if total_kb <= 0:
@@ -164,6 +164,16 @@ class FileBrowser(QWidget):
         self.progress.setValue(0)
         self.transfer_label.setText("")
         self.btn_cancel.setVisible(False)
+
+    def apply_scale(self, scale: float) -> None:
+        """窗口大小变化时同步列宽、行高与路径框最小宽度"""
+        def px(base: float, minimum: int = 20) -> int:
+            return max(minimum, int(round(base * scale)))
+
+        self.path_edit.setMinimumWidth(px(240, 150))
+        self.table.verticalHeader().setDefaultSectionSize(px(28, 20))
+        self.table.setColumnWidth(_COL_SIZE, px(120, 80))
+        self.table.setColumnWidth(_COL_TYPE, px(100, 70))
 
     def current_entry(self):
         row = self.table.currentRow()

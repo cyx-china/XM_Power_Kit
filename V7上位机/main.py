@@ -15,8 +15,10 @@ from __future__ import annotations
 import os
 import sys
 from datetime import datetime
+from string import Template
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QGuiApplication
 from PyQt5.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
@@ -32,17 +34,22 @@ from worker import Worker
 
 BAUDS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 
-STYLE = """
-QWidget { background-color: #1e1e2e; color: #cdd6f4; font-size: 13px; }
+# 设计基准尺寸：窗口按这个尺寸显示时缩放系数为 1.0
+BASE_W, BASE_H = 1180, 760
+BASE_FONT = 13
+SCALE_MIN, SCALE_MAX = 0.80, 2.00
+
+_STYLE = Template("""
+QWidget { background-color: #1e1e2e; color: #cdd6f4; font-size: ${fs}px; }
 QMainWindow { background-color: #181825; }
-QTabWidget::pane { border: 1px solid #313244; border-radius: 6px; top: -1px; }
-QTabBar::tab { background: #212134; padding: 8px 22px; border: 1px solid #313244;
-               border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px;
+QTabWidget::pane { border: 1px solid #313244; border-radius: ${r1}px; top: -1px; }
+QTabBar::tab { background: #212134; padding: ${pt}px ${pt2}px; border: 1px solid #313244;
+               border-bottom: none; border-top-left-radius: ${r1}px; border-top-right-radius: ${r1}px;
                margin-right: 2px; }
 QTabBar::tab:selected { background: #7aa2f7; color: #1e1e2e; font-weight: bold; }
 QTabBar::tab:hover:!selected { background: #313244; }
-QPushButton { background-color: #2d2d3f; border: 1px solid #3b3b54; border-radius: 6px;
-              padding: 6px 14px; }
+QPushButton { background-color: #2d2d3f; border: 1px solid #3b3b54; border-radius: ${r1}px;
+              padding: ${b1}px ${b2}px; }
 QPushButton:hover { border: 1px solid #7aa2f7; background-color: #3b3b54; }
 QPushButton:pressed { background-color: #7aa2f7; color: #1e1e2e; }
 QPushButton:disabled { color: #585b70; border-color: #313244; }
@@ -50,24 +57,44 @@ QPushButton#PrimaryButton { background-color: #7aa2f7; color: #1e1e2e; font-weig
 QPushButton#PrimaryButton:hover { background-color: #89b4fa; }
 QPushButton#PrimaryButton:disabled { background-color: #45475a; color: #7f849c; }
 QLineEdit, QComboBox, QSpinBox { background-color: #2d2d3f; border: 1px solid #3b3b54;
-                                 border-radius: 6px; padding: 5px 10px; }
+                                 border-radius: ${r1}px; padding: ${i1}px ${i2}px; }
 QLineEdit:focus, QComboBox:focus { border: 1px solid #7aa2f7; }
 QLineEdit:read-only { background-color: #252536; color: #a6adc8; }
 QTableWidget { background-color: #212134; alternate-background-color: #262638;
-               gridline-color: #313244; border: 1px solid #313244; border-radius: 6px; }
-QHeaderView::section { background-color: #2d2d3f; color: #cdd6f4; padding: 6px;
+               gridline-color: #313244; border: 1px solid #313244; border-radius: ${r1}px; }
+QHeaderView::section { background-color: #2d2d3f; color: #cdd6f4; padding: ${hp}px;
                        border: none; border-right: 1px solid #313244; }
-QListWidget#NavList { background-color: #212134; border: 1px solid #313244; border-radius: 6px; }
-QListWidget#NavList::item { height: 40px; padding-left: 14px; border-radius: 4px; margin: 3px 6px; }
+QListWidget#NavList { background-color: #212134; border: 1px solid #313244; border-radius: ${r1}px; }
+QListWidget#NavList::item { height: ${nh}px; padding-left: ${npl}px; border-radius: ${r2}px;
+                            margin: ${nmv}px ${nmh}px; }
 QListWidget#NavList::item:selected { background-color: #7aa2f7; color: #1e1e2e; font-weight: bold; }
 QListWidget#NavList::item:hover:!selected { background-color: #313244; }
-QProgressBar { border: 1px solid #313244; border-radius: 6px; text-align: center;
-               background-color: #2d2d3f; height: 16px; }
-QProgressBar::chunk { background-color: #7aa2f7; border-radius: 5px; }
-QGroupBox { border: 1px solid #313244; border-radius: 8px; margin-top: 12px; padding-top: 14px; }
-QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #89b4fa; }
+QProgressBar { border: 1px solid #313244; border-radius: ${r1}px; text-align: center;
+               background-color: #2d2d3f; height: ${ph}px; }
+QProgressBar::chunk { background-color: #7aa2f7; border-radius: ${r2c}px; }
+QGroupBox { border: 1px solid #313244; border-radius: ${r3}px; margin-top: ${gbm}px;
+            padding-top: ${gbp}px; }
+QGroupBox::title { subcontrol-origin: margin; left: ${gbt}px; padding: 0 ${gbt2}px; color: #89b4fa; }
 QStatusBar { background: #181825; color: #a6adc8; }
-"""
+""")
+
+
+def build_style(scale: float) -> str:
+    """按缩放系数重建样式表（字号、内边距、控件高度一起缩放，窗口变大时整体放大）"""
+    def px(base: float, minimum: int = 1) -> int:
+        return max(minimum, int(round(base * scale)))
+
+    return _STYLE.substitute(
+        fs=max(10, px(BASE_FONT)),
+        r1=px(6, 3), r2=px(4, 2), r3=px(8, 4), r2c=px(5, 2),
+        pt=px(8), pt2=px(22),
+        b1=px(6), b2=px(14),
+        i1=px(5), i2=px(10),
+        hp=px(6),
+        nh=px(40), npl=px(14), nmv=px(3), nmh=px(6),
+        ph=px(16),
+        gbm=px(12), gbp=px(14), gbt=px(12), gbt2=px(6),
+    )
 
 
 def _log_path() -> str:
@@ -79,20 +106,27 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("XM Power Kit V7 上位机")
-        self.resize(1180, 760)
-        self.setStyleSheet(STYLE)
+        self.resize(BASE_W, BASE_H)
+        self.setMinimumSize(int(BASE_W * SCALE_MIN), int(BASE_H * SCALE_MIN))
 
         self.current_values = None          # 最近一次读取的当前参数
         self.device_info = {}
         self.connected = False
 
+        self._scale = 0.0
+        self._scale_timer = QTimer(self)    # 拖拽窗口时延时重算，避免每个像素都重建样式
+        self._scale_timer.setSingleShot(True)
+        self._scale_timer.timeout.connect(self._apply_scale)
+
         self.worker = Worker()
         self.worker.start()
 
+        self.setStyleSheet(build_style(1.0))
         self._build()
         self._wire()
         self.refresh_ports()
         self._set_connected(False)
+        self._apply_scale()
 
     # ------------------------------------------------------------ 界面
     def _build(self) -> None:
@@ -109,28 +143,24 @@ class MainWindow(QMainWindow):
         cl.addWidget(QLabel("通信方式"))
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["USB CDC 串口", "蓝牙串口"])
-        self.mode_combo.setFixedWidth(130)
         cl.addWidget(self.mode_combo)
         cl.addSpacing(10)
         cl.addWidget(QLabel("端口"))
-        self.port_combo = QComboBox()
-        self.port_combo.setFixedWidth(360)
-        cl.addWidget(self.port_combo)
+        self.port_combo = QComboBox()       # 端口下拉框吃掉多余宽度，窗口变宽时跟着变长
+        cl.addWidget(self.port_combo, 1)
         self.btn_refresh_ports = QPushButton("刷新")
-        self.btn_refresh_ports.setFixedWidth(60)
         cl.addWidget(self.btn_refresh_ports)
         cl.addSpacing(10)
         cl.addWidget(QLabel("波特率"))
         self.baud_combo = QComboBox()
         self.baud_combo.addItems([str(b) for b in BAUDS])
         self.baud_combo.setCurrentText("115200")
-        self.baud_combo.setFixedWidth(100)
         cl.addWidget(self.baud_combo)
         cl.addSpacing(6)
         self.btn_connect = QPushButton("连接")
         self.btn_connect.setObjectName("PrimaryButton")
         cl.addWidget(self.btn_connect)
-        cl.addStretch(1)
+        cl.addSpacing(12)
         self.device_label = QLabel("未连接")
         self.device_label.setStyleSheet("color:#a6adc8;")
         cl.addWidget(self.device_label)
@@ -152,7 +182,6 @@ class MainWindow(QMainWindow):
         sb = self.statusBar()
         self.status_label = QLabel("就绪")
         self.status_progress = QProgressBar()
-        self.status_progress.setFixedWidth(200)
         self.status_progress.setVisible(False)
         sb.addWidget(self.status_label, 1)
         sb.addPermanentWidget(self.status_progress)
@@ -401,6 +430,34 @@ class MainWindow(QMainWindow):
         if QMessageBox.question(self, "确认", "重启设备？当前连接会短暂断开。") == QMessageBox.Yes:
             self.worker.submit("reboot", "reboot")
 
+    # ------------------------------------------------------------ 自适应缩放
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._scale_timer.start(120)        # 拖拽过程中只按最后一帧重算
+
+    def _apply_scale(self) -> None:
+        """按窗口大小等比例放大/缩小整套界面：字号、内边距、行高、列宽一起变"""
+        scale = min(self.width() / float(BASE_W), self.height() / float(BASE_H))
+        scale = max(SCALE_MIN, min(SCALE_MAX, scale))
+        scale = round(scale * 40.0) / 40.0          # 0.025 一档，避免反复重建样式
+        if abs(scale - self._scale) < 1e-6:
+            return
+        self._scale = scale
+        self.setStyleSheet(build_style(scale))
+        self._apply_widths(scale)
+        self.view_params.apply_scale(scale)
+        self.view_files.apply_scale(scale)
+
+    def _apply_widths(self, scale: float) -> None:
+        def px(base: float, minimum: int = 40) -> int:
+            return max(minimum, int(round(base * scale)))
+
+        self.mode_combo.setFixedWidth(px(130))
+        self.btn_refresh_ports.setFixedWidth(px(60))
+        self.baud_combo.setFixedWidth(px(100))
+        self.status_progress.setFixedWidth(px(200))
+        self.port_combo.setMinimumWidth(px(280, 160))
+
     def closeEvent(self, event) -> None:
         try:
             self.worker.shutdown()
@@ -410,6 +467,11 @@ class MainWindow(QMainWindow):
 
 
 def main() -> int:
+    # 高分屏（4K / 系统缩放 150% 以上）跟随系统缩放，否则界面会小得看不清
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     win = MainWindow()
     win.show()
