@@ -56,7 +56,9 @@ MEMORY
 {
   RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
   CCMRAM (xrw)   : ORIGIN = 0x10000000, LENGTH = 64K
-  FLASH (rx)     : ORIGIN = 0x8000000, LENGTH = 512K
+  /* OTA 分区：0x08000000 起 32K 留给 Bootloader，应用从 0x08008000 起
+     （sector0/1 = 16K+16K 给 bootloader 与其状态记录，sector2..7 = 480K 给应用） */
+  FLASH (rx)     : ORIGIN = 0x8008000, LENGTH = 480K
 }
 
 /* Highest address of the user mode stack */
@@ -206,6 +208,13 @@ SECTIONS
     PROVIDE(__data_end = .);
     PROVIDE(__tdata_end = .);
   } >RAM AT> FLASH
+
+  /* 应用镜像在 Flash 中的结束地址（含 .data/.ccmram 的 LMA 初值），供 OTA 自备份用 */
+  .image_end :
+  {
+    . = ALIGN(4);
+    _image_end = .;
+  } >FLASH
 
   PROVIDE( __tdata_start = ADDR(.tdata) );
   PROVIDE( __tdata_size = __tdata_end - __tdata_start );

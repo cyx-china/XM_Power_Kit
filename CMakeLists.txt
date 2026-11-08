@@ -123,6 +123,12 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
         # Add user defined libraries
 )
 
+# 链接脚本与 Map 文件按目标指定（工具链文件里已移除写死的 -T，避免和 Bootloader 的脚本叠加）
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
+        -T${CMAKE_SOURCE_DIR}/STM32F407xx_FLASH.ld
+        -Wl,-Map=${CMAKE_PROJECT_NAME}.map
+)
+
 
 # 浮点打印：全工程禁用 printf 系函数的 %f（统一走 UserCode/Utils/format.h 的定点格式化），
 # 因此不再需要 -u _printf_float（该选项会把 _printf_float/_dtoa_r 整套代码链进镜像，约 4KB）。
@@ -143,3 +149,6 @@ add_custom_command(
         COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:${CMAKE_PROJECT_NAME}> ${CMAKE_PROJECT_NAME}.hex
         COMMENT "Generating ${CMAKE_PROJECT_NAME}.hex file..."
 )
+
+# OTA Bootloader：独立目标，链接到内部 Flash 0x08000000（16KB），生成 XM_Power_Kit_Boot.elf/.hex
+add_subdirectory(Bootloader)
