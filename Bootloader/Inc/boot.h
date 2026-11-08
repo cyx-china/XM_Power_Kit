@@ -108,6 +108,20 @@ bool     Boot_Flash_EraseSector(uint32_t addr);
 
 /* ============================ FATFS ============================ */
 bool     Boot_Fs_Mount(void);
+bool     Boot_Fs_Format(void);      /* 卷无文件系统时现场建 FAT16（不接电脑） */
+
+/* ============================ 出厂初始化（目录 / 字库 / 参数文件） ============================ */
+#define BOOT_DIR_FONT           "0:/font"
+#define BOOT_DIR_FONT_BOOT      "0:/font/bootloader"
+#define BOOT_DIR_IMAGES         "0:/images"
+#define BOOT_FILE_FONT          "0:/font/bootloader/boot.bin"
+#define BOOT_FILE_PARAM         "0:/uparam.bin"
+
+#define BOOT_PROV_DIRS          0x01U   /* 建过目录 */
+#define BOOT_PROV_FONT          0x02U   /* 写过字库 */
+#define BOOT_PROV_PARAM         0x04U   /* 写过参数文件 */
+
+uint8_t  Boot_Storage_Provision(void);
 
 /* ============================ CRC32 ============================ */
 void     Boot_Crc32_Init(void);
@@ -178,12 +192,66 @@ extern const char Boot_Txt_WriteFail[];
 extern const char Boot_Txt_RollbackFail[];
 extern const char Boot_Txt_Wait[];
 extern const char Boot_Txt_Ready[];
+extern const char Boot_Txt_InitTitle[];
+extern const char Boot_Txt_InitFooter[];
+extern const char Boot_Txt_Formatting[];
+extern const char Boot_Txt_Provision[];
+extern const char Boot_Txt_SelfTest[];
+extern const char Boot_Txt_Formatted[];
+extern const char Boot_Txt_FormatFail[];
+extern const char Boot_Txt_AllOk[];
+extern const char Boot_Txt_SomeFail[];
+extern const char Boot_Txt_Stay[];
+extern const char Boot_Txt_StayHint[];
+extern const char Boot_Txt_JumpIn[];
+extern const char Boot_Txt_Entering[];
 
-void     Boot_Ui_Init(bool font_ok);
+void     Boot_Ui_Screen(const char *title, const char *footer, bool with_bar);
 void     Boot_Ui_ClearLine(uint16_t y);
 void     Boot_Ui_Package(const char *version, uint32_t size, uint32_t crc);
 void     Boot_Ui_Progress(uint16_t percent);
 void     Boot_Ui_Status(const char *text, bool ok);
 void     Boot_Ui_Error(const char *text);
+void     Boot_Ui_Hint(const char *text, bool warn);
+void     Boot_Ui_Item(uint8_t index, const char *label, const char *value, uint8_t state);
+bool     Boot_Ui_HasBar(void);   /* true=当前是升级界面（自检行不再往屏幕上画） */
+
+/* ============================ 自检项 ============================ */
+#define BOOT_ITEM_CLOCK     0U
+#define BOOT_ITEM_FLASH     1U
+#define BOOT_ITEM_FS        2U
+#define BOOT_ITEM_PARAM     3U
+#define BOOT_ITEM_SENSOR    4U
+#define BOOT_ITEM_APP       5U
+#define BOOT_ITEM_NUM       6U
+
+typedef enum
+{
+    BOOT_ITEM_PENDING = 0U,
+    BOOT_ITEM_OK      = 1U,
+    BOOT_ITEM_FAIL    = 2U,
+} boot_item_state_e;
+
+typedef struct
+{
+    const char *label;
+    char        value[20];
+    uint8_t     state;
+} boot_item_t;
+
+extern boot_item_t g_boot_items[BOOT_ITEM_NUM];
+
+void     Boot_Item_Set(uint8_t index, uint8_t state, const char *value);
+void     Boot_SelfTest_Begin(void);
+bool     Boot_SelfTest_Run(bool fs_ok, bool did_format, uint8_t prov_flags);
+bool     Boot_SelfTest_AllOk(void);
+
+/* ============================ I2C 自检（只探测器件是否应答） ============================ */
+bool     Boot_I2c_Init(void);
+uint8_t  Boot_I2c_Probe(void);
+
+/* ============================ 按键（PB12~15 + PE4，低有效） ============================ */
+void     Boot_Key_Init(void);
+bool     Boot_Key_Pressed(void);
 
 #endif /* BOOT_H */

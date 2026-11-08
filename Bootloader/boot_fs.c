@@ -129,6 +129,32 @@ void ff_mutex_give(int vol)
 }
 #endif
 
+/* ============================ 格式化 ============================ */
+/**
+ * @brief  现场给外部 Flash 建 FAT16 文件系统（新机第一次上电，不需要连电脑）
+ * @note   卷大小 32MB、扇区 4KB，FAT16 足够；格式化完成后重新挂载
+ */
+bool Boot_Fs_Format(void)
+{
+    MKFS_PARM   opt;
+    static BYTE work[BOOT_SECTOR_SIZE];
+
+    f_mount(NULL, "0:", 0);                 /* 先卸载，避免格式化旧卷 */
+
+    opt.fmt     = FM_FAT;                   /* 只接受 FAT16 */
+    opt.n_fat   = 2U;
+    opt.n_root  = 512U;
+    opt.au_size = 0U;                       /* 由 FATFS 按卷大小选 */
+    opt.align   = 0U;
+
+    if (f_mkfs("0:", &opt, work, sizeof(work)) != FR_OK)
+    {
+        return false;
+    }
+
+    return Boot_Fs_Mount();
+}
+
 /* ============================ 挂载 ============================ */
 bool Boot_Fs_Mount(void)
 {

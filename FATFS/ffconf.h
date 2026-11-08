@@ -12,7 +12,7 @@
 #define FF_FS_READONLY      0       /* 读写都支持 */
 #define FF_FS_MINIMIZE      0
 #define FF_USE_FIND         0       /* 不需模式搜索 */
-#define FF_USE_MKFS         0       /* 不需格式化 */
+#define FF_USE_MKFS         1       /* bootloader 需要现场格式化外部 Flash */
 #define FF_USE_FASTSEEK     1       /* LVGL seek频繁，保留 */
 #define FF_USE_EXPAND       0
 #define FF_USE_CHMOD        0

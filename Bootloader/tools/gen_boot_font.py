@@ -17,7 +17,7 @@ import struct
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "..", "boot_ui.c")
+SRC_DIR = os.path.join(HERE, "..")
 OUT = os.path.join(HERE, "..", "boot_font.bin")
 
 FONT_CANDIDATES = [
@@ -47,10 +47,14 @@ def unescape(text):
 
 
 def collect_chars():
-    with open(SRC, "r", encoding="utf-8") as fp:
-        source = fp.read()
+    # 扫描 bootloader 全部 .c（文案可能在 boot_ui.c / boot_selftest.c / boot_main.c）
+    source = ""
+    for name in sorted(os.listdir(SRC_DIR)):
+        if name.endswith(".c"):
+            with open(os.path.join(SRC_DIR, name), "r", encoding="utf-8") as fp:
+                source += fp.read() + "\n"
 
-    # 运行时会拼出来的字符（版本串/大小/CRC/百分比）不在源码里，直接铺满可打印 ASCII
+    # 运行时会拼出来的字符（版本串/大小/CRC/百分比/倒计时）不在源码里，直接铺满可打印 ASCII
     chars = set(chr(c) for c in range(0x20, 0x7F))
     for raw in STRING_RE.findall(source):
         try:

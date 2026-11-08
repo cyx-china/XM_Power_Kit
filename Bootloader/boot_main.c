@@ -1,21 +1,24 @@
 /**
  ******************************************************************************
  * @file    boot_main.c
- * @brief   OTA Bootloader 主流程：
- *          时钟 -> GPIO -> SPI Flash -> FATFS -> 读状态记录 -> （是否搬运新固件）
- *          -> 校验应用向量表 -> 跳转。
- *          P2 阶段只实现“应用有效就跳转”，搬运逻辑由 P3 的 boot_ota.c 接入。
+ * @brief   Bootloader 主流程：
+ *          背光 -> 时钟 -> GPIO/按键 -> 屏幕 -> 外部 Flash -> 文件系统（挂载失败
+ *          就现场格式化）-> 出厂文件（目录/字库/参数文件）-> 开机自检表 ->
+ *          OTA 决策（升级/回滚/首次安装）-> 应用有效就跳转。
+ *
+ *          新机（应用分区为空）会停在自检界面，方便用户接上位机刷固件；
+ *          应用有效但自检有项目未通过时给 8 秒倒计时，期间按任意键停留。
  ******************************************************************************
  */
 #include "boot.h"
 #include "stm32f4xx_hal.h"
 
-static void Boot_Error(void);
 static void Boot_Clock_Init(void);
 static void Boot_Gpio_Init(void);
+static void Stay_Forever(void);
 
 /* 启动阶段与屏幕就绪标志：故障时由 Boot_Panic() 用来指示卡在哪一步 */
-volatile uint8_t g_boot_stage    = 0U;
+volatile uint8_t g_boot_stage     = 0U;
 volatile uint8_t g_boot_lcd_ready = 0U;
 
 /* ---------------------------- 指示灯 ---------------------------- */
@@ -86,7 +89,7 @@ static void Boot_Clock_Init(void)
     osc.PLL.PLLQ            = 6U;
     if (HAL_RCC_OscConfig(&osc) != HAL_OK)
     {
-        Boot_Error();
+        Boot_Panic(g_boot_stage);
     }
 
     clk.ClockType      = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
@@ -98,20 +101,42 @@ static void Boot_Clock_Init(void)
 
     if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_4) != HAL_OK)
     {
-        Boot_Error();
+        Boot_Panic(g_boot_stage);
     }
 }
 
-/* ---------------------------- 致命错误：快闪等待 ---------------------------- */
-static void Boot_Error(void)
+/* ---------------------------- 停留：慢闪等上位机/ST-Link ---------------------------- */
+static void Stay_Forever(void)
 {
+    Boot_Led(false);
+
     while (1)
     {
         Boot_Led(true);
-        HAL_Delay(60);
+        HAL_Delay(400);
         Boot_Led(false);
-        HAL_Delay(60);
+        HAL_Delay(400);
     }
+}
+
+/* ---------------------------- 倒计时提示文字："8 秒后进入系统，按键停留" ---------------------------- */
+static void Make_Countdown_Text(char *out, uint32_t seconds)
+{
+    uint32_t i = 0U;
+
+    if (seconds > 9U)
+    {
+        seconds %= 10U;
+    }
+    out[i++] = (char)('0' + seconds);
+
+    const char *tail = Boot_Txt_JumpIn;
+
+    while ((tail[0] != '\0') && (i < 38U))
+    {
+        out[i++] = *tail++;
+    }
+    out[i] = '\0';
 }
 
 /* ---------------------------- 入口 ---------------------------- */
@@ -128,48 +153,101 @@ int main(void)
 
     g_boot_stage = 2U;
     Boot_Gpio_Init();
+    Boot_Key_Init();
     Boot_Crc32_Init();
     Boot_Led(true);             /* 指示"正在启动"，跳转前熄灭 */
 
     g_boot_stage = 3U;
-    bool lcd_ok   = Boot_Lcd_Init();
+    bool lcd_ok = Boot_Lcd_Init();
+
     g_boot_stage = 4U;
     bool flash_ok = Boot_Flash_Init();
-    g_boot_stage = 5U;
-    bool fs_ok    = flash_ok && Boot_Fs_Mount();
 
-    /* 屏幕与字库（字库在外部 Flash：0:/font/boot.bin，缺失时只显示进度条） */
+    /* 屏幕与字库：字库优先外部 Flash，缺失时用内嵌的那份 */
     if (lcd_ok)
     {
         Boot_Font_Init();
-        Boot_Ui_Init(Boot_Font_Ready());
+        Boot_Ui_Screen(Boot_Txt_InitTitle, Boot_Txt_InitFooter, false);
     }
 
-    /* OTA 决策：处理升级/回滚请求、确认上次升级、应用损坏时用快照兜底 */
+    /* ---------------- 文件系统：挂载失败就现场格式化 ---------------- */
+    g_boot_stage = 5U;
+    bool fs_ok      = flash_ok && Boot_Fs_Mount();
+    bool did_format = false;
+
+    if (!fs_ok && flash_ok)
+    {
+        Boot_Ui_Status(Boot_Txt_Formatting, true);
+        fs_ok      = Boot_Fs_Format();
+        did_format = fs_ok;
+    }
+
+    /* ---------------- 出厂文件：目录 / 字库 / 参数文件 ---------------- */
+    uint8_t prov = 0U;
+
+    if (fs_ok)
+    {
+        Boot_Ui_Status(Boot_Txt_Provision, true);
+        prov = Boot_Storage_Provision();
+    }
+
+    /* ---------------- 开机自检表 ---------------- */
+    Boot_SelfTest_Begin();
+    Boot_Ui_Status(Boot_Txt_SelfTest, true);
+    (void)Boot_SelfTest_Run(fs_ok, did_format, prov);
+
+    /* ---------------- OTA：升级 / 回滚 / 首次安装 ---------------- */
     g_boot_stage = 6U;
     if (fs_ok)
     {
         Boot_Ota_Boot();
     }
-    else
-    {
-        Boot_Ui_Status(Boot_Txt_NoPkg, false);
-    }
+
+    /* 搬运可能刚换了固件，这一行重新算 */
+    bool app_ok = Boot_App_Valid();
+    Boot_Item_Set(BOOT_ITEM_APP, app_ok ? BOOT_ITEM_OK : BOOT_ITEM_FAIL, app_ok ? "有效" : "无");
 
     g_boot_stage = 7U;
-    if (Boot_App_Valid())
+
+    /* ---------------- 1) 文件系统不可用 / 没有可用固件：自检表常驻 ---------------- */
+    if (!fs_ok || !app_ok)
     {
-        HAL_Delay(20);
-        Boot_App_Jump();
-        /* Boot_App_Jump() 正常情况下不返回（跳转前会熄灭 LED） */
+        Boot_Ui_Status(!fs_ok ? Boot_Txt_FormatFail : Boot_Txt_Stay, false);
+        Boot_Ui_Hint(Boot_Txt_StayHint, false);
+        Stay_Forever();
     }
 
-    /* 应用分区无效且暂时无包可刷：慢闪待机，等待 USB/ST-Link 处理 */
-    while (1)
+    /* ---------------- 2) 全部通过：直接进主程序 ---------------- */
+    if (Boot_SelfTest_AllOk())
     {
-        Boot_Led(true);
-        HAL_Delay(200);
-        Boot_Led(false);
-        HAL_Delay(200);
+        Boot_Ui_Status(Boot_Txt_Entering, true);
+        HAL_Delay(120);
+        Boot_App_Jump();
     }
+
+    /* ---------------- 3) 有项目未通过：8 秒倒计时，期间按任意键停留 ---------------- */
+    Boot_Ui_Status(Boot_Txt_SomeFail, false);
+
+    char hint[40];
+
+    for (uint32_t sec = 8U; sec > 0U; sec--)
+    {
+        Make_Countdown_Text(hint, sec);
+        Boot_Ui_Hint(hint, false);
+
+        for (uint32_t tick = 0U; tick < 10U; tick++)
+        {
+            if (Boot_Key_Pressed())
+            {
+                Boot_Ui_Status(Boot_Txt_Stay, false);
+                Boot_Ui_Hint(Boot_Txt_StayHint, false);
+                Stay_Forever();
+            }
+            HAL_Delay(100U);
+        }
+    }
+
+    Boot_App_Jump();
+
+    Stay_Forever();            /* 正常情况下不会执行到这里 */
 }

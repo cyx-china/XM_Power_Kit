@@ -94,7 +94,8 @@ static bool program(const char *path, boot_record_t *rec, uint32_t token, bool r
 {
     boot_pkg_head_t head;
 
-    Boot_Ui_Error("");                               /* 清掉上一次的错误行 */
+    /* 从自检界面切到升级界面（进度条 + 包信息） */
+    Boot_Ui_Screen(Boot_Txt_Title, Boot_Txt_Footer, true);
     Boot_Ui_Status(Boot_Txt_Verify, true);
     Boot_Ui_Progress(0U);
 
@@ -221,10 +222,10 @@ void Boot_Ota_Boot(void)
         {
             return;
         }
-        if (program(BOOT_FILE_PREV, &rec, rec.token, false))
+        if ((f_stat(BOOT_FILE_PREV, &info) == FR_OK) &&
+            program(BOOT_FILE_PREV, &rec, rec.token, false))
         {
             return;
         }
-        Boot_Ui_Error(Boot_Txt_NoPkg);
     }
 }
