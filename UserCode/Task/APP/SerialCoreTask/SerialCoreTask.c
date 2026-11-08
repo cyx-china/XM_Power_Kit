@@ -1,239 +1,208 @@
+/**
+******************************************************************************
+  * @file           : SerialCoreTask.c
+  * @brief          : 上位机通信任务（命令分发）
+  * @date           : 2026/11/08
+  * @license        : CC-BY-NC-SA 4.0
+  ******************************************************************************
+  * 链路无关：USB CDC 与 USART3 蓝牙共用同一套帧格式，应答从请求进来的链路返回。
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 雪萌_Xuemeng
+  * All rights reserved.
+  ******************************************************************************
+  */
+
 #include "SerialCoreTask.h"
-#include "UserDefineManage.h"
+
 #include <string.h>
+
+#include "cmsis_os2.h"
+#include "ff.h"
 #include "os_handles.h"
-#include "usbd_cdc_if.h"
+#include "stm32f4xx_hal.h"
+#include "UserDefineManage.h"
 #include "UserTask.h"
 
-// ================== 全局变量定义 ==================
-static uint8_t rx_buffer[RX_BUFFER_SIZE] = {0};  // 接收缓冲区
-static uint8_t tx_buffer[TX_BUFFER_SIZE] = {0};  // 发送缓冲区
+#define BT_CFG_PATH     "0:/btcfg.bin"
+#define BT_CFG_DEFAULT  115200U
 
-volatile bool Is_Serial_Busy = false;                   // 是否正在处理数据
-volatile bool IS_Receiving = false;              // 是否正在接收标志位
-volatile bool Receiving_Done = false;            // 完成接收标志位
-volatile uint16_t Rx_Buffer_Ptr = 0;             // 接收缓冲区指针
-volatile CmdCode Current_Cmd = CMD_NULL;          // 当前正在处理的指令
+/* s_rsp[0] = 状态码，数据从 s_rsp[1] 开始，正好一帧的负载长度 */
+static uint8_t s_rsp[PROTO_MAX_PAYLOAD];
 
-// ================== 内部辅助函数：计算校验和 ==================
-static uint8_t calc_checksum(uint8_t *data, uint16_t len)
-{
-    uint32_t sum = 0;
-    for (uint16_t i = 0; i < len; i++) {
-        sum += data[i];
+/* ============================ 应答辅助 ============================ */
+static void Serial_ReplyStatus(const ProtoFrame_t *req, uint8_t status, uint16_t data_len) {
+    s_rsp[0] = status;
+    SerialProto_Send((LinkId_t)req->link, req->cmd, req->seq, s_rsp, (uint16_t)(data_len + 1U));
+}
+
+/* ============================ 蓝牙波特率配置 ============================ */
+static void bt_cfg_load(void) {
+    FIL   fil;
+    UINT  br = 0U;
+    uint8_t buf[4];
+
+    if (f_open(&fil, BT_CFG_PATH, FA_READ) != FR_OK) {
+        return;
     }
-    return (uint8_t)(sum & 0xFF);
+    FRESULT fr = f_read(&fil, buf, 4U, &br);
+    (void)f_close(&fil);
+    if (fr != FR_OK || br != 4U) {
+        return;
+    }
+    uint32_t baud = ser_get_u32(buf);
+    if (baud >= 1200U && baud <= 921600U) {
+        SerialLink_SetBtBaud(baud);
+    }
 }
 
-// ================== 发送指令包 ==================
-void Serial_Send_Cmd(CmdCode cmd)
-{
-    tx_buffer[0] = CMD_PACK_START;
-    tx_buffer[1] = (uint8_t)cmd;
-    tx_buffer[2] = calc_checksum(tx_buffer, 2);
-    tx_buffer[3] = CMD_PACK_END;
-    CDC_Transmit_FS(tx_buffer, 4);
+static void bt_cfg_save(uint32_t baud) {
+    FIL   fil;
+    UINT  bw = 0U;
+    uint8_t buf[4];
+
+    if (f_open(&fil, BT_CFG_PATH, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) {
+        return;
+    }
+    (void)ser_put_u32(buf, baud);
+    (void)f_write(&fil, buf, 4U, &bw);
+    (void)f_close(&fil);
 }
 
-// ================== 发送数据包 ==================
-void Serial_Send_Data(uint8_t *data, uint16_t len)
-{
-    if (len > 255) return;
+/* ============================ 命令：设备信息 ============================ */
+static void Serial_HandleSysInfo(const ProtoFrame_t *req) {
+    uint8_t *p = &s_rsp[1];
+    uint16_t i = 0U;
 
-    uint16_t idx = 0;
-    tx_buffer[idx++] = DATA_PACK_START;
-    tx_buffer[idx++] = (uint8_t)len;
-    memcpy(&tx_buffer[idx], data, len);
-    idx += len;
-    tx_buffer[idx] = calc_checksum(tx_buffer, idx);
-    idx++;
-    tx_buffer[idx++] = DATA_PACK_END;
-    CDC_Transmit_FS(tx_buffer, idx);
+    const char *ver = SYS_VERSION_CODE;
+    uint16_t    vl  = (uint16_t)strlen(ver);
+    if (vl > 40U) {
+        vl = 40U;
+    }
+
+    p[i++] = (uint8_t)PROTO_VER;
+    p[i++] = (uint8_t)vl;
+    memcpy(&p[i], ver, vl);
+    i = (uint16_t)(i + vl);
+
+    p[i++] = (uint8_t)Param_Number;
+    i = (uint16_t)(i + ser_put_u16(&p[i], (uint16_t)PARAM_TOTAL_BYTES));
+    i = (uint16_t)(i + ser_put_u16(&p[i], 0x0007U));            // bit0 USB / bit1 BT / bit2 FS
+    i = (uint16_t)(i + ser_put_u32(&p[i], SerialLink_GetBtBaud()));
+
+    uint32_t total_kb = 0U;
+    uint32_t free_kb  = 0U;
+    (void)FileService_GetCapacity(&total_kb, &free_kb);
+    i = (uint16_t)(i + ser_put_u32(&p[i], total_kb));
+    i = (uint16_t)(i + ser_put_u32(&p[i], free_kb));
+
+    Serial_ReplyStatus(req, ST_OK, i);
 }
 
-// ================== CDC接收回调函数 ==================
-void CB_CDC_Receive(uint8_t *Buf, uint32_t *Len)
-{
-    uint32_t len = *Len;
-    if (len == 0 || len > 64) return;
+/* ============================ 命令：参数读写 ============================ */
+static void Serial_HandleParam(const ProtoFrame_t *req) {
+    uint8_t *p = &s_rsp[1];
 
-    // ========== 未在接收数据包，先判断是不是指令包 ==========
-    if (!IS_Receiving) {
-        if (len == 4 && Buf[0] == CMD_PACK_START && Buf[3] == CMD_PACK_END) {
-            // 是指令包，校验和验证
-            if (calc_checksum(Buf, 2) == Buf[2]) {
-                CmdCode cmd_code = (CmdCode)Buf[1];
-
-                // 如果是写入指令，需要准备接收数据包
-                if (cmd_code == CMD_WRITE_Data) {
-                    Current_Cmd = cmd_code;
-                    IS_Receiving = true;
-                    Rx_Buffer_Ptr = 0;
-                    Receiving_Done = false;
-                }
-
-                // 发送指令到消息队列
-                osMessageQueuePut(SerialMsgQueueHandle, &cmd_code, 0, 0);
-            } else {
-                // 校验失败
-                CmdCode err = ERROR_Verify;
-                osMessageQueuePut(SerialMsgQueueHandle, &err, 0, 0);
-            }
+    if (req->cmd == CMD_PARAM_GET) {
+        if (req->len < 1U) {
+            Serial_ReplyStatus(req, ST_E_PARAM, 0U);
+            return;
         }
+        HAL_StatusTypeDef ret = (req->data[0] == 1U)
+                                ? Process_Default_Data(p)
+                                : Process_Current_Data(p);
+        if (ret != HAL_OK) {
+            Serial_ReplyStatus(req, ST_E_FS, 0U);
+            return;
+        }
+        Serial_ReplyStatus(req, ST_OK, (uint16_t)PARAM_TOTAL_BYTES);
         return;
     }
 
-    // ========== 正在接收数据包 ==========
-    if (IS_Receiving) {
-        // 检查缓冲区是否溢出
-        if (Rx_Buffer_Ptr + len > RX_BUFFER_SIZE) {
-            IS_Receiving = false;
-            Rx_Buffer_Ptr = 0;
-            return;
+    /* CMD_PARAM_SET */
+    if (req->len != (uint16_t)PARAM_TOTAL_BYTES) {
+        Serial_ReplyStatus(req, ST_E_PARAM, 0U);
+        return;
+    }
+    if (Write_Current_Data((uint8_t *)req->data, PARAM_TOTAL_BYTES) != HAL_OK) {
+        Serial_ReplyStatus(req, ST_E_FS, 0U);
+        return;
+    }
+    (void)UserParam_LoadAllValues();
+    Serial_ReplyStatus(req, ST_OK, 0U);
+}
+
+/* ============================ 命令分发 ============================ */
+static void Serial_Handle(const ProtoFrame_t *req) {
+    switch (req->cmd) {
+        case CMD_SYS_INFO:
+            Serial_HandleSysInfo(req);
+            break;
+
+        case CMD_SYS_REBOOT:
+            Serial_ReplyStatus(req, ST_OK, 0U);
+            osDelay(100U);
+            NVIC_SystemReset();
+            break;
+
+        case CMD_SYS_BT_BAUD: {
+            if (req->len < 4U) {
+                Serial_ReplyStatus(req, ST_E_PARAM, 0U);
+                break;
+            }
+            uint32_t baud = ser_get_u32(req->data);
+            if (baud < 1200U || baud > 921600U) {
+                Serial_ReplyStatus(req, ST_E_PARAM, 0U);
+                break;
+            }
+            Serial_ReplyStatus(req, ST_OK, 0U);       // 先应答，再切换波特率
+            osDelay(50U);
+            bt_cfg_save(baud);
+            SerialLink_SetBtBaud(baud);
+            break;
         }
 
-        // 拷贝数据到缓冲区
-        memcpy(&rx_buffer[Rx_Buffer_Ptr], Buf, len);
-        Rx_Buffer_Ptr += len;
+        case CMD_PARAM_GET:
+        case CMD_PARAM_SET:
+            Serial_HandleParam(req);
+            break;
 
-        // 检查是否收到包尾
-        if (Buf[len - 1] == DATA_PACK_END) {
-            IS_Receiving = false;
-            Receiving_Done = true;
+        case CMD_FS_LIST:
+        case CMD_FS_READ:
+        case CMD_FS_WRITE:
+        case CMD_FS_DELETE:
+        case CMD_FS_RENAME:
+        case CMD_FS_MKDIR:
+        case CMD_FS_STAT:
+        case CMD_FS_INFO:
+        case CMD_FS_SYNC: {
+            uint16_t dlen = 0U;
+            uint8_t  st = FileService_Handle(req, &s_rsp[1], &dlen);
+            Serial_ReplyStatus(req, st, dlen);
+            break;
         }
+
+        default:
+            Serial_ReplyStatus(req, ST_E_UNSUPPORTED, 0U);
+            break;
     }
 }
 
-// ================== 任务函数实现 ==================
-void Start_SerialCoreTask(void const * argument)
-{
-    CmdCode cmd_code;
-    const uint8_t version_str[8] = VERSION_STR;
-    static uint8_t data_buf[PARAM_TOTAL_BYTES] = {0}; // 参数数据暂存缓冲区
+/* ============================ 初始化 / 任务 ============================ */
+void Serial_Init(void) {
+    bt_cfg_load();              // 需在 f_mount 之后调用
+    SerialLink_Init();
+}
+
+void Start_SerialCoreTask(void const * argument) {
+    (void)argument;
+    static ProtoFrame_t s_req;      // 519 字节，放静态区，省任务栈
 
     for (;;) {
-        // 等待消息队列
-        if (osMessageQueueGet(SerialMsgQueueHandle, &cmd_code, NULL, osWaitForever) != osOK) {
+        if (osMessageQueueGet(SerialReqQueueHandle, &s_req, NULL, osWaitForever) != osOK) {
             continue;
         }
-        // 检查忙标志
-        if (Is_Serial_Busy && cmd_code != CMD_ACK) {
-            Serial_Send_Cmd(ERROR_Busy);
-            continue;
-        }
-
-        switch (cmd_code) {
-            case CMD_READ_Version: {
-                // 回复ACK
-                Serial_Send_Cmd(CMD_ACK);
-                // 简单延时
-                osDelay(10);
-                // 发送版本号数据包
-                Serial_Send_Data((uint8_t*)version_str, 8);
-                break;
-            }
-
-            case CMD_READ_CurrentData: {
-                // 回复ACK
-                Serial_Send_Cmd(CMD_ACK);
-                osDelay(10);
-                // 读取当前参数到缓冲区
-                if (Process_Current_Data(data_buf) == HAL_OK) {
-                    // 发送数据包
-                    Serial_Send_Data(data_buf, PARAM_TOTAL_BYTES);
-                }
-                break;
-            }
-
-            case CMD_READ_DefaultData: {
-                // 回复ACK
-                Serial_Send_Cmd(CMD_ACK);
-                osDelay(10);
-                // 填充默认参数到缓冲区
-                if (Process_Default_Data(data_buf) == HAL_OK) {
-                    // 发送数据包
-                    Serial_Send_Data(data_buf, PARAM_TOTAL_BYTES);
-                }
-                break;
-            }
-
-            case CMD_WRITE_Data: {
-                // 回复ACK
-                Serial_Send_Cmd(CMD_ACK);
-                // 等待接收数据包（等待Receiving_Done标志）
-                uint32_t timeout = 0;
-                while (!Receiving_Done) {
-                    osDelay(1);
-                    timeout++;
-                    if (timeout > 5000) { // 5秒超时
-                        Receiving_Done = false;
-                        Rx_Buffer_Ptr = 0;
-                        return;
-                    }
-                }
-                // 校验接收到的数据包
-                if (Rx_Buffer_Ptr < 4) {
-                    Receiving_Done = false;
-                    Rx_Buffer_Ptr = 0;
-                    Serial_Send_Cmd(ERROR_Verify);
-                    return;
-                }
-                // 验证包头、包尾
-                if (rx_buffer[0] != DATA_PACK_START || rx_buffer[Rx_Buffer_Ptr - 1] != DATA_PACK_END) {
-                    Receiving_Done = false;
-                    Rx_Buffer_Ptr = 0;
-                    Serial_Send_Cmd(ERROR_Verify);
-                    return;
-                }
-                // 验证数据长度
-                uint8_t data_len = rx_buffer[1];
-                if (data_len != PARAM_TOTAL_BYTES) {
-                    Receiving_Done = false;
-                    Rx_Buffer_Ptr = 0;
-                    Serial_Send_Cmd(ERROR_Verify);
-                    return;
-                }
-                // 验证校验和
-                uint8_t calc_cs = calc_checksum(rx_buffer, 2 + data_len);
-                if (calc_cs != rx_buffer[2 + data_len]) {
-                    Receiving_Done = false;
-                    Rx_Buffer_Ptr = 0;
-                    Serial_Send_Cmd(ERROR_Verify);
-                    return;
-                }
-                // 设置忙标志，写入Flash
-                Is_Serial_Busy = true;
-                // 写入到flash
-                HAL_StatusTypeDef RES = Write_Current_Data(&rx_buffer[2], PARAM_TOTAL_BYTES);
-                Is_Serial_Busy = false;
-
-                // 回复结果
-                if (RES == HAL_OK) {
-                    osDelay(10);
-                    UserParam_LoadAllValues();       // 将新值读取到用户参数表
-                    Serial_Send_Cmd(CMD_WRITE_Data); // 回显写入指令表示成功
-                } else {
-                    Serial_Send_Cmd(ERROR_Verify);
-                }
-                // 清理标志
-                Receiving_Done = false;
-                Rx_Buffer_Ptr = 0;
-                break;
-            }
-
-            case ERROR_Verify: {
-                // 上位机报告校验错误
-                break;
-            }
-
-            case ERROR_Busy: {
-                // 上位机报告忙
-                break;
-            }
-
-            default: {
-                break;
-            }
-        }
+        Serial_Handle(&s_req);
     }
 }

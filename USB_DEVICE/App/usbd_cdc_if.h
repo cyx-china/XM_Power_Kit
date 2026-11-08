@@ -109,7 +109,8 @@ extern USBD_CDC_ItfTypeDef USBD_Interface_fops_FS;
 uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len);
 
 /* USER CODE BEGIN EXPORTED_FUNCTIONS */
-
+/* 发送是否仍在进行（1 = 忙）。CDC_Transmit_FS 只登记缓冲区指针，必须等它完成才能复用缓冲区。 */
+uint8_t CDC_TransmitBusy(void);
 /* USER CODE END EXPORTED_FUNCTIONS */
 
 /**

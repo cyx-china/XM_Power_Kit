@@ -54,7 +54,7 @@ extern osMessageQueueId_t LcdMsgQueueHandle;      // LCD刷新消息队列句柄
 extern osMessageQueueId_t AppSwitchQueueHandle;   // APP切换消息队列
 extern osMessageQueueId_t KeyEventQueueHandle;    // 按键事件消息队列 (APP)
 extern osMessageQueueId_t BeezerQueueHandle;      // 蜂鸣器消息队列
-extern osMessageQueueId_t SerialMsgQueueHandle;   // 串口消息队列
+extern osMessageQueueId_t SerialReqQueueHandle;   // 上位机请求队列（ProtoFrame_t）
 // ============================= FileSystem_Handles =============================//
 extern FATFS fs;
 extern FIL fil;

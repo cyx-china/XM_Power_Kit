@@ -147,7 +147,7 @@ const osThreadAttr_t DsoCoreTask_attributes = {
 osThreadId_t SerialCoreTaskHandle;
 const osThreadAttr_t SerialCoreTask_attributes = {
   .name = "SerialCoreTask",
-  .stack_size = 256 * 4,
+  .stack_size = 384 * 4,
   .priority = (osPriority_t) osPriorityRealtime1,
 };
 /* Definitions for AppSwitchQueue */
@@ -170,10 +170,10 @@ osMessageQueueId_t BeezerQueueHandle;
 const osMessageQueueAttr_t BeezerQueue_attributes = {
   .name = "BeezerQueue"
 };
-/* Definitions for SerialMsgQueue */
-osMessageQueueId_t SerialMsgQueueHandle;
-const osMessageQueueAttr_t SerialMsgQueue_attributes = {
-  .name = "SerialMsgQueue"
+/* Definitions for SerialReqQueue */
+osMessageQueueId_t SerialReqQueueHandle;
+const osMessageQueueAttr_t SerialReqQueue_attributes = {
+  .name = "SerialReqQueue"
 };
 /* Definitions for IIC1_Mutex */
 osMutexId_t IIC1_MutexHandle;
@@ -315,8 +315,8 @@ void MX_FREERTOS_Init(void) {
   /* creation of BeezerQueue */
   BeezerQueueHandle = osMessageQueueNew (8, sizeof(uint16_t), &BeezerQueue_attributes);
 
-  /* creation of SerialMsgQueue */
-  SerialMsgQueueHandle = osMessageQueueNew (16, sizeof(CmdCode), &SerialMsgQueue_attributes);
+  /* creation of SerialReqQueue（上位机请求帧，深度 3） */
+  SerialReqQueueHandle = osMessageQueueNew (3, sizeof(ProtoFrame_t), &SerialReqQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */

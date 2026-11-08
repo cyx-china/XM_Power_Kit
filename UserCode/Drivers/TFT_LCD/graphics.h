@@ -45,5 +45,9 @@ void GFX_DrawImage(const ImageInfo* pic, uint16_t x, uint16_t y);
 void GFX_DrawString(uint16_t x, uint16_t y, const char* str, const FontInfo* font,
             uint16_t ftColor, uint16_t bgColor, int8_t spacing);
 
+/* 文件/字模缓存失效（外部 Flash 文件被上位机改动后调用） */
+void    GFX_RequestCacheInvalidate(void);       // 请求失效（异步）
+uint8_t GFX_CacheInvalidateDone(void);          // 是否已完成
+void    GFX_ServiceCacheInvalidate(void);       // 由 LcdFlushTask 调用，真正执行
 
 #endif // XM_POWER_KIT_GRAPHICS_H

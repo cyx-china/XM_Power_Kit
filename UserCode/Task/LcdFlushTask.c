@@ -45,8 +45,10 @@ void Start_LcdFlushTask(void *argument) {
     }
 
     for (;;) {
-        ret = osMessageQueueGet(LcdMsgQueueHandle, &msg, NULL, osWaitForever);
+        // 20ms 超时：队列空闲时顺便处理"图形缓存失效"请求（上位机改动了字库/图片文件）
+        ret = osMessageQueueGet(LcdMsgQueueHandle, &msg, NULL, 20U);
         if (ret != osOK || msg == NULL) {
+            GFX_ServiceCacheInvalidate();
             continue;
         }
 

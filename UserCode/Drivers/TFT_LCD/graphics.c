@@ -891,3 +891,44 @@ void GFX_DrawString(uint16_t x, uint16_t y, const char *str, const FontInfo *fon
         p += utf8_len; // 移动到下一个UTF-8字符
     }
 }
+
+/* ==================== 文件 / 字模缓存失效（供上位机文件管理使用） ==================== */
+// graphics 的绘制全部在 LcdFlushTask 里执行，因此这里只做"请求"，
+// 真正的关闭文件与清缓存由 LcdFlushTask 在自己的循环里调用 GFX_ServiceCacheInvalidate() 完成，
+// 避免绘图线程正在读字模时把 FIL 关掉。
+static volatile uint8_t s_gfx_invalid_req;
+static volatile uint8_t s_gfx_invalid_done = 1U;
+
+void GFX_RequestCacheInvalidate(void) {
+    s_gfx_invalid_done = 0U;
+    s_gfx_invalid_req  = 1U;
+}
+
+uint8_t GFX_CacheInvalidateDone(void) {
+    return s_gfx_invalid_done;
+}
+
+void GFX_ServiceCacheInvalidate(void) {
+    if (s_gfx_invalid_req == 0U) {
+        return;
+    }
+
+    for (uint8_t i = 0; i < GFX_FILE_CACHE_NUM; i++) {
+        if (file_handles[i].used) {
+            (void)f_close(&file_handles[i].fil);
+            file_handles[i].used = 0;
+            file_handles[i].path = NULL;
+            file_handles[i].stamp = 0;
+        }
+    }
+    file_stamp = 0;
+
+    glyph_count = 0;
+    glyph_pool_used = 0;
+    glyph_stamp = 0;
+    blend_lut_valid = 0;
+
+    s_gfx_invalid_req  = 0U;
+    s_gfx_invalid_done = 1U;
+}
+

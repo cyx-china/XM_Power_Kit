@@ -34,6 +34,7 @@
 #include "TMP102.h"
 #include "wave_generator.h"
 #include "Manager/UserDefineManage.h"
+#include "SerialCoreTask.h"
 
 FATFS fs;   FIL fil;    FRESULT res;    UINT br;    // Fatfs所需的全局变量
 
@@ -64,6 +65,7 @@ void Start_InitTask(void *argument)
   // 开始系统初始化
   bool result = Sys_Init();
   if (result == true) {
+    Serial_Init();                              // 启动上位机通信（USB CDC + 蓝牙 USART3）
     osThreadResume(PageSelectTaskHandle);       // 释放 App 切换任务
     osThreadExit();                             // 任务自删除
   }
