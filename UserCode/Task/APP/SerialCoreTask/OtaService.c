@@ -189,7 +189,7 @@ static bool snapshot_current(void) {
     memcpy(head.board, OTA_BOARD, strlen(OTA_BOARD));
     head.head_crc   = crc_update(0xFFFFFFFFU, &head, 48U);
 
-    if (f_open(&file, OTA_FILE_GOOD, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) {
+    if (f_open(&file, OTA_FILE_PREV, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) {
         return false;
     }
 
@@ -215,35 +215,24 @@ static bool snapshot_current(void) {
 
 /* ============================ 启动确认 ============================ */
 void Ota_BootConfirm(void) {
-    ota_head_t   head;
     ota_record_t rec;
-    FIL          file;
-    UINT         br = 0U;
 
-    /* 新固件包还在，且版本就是当前跑的版本 → 说明这次是通过 OTA 启动的 */
-    if (f_open(&file, OTA_FILE_FW, FA_READ) == FR_OK) {
-        bool match = (f_read(&file, &head, OTA_HEAD_SIZE, &br) == FR_OK &&
-                      br == OTA_HEAD_SIZE &&
-                      memcmp(head.magic, OTA_MAGIC, 8U) == 0 &&
-                      strncmp(head.version, SYS_VERSION_CODE, sizeof(head.version)) == 0);
-        (void)f_close(&file);
-
-        if (match) {
-            /* 先写成功标记：即使后面改名/删除中途掉电，bootloader 也认为本次升级成功 */
-            (void)write_bootok(SYS_VERSION_CODE);
-            (void)f_unlink(OTA_FILE_REQ);
-            (void)f_unlink(OTA_FILE_GOOD);
-            if (f_rename(OTA_FILE_FW, OTA_FILE_GOOD) == FR_OK) {
-                UserParam_SaveAllValues();       /* 顺手把参数落盘，保证与镜像一致 */
-            }
-            return;
-        }
+    read_record(&rec);
+    if (rec.magic != OTA_REC_MAGIC || rec.state != OTA_ST_WAIT_BOOTOK) {
+        return;                     /* 稳定运行：不碰外部 Flash，避免每次开机都擦写 */
     }
 
-    /* 普通启动：只有 bootloader 还在等确认时才补写 BOOTOK，避免每次开机都擦写外部 Flash */
-    read_record(&rec);
-    if (rec.magic == OTA_REC_MAGIC && rec.state == OTA_ST_WAIT_BOOTOK) {
-        (void)write_bootok(SYS_VERSION_CODE);
+    /* bootloader 记的版本和当前跑的版本不一致，说明搬进去的镜像不是要升级的那个：
+       不写 BOOTOK，让 bootloader 继续累计失败次数，够 3 次自动回滚到 PREV.BIN */
+    if (strncmp(rec.version, SYS_VERSION_CODE, sizeof(rec.version)) != 0) {
+        return;
+    }
+
+    /* 先写成功标记再清请求：中途掉电时 bootloader 也已经认为本次升级成功 */
+    if (write_bootok(SYS_VERSION_CODE)) {
+        /* BOOTOK.BIN 要留给 bootloader 读（它确认后自己删），这里不能删 */
+        (void)f_unlink(OTA_FILE_REQ);
+        UserParam_SaveAllValues();             /* 让参数与镜像保持一致 */
     }
 }
 
@@ -255,7 +244,7 @@ static uint8_t ota_info(uint8_t *out, uint16_t *out_len) {
     uint8_t  flags = 0U;
     uint16_t i = 0U;
 
-    if (f_stat(OTA_FILE_GOOD, &fno) == FR_OK)   { flags |= 0x01U; }
+    if (f_stat(OTA_FILE_PREV, &fno) == FR_OK)   { flags |= 0x01U; }
     if (f_stat(OTA_FILE_FW, &fno) == FR_OK)     { flags |= 0x02U; }
     if (f_stat(OTA_FILE_REQ, &fno) == FR_OK)    { flags |= 0x04U; }
     if (f_stat(OTA_FILE_BOOTOK, &fno) == FR_OK) { flags |= 0x08U; }
@@ -267,7 +256,7 @@ static uint8_t ota_info(uint8_t *out, uint16_t *out_len) {
     i = (uint16_t)(i + ser_put_u32(&out[i], app_image_size()));
 
     memset(&head, 0, sizeof(head));
-    (void)head_from_file(OTA_FILE_GOOD, &head);
+    (void)head_from_file(OTA_FILE_PREV, &head);
     memcpy(&out[i], head.version, 32U);  i = (uint16_t)(i + 32U);
     (void)ser_put_u32(&out[i], head.image_size);
     i = (uint16_t)(i + 4U);
@@ -386,7 +375,7 @@ static uint8_t ota_commit(void) {
     (void)f_close(&s_file);
     s_open = false;
 
-    /* 先把当前运行的镜像存成 GOOD.BIN，升级失败才有得回滚 */
+    /* 先把当前运行的镜像存成 PREV.BIN，升级失败才有得回滚 */
     if (!snapshot_current()) {
         (void)f_unlink(OTA_FILE_FW);
         return ST_E_FS;
@@ -413,7 +402,7 @@ static uint8_t ota_abort(void) {
 static uint8_t ota_rollback(void) {
     ota_head_t head;
 
-    if (!head_from_file(OTA_FILE_GOOD, &head)) {
+    if (!head_from_file(OTA_FILE_PREV, &head)) {
         return ST_E_NOTFOUND;
     }
     if (!write_req(OTA_OP_ROLLBACK)) {

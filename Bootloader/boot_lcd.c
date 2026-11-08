@@ -87,30 +87,20 @@ void Boot_Lcd_Blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_
 /* ============================ FSMC 初始化（直接写寄存器，省掉 HAL_SRAM） ============================ */
 static void boot_fsmc_init(void)
 {
-    GPIO_InitTypeDef gpio = {0};
-
     __HAL_RCC_FSMC_CLK_ENABLE();
     __HAL_RCC_GPIOE_CLK_ENABLE();
     __HAL_RCC_GPIOD_CLK_ENABLE();
 
     /* PE7..PE15 = FSMC_D4..D12 */
-    gpio.Pin       = GPIO_PIN_7 | GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 |
-                     GPIO_PIN_11 | GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
-    gpio.Mode      = GPIO_MODE_AF_PP;
-    gpio.Pull      = GPIO_NOPULL;
-    gpio.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
-    gpio.Alternate = GPIO_AF12_FSMC;
-    HAL_GPIO_Init(GPIOE, &gpio);
+    Boot_Gpio_Setup(GPIOE, GPIO_PIN_7 | GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 |
+                          GPIO_PIN_11 | GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15,
+                    true, 0U, 3U, 12U);
 
     /* PD0/1 = D2/D3，PD4 = NOE，PD5 = NWE，PD7 = NE1，PD8..PD11 = D13..D15/A16，PD14/15 = D0/D1 */
-    gpio.Pin       = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_7 |
-                     GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 | GPIO_PIN_11 |
-                     GPIO_PIN_14 | GPIO_PIN_15;
-    gpio.Mode      = GPIO_MODE_AF_PP;
-    gpio.Pull      = GPIO_NOPULL;
-    gpio.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
-    gpio.Alternate = GPIO_AF12_FSMC;
-    HAL_GPIO_Init(GPIOD, &gpio);
+    Boot_Gpio_Setup(GPIOD, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_7 |
+                          GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 | GPIO_PIN_11 |
+                          GPIO_PIN_14 | GPIO_PIN_15,
+                    true, 0U, 3U, 12U);
 
     /* BCR1：SRAM 模式、16 位、写使能、不使能复用 */
     FSMC_Bank1->BTCR[0] = FSMC_BCR1_MBKEN | FSMC_BCR1_FACCEN | FSMC_BCR1_WREN |
@@ -228,27 +218,17 @@ static void lcd_panel_init(void)
 /* ============================ 对外初始化 ============================ */
 bool Boot_Lcd_Init(void)
 {
-    GPIO_InitTypeDef gpio = {0};
-
     __HAL_RCC_GPIOC_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
     /* 复位脚 PC3 */
     HAL_GPIO_WritePin(LCD_RST_PORT, LCD_RST_PIN, GPIO_PIN_SET);
-    gpio.Pin   = LCD_RST_PIN;
-    gpio.Mode  = GPIO_MODE_OUTPUT_PP;
-    gpio.Pull  = GPIO_NOPULL;
-    gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(LCD_RST_PORT, &gpio);
+    Boot_Gpio_Setup(LCD_RST_PORT, LCD_RST_PIN, false, 0U, 0U, 0U);
 
     /* 背光 PA9：bootloader 里直接常亮，不做 PWM。
        应用启动后 MX_TIM1_Init 会把 PA9 重新配成 TIM1_CH2 复用，不会相互影响。 */
     HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_SET);
-    gpio.Pin   = LCD_BL_PIN;
-    gpio.Mode  = GPIO_MODE_OUTPUT_PP;
-    gpio.Pull  = GPIO_NOPULL;
-    gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(LCD_BL_PORT, &gpio);
+    Boot_Gpio_Setup(LCD_BL_PORT, LCD_BL_PIN, false, 0U, 0U, 0U);
 
     boot_fsmc_init();
 

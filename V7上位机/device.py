@@ -308,15 +308,15 @@ class Device:
             return data[off:off + 32].split(b"\0")[0].decode("utf-8", "replace")
 
         info = {
-            "has_good": bool(data[0] & 0x01),
+            "has_prev": bool(data[0] & 0x01),
             "has_fw": bool(data[0] & 0x02),
             "has_req": bool(data[0] & 0x04),
             "has_bootok": bool(data[0] & 0x08),
             "uploading": bool(data[1]),
         }
         info["app_size"] = struct.unpack("<I", data[2:6])[0]
-        info["good_version"] = text(6)
-        info["good_size"] = struct.unpack("<I", data[38:42])[0]
+        info["prev_version"] = text(6)
+        info["prev_size"] = struct.unpack("<I", data[38:42])[0]
         info["fw_version"] = text(42)
         info["fw_size"] = struct.unpack("<I", data[74:78])[0]
         info["fw_crc"] = struct.unpack("<I", data[78:82])[0]
@@ -354,7 +354,7 @@ class Device:
             pass
 
     def ota_rollback(self) -> None:
-        """让设备用 GOOD.BIN 覆盖内部 Flash 并重启"""
+        """让设备用 PREV.BIN（升级前的版本）覆盖内部 Flash 并重启"""
         self.request(CMD_OTA_ROLLBACK, timeout=20.0, retries=0)
 
     def ota_upload(self, head: bytes, bin_path: str, progress=None, cancel=None) -> None:

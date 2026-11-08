@@ -10,6 +10,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "stm32f4xx_hal.h"
+
 /* ============================ 分区地址 ============================ */
 #define BOOT_SIZE           (16U * 1024U)      /* bootloader：sector0 */
 #define BOOT_STATE_ADDR     0x08004000U        /* OTA 状态记录：sector1 */
@@ -26,7 +28,7 @@
 /* ============================ 外部 Flash 上的文件 ============================ */
 #define BOOT_DIR_OTA        "0:/ota"
 #define BOOT_FILE_FW        "0:/ota/FW.BIN"      /* 待升级的新固件包 */
-#define BOOT_FILE_GOOD      "0:/ota/GOOD.BIN"    /* 当前可运行版本的快照（回滚源） */
+#define BOOT_FILE_PREV      "0:/ota/PREV.BIN"    /* 升级前的版本快照（回滚源） */
 #define BOOT_FILE_BOOTOK    "0:/ota/BOOTOK.BIN"  /* 应用启动成功标记 */
 #define BOOT_FILE_REQ       "0:/ota/REQ.BIN"     /* 升级/回滚请求（应用写、bootloader 读） */
 
@@ -122,6 +124,14 @@ void     Boot_App_Jump(void);
 
 /* ============================ 指示灯 ============================ */
 void     Boot_Led(bool on);
+
+/* ============================ GPIO 直写（省掉 HAL_GPIO_Init 的 ~430 字节） ============================ */
+/* is_af：0=推挽输出 1=复用推挽；pull：0=无 1=上拉；speed：0=低速 3=最高速；af：0~15 */
+void     Boot_Gpio_Setup(GPIO_TypeDef *port, uint32_t pins, bool is_af,
+                         uint32_t pull, uint32_t speed, uint32_t af);
+
+/* ============================ 内部 Flash 擦扇区（直写寄存器） ============================ */
+bool     Boot_IntFlash_EraseSector(uint32_t sector);
 
 /* ============================ 屏幕 ============================ */
 bool     Boot_Lcd_Init(void);

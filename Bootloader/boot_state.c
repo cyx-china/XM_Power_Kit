@@ -9,6 +9,33 @@
 #include "stm32f4xx_hal.h"
 #include <stddef.h>
 
+/* ---------------------------- 擦扇区（直写 FLASH 寄存器） ---------------------------- */
+#define SNB_SHIFT   3U
+
+bool Boot_IntFlash_EraseSector(uint32_t sector)
+{
+    bool ok;
+
+    FLASH->CR &= ~FLASH_CR_PSIZE;
+    FLASH->CR |= FLASH_CR_PSIZE_1;                         /* x32 并行位 */
+    FLASH->CR |= FLASH_CR_SER;
+    FLASH->CR = (FLASH->CR & ~(0xFUL << SNB_SHIFT)) | (sector << SNB_SHIFT);
+    FLASH->CR |= FLASH_CR_STRT;
+
+    while ((FLASH->SR & FLASH_SR_BSY) != 0U)
+    {
+    }
+
+    ok = (FLASH->SR & (FLASH_SR_OPERR | FLASH_SR_WRPERR | FLASH_SR_PGAERR |
+                       FLASH_SR_PGPERR | FLASH_SR_PGSERR)) == 0U;
+
+    FLASH->CR &= ~(FLASH_CR_SER | FLASH_CR_SNB | FLASH_CR_STRT);
+    FLASH->SR = FLASH_SR_EOP | FLASH_SR_OPERR | FLASH_SR_WRPERR |
+                FLASH_SR_PGAERR | FLASH_SR_PGPERR | FLASH_SR_PGSERR;
+
+    return ok;
+}
+
 static uint32_t record_crc(const boot_record_t *rec)
 {
     return Boot_Crc32(rec, (uint32_t)offsetof(boot_record_t, crc));
@@ -36,8 +63,6 @@ void Boot_State_Load(boot_record_t *rec)
 bool Boot_State_Save(const boot_record_t *rec)
 {
     boot_record_t tmp = *rec;
-    FLASH_EraseInitTypeDef erase = {0};
-    uint32_t sector_error = 0U;
     const uint32_t *words;
     bool ok = true;
 
@@ -47,12 +72,7 @@ bool Boot_State_Save(const boot_record_t *rec)
     __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR |
                            FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
 
-    erase.TypeErase    = FLASH_TYPEERASE_SECTORS;
-    erase.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    erase.Sector       = FLASH_SECTOR_1;
-    erase.NbSectors    = 1U;
-
-    if (HAL_FLASHEx_Erase(&erase, &sector_error) != HAL_OK)
+    if (!Boot_IntFlash_EraseSector(1U))                    /* sector1 = 状态记录 */
     {
         ok = false;
     }

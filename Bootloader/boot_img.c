@@ -99,8 +99,6 @@ bool Boot_Pkg_Flash(const char *path, const boot_pkg_head_t *head, boot_progress
     uint32_t write_end = (end + 3U) & ~3U;      /* 按字写，末尾补齐 */
     uint32_t first_sector = sector_index_of(BOOT_APP_ADDR);
     uint32_t last_sector = sector_index_of(write_end - 1U);
-    uint32_t sector_error = 0U;
-    FLASH_EraseInitTypeDef erase = {0};
     bool ok = true;
 
     if (f_open(&file, path, FA_READ) != FR_OK)
@@ -122,14 +120,9 @@ bool Boot_Pkg_Flash(const char *path, const boot_pkg_head_t *head, boot_progress
     HAL_FLASH_Unlock();
     clear_flash_flags();
 
-    erase.TypeErase    = FLASH_TYPEERASE_SECTORS;
-    erase.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    erase.NbSectors    = 1U;
-
     for (uint32_t sector = first_sector; ok && sector <= last_sector; sector++)
     {
-        erase.Sector = sector;
-        if (HAL_FLASHEx_Erase(&erase, &sector_error) != HAL_OK)
+        if (!Boot_IntFlash_EraseSector(sector))
         {
             ok = false;
             break;

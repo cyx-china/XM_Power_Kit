@@ -61,7 +61,7 @@ class SimDevice:
         # OTA 状态
         self.ota_head = None
         self.ota_image = bytearray()
-        self.ota_good = None
+        self.ota_prev = None
         self.ota_state = 0
         self.ota_fail = 0
         self.ota_req = False
@@ -175,9 +175,9 @@ class SimDevice:
 
         # ---------------- OTA ----------------
         if cmd == PR.CMD_OTA_INFO:
-            good = self.ota_good or {}
+            good = self.ota_prev or {}
             head = self.ota_head or {}
-            flags = (0x01 if self.ota_good else 0) | (0x02 if self.ota_head else 0) | \
+            flags = (0x01 if self.ota_prev else 0) | (0x02 if self.ota_head else 0) | \
                     (0x04 if self.ota_req else 0)
             body = bytes([flags, 1 if self.ota_head else 0])
             body += struct.pack("<I", 303020)
@@ -212,7 +212,7 @@ class SimDevice:
                 return bytes([PR.ST_E_PARAM])
             if PR.crc32(bytes(self.ota_image)) != self.ota_head["crc"]:
                 return bytes([PR.ST_E_CRC])
-            self.ota_good = self.ota_head
+            self.ota_prev = self.ota_head
             self.ota_req = True
             self.ota_state = 1
             return b"\x00"
@@ -223,7 +223,7 @@ class SimDevice:
             return b"\x00"
 
         if cmd == PR.CMD_OTA_ROLLBACK:
-            if not self.ota_good:
+            if not self.ota_prev:
                 return bytes([PR.ST_E_NOTFOUND])
             self.ota_req = True
             return b"\x00"
@@ -350,9 +350,9 @@ def main() -> int:
         assert bytes(dev.sim.ota_image) == image
 
         info = dev.ota_info()
-        assert info["has_good"] and info["has_fw"]
-        assert info["good_version"] == pkg["version"]
-        assert info["good_size"] == len(image)
+        assert info["has_prev"] and info["has_fw"]
+        assert info["prev_version"] == pkg["version"]
+        assert info["prev_size"] == len(image)
         assert info["state"] == 1
         dev.ota_rollback()
         assert dev.sim.ota_req is True

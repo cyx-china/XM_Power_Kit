@@ -6,8 +6,8 @@
   * @license        : CC-BY-NC-SA 4.0
   ******************************************************************************
   * 与 bootloader 的约定：
-  *   /ota/FW.BIN      新固件包（80 字节头 + 镜像），升级完由应用改名为 GOOD.BIN
-  *   /ota/GOOD.BIN    当前可运行版本的快照，回滚源
+  *   /ota/FW.BIN      新固件包（80 字节头 + 镜像），由 bootloader 搬进内部 Flash 后删除
+  *   /ota/PREV.BIN    升级前那版固件的快照，回滚源（手动回滚与自动回滚都用它）
   *   /ota/BOOTOK.BIN  应用启动成功后写入，bootloader 用它确认新版本能起来
   *   /ota/REQ.BIN     升级/回滚请求，应用写、bootloader 读并消费
   ******************************************************************************
@@ -27,7 +27,7 @@
 
 #define OTA_DIR             "0:/ota"
 #define OTA_FILE_FW         "0:/ota/FW.BIN"
-#define OTA_FILE_GOOD       "0:/ota/GOOD.BIN"
+#define OTA_FILE_PREV       "0:/ota/PREV.BIN"
 #define OTA_FILE_BOOTOK     "0:/ota/BOOTOK.BIN"
 #define OTA_FILE_REQ        "0:/ota/REQ.BIN"
 
@@ -53,7 +53,7 @@ typedef struct {
 } ota_head_t;
 
 /* 启动成功后调用（放在 Sys_Init 里，f_mount 之后）：
-   写 BOOTOK.BIN，并把 FW.BIN 提升为 GOOD.BIN、清掉 REQ.BIN */
+   bootloader 在等确认时写 BOOTOK.BIN，并清掉已消费的 REQ.BIN */
 void    Ota_BootConfirm(void);
 
 /* 处理 OTA 命令：返回状态码，数据写到 out（去掉状态码字节） */

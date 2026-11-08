@@ -161,7 +161,7 @@ static bool Sys_Init(void) {
     Fatfs_pass = false; // 挂载失败
     pass = false;
   } else {
-    // OTA：向 bootloader 确认本次启动成功，并收尾上一次升级（FW.BIN → GOOD.BIN）
+    // OTA：向 bootloader 确认本次启动成功，并清掉已消费的升级请求
     // 必须早于界面刷新和其它 Flash 操作，掉电重试全靠这一步
     Ota_BootConfirm();
   }

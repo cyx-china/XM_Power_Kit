@@ -71,7 +71,7 @@ typedef enum {
     CMD_OTA_DATA        = 0x32,     // 上传一块 [offset u32][data]
     CMD_OTA_COMMIT      = 0x33,     // 校验 + 生成快照 + 写升级请求
     CMD_OTA_ABORT       = 0x34,     // 放弃本次上传
-    CMD_OTA_ROLLBACK    = 0x35      // 回滚到 GOOD.BIN
+    CMD_OTA_ROLLBACK    = 0x35      // 回滚到 PREV.BIN
 } ProtoCmd_t;
 
 /* ============================== 状态码 ============================== */

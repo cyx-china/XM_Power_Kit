@@ -110,16 +110,10 @@ static void send_addr4(uint32_t addr)
 /* ---------------------------- 对外接口 ---------------------------- */
 bool Boot_Flash_Init(void)
 {
-    GPIO_InitTypeDef gpio = {0};
-
     __HAL_RCC_GPIOD_CLK_ENABLE();
 
-    /* 片选：推挽输出，默认拉高 */
-    gpio.Pin   = FLASH_CS_PIN;
-    gpio.Mode  = GPIO_MODE_OUTPUT_PP;
-    gpio.Pull  = GPIO_PULLUP;
-    gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    HAL_GPIO_Init(FLASH_CS_PORT, &gpio);
+    /* 片选：推挽输出（上拉），默认拉高 */
+    Boot_Gpio_Setup(FLASH_CS_PORT, FLASH_CS_PIN, false, 1U, 3U, 0U);
     FLASH_CS_HIGH();
 
     spi_init();

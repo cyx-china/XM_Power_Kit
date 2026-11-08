@@ -27,20 +27,40 @@ void Boot_Led(bool on)
     }
 }
 
-/* ---------------------------- GPIO ---------------------------- */
+/* ---------------------------- GPIO 直写 ---------------------------- */
+void Boot_Gpio_Setup(GPIO_TypeDef *port, uint32_t pins, bool is_af,
+                     uint32_t pull, uint32_t speed, uint32_t af)
+{
+    for (uint32_t i = 0U; i < 16U; i++)
+    {
+        if ((pins & (1UL << i)) == 0UL)
+        {
+            continue;
+        }
+
+        port->MODER = (port->MODER & ~(3UL << (i * 2U))) |
+                      ((is_af ? 2UL : 1UL) << (i * 2U));
+        port->OTYPER &= ~(1UL << i);
+        port->OSPEEDR = (port->OSPEEDR & ~(3UL << (i * 2U))) | (speed << (i * 2U));
+        port->PUPDR = (port->PUPDR & ~(3UL << (i * 2U))) | (pull << (i * 2U));
+
+        if (is_af)
+        {
+            uint32_t shift = (i & 7U) * 4U;
+            uint32_t idx = (i < 8U) ? 0U : 1U;
+
+            port->AFR[idx] = (port->AFR[idx] & ~(0xFUL << shift)) | (af << shift);
+        }
+    }
+}
+
 static void Boot_Gpio_Init(void)
 {
-    GPIO_InitTypeDef gpio = {0};
-
     __HAL_RCC_GPIOC_CLK_ENABLE();
 
     /* PC0：状态指示灯，复位后先灭 */
     BOOT_LED_PORT->BSRR = (uint32_t)BOOT_LED_PIN << 16;
-    gpio.Pin   = BOOT_LED_PIN;
-    gpio.Mode  = GPIO_MODE_OUTPUT_PP;
-    gpio.Pull  = GPIO_NOPULL;
-    gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(BOOT_LED_PORT, &gpio);
+    Boot_Gpio_Setup(BOOT_LED_PORT, BOOT_LED_PIN, false, 0U, 0U, 0U);
 }
 
 /* ---------------------------- 时钟（与应用完全一致） ---------------------------- */

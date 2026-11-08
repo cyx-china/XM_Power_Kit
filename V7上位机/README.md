@@ -55,18 +55,20 @@ python selftest.py
 
 1. 编译固件，得到 `build/Release/XM_Power_Kit.bin`（CMake 的 POST_BUILD 会自动生成 `.bin` 和 `.hex`）；
 2. 「固件升级」页 →「选择文件」→ 自动读出镜像里的版本串（就是 `SYS_VERSION_CODE`）并算出 CRC32；
+   「导出升级包…」可以另外存一份带头部的 `FW.BIN`，用于首次安装（见 `Bootloader/README.md`）；
 3. 点「开始升级」：`OTA_BEGIN` 写包头 → `OTA_DATA` 分块传镜像（432 字节/块）→ `OTA_COMMIT` 校验并让设备重启；
 4. 设备重启后进入 bootloader：校验包 CRC → 擦除应用分区 → 写入 → 回读校验 → 跳转新固件，屏幕上显示进度；
 5. 新固件第一次启动时写 `BOOTOK.BIN` 确认，bootloader 从此认为本次升级成功。
 
 回滚：
 
-- 提交升级前，应用会把**当前正在运行的镜像**快照成 `0:/ota/GOOD.BIN`，这就是回滚源；
-- 新固件连续 3 次启动失败（没写 BOOTOK）→ bootloader 自动用 `GOOD.BIN` 刷回；
-- 也可以手动点「回滚到上一版本」，设备重启后 bootloader 直接用 `GOOD.BIN` 覆盖。
+- 提交升级前，应用会把**当前正在运行的镜像**快照成 `0:/ota/PREV.BIN`，这就是回滚源（也就是“上一版本”）；
+- 新固件连续 3 次启动失败（没写 BOOTOK）→ bootloader 自动用 `PREV.BIN` 刷回；
+- 也可以手动点「回滚到上一版本」，设备重启后 bootloader 直接用 `PREV.BIN` 覆盖；
+- 升级成功后 `PREV.BIN` 会保留下来，所以“退回上一版”在任何时候都可用；再升一次级它会更新成新的上一版。
 
-外部 Flash 上的 OTA 文件：`0:/ota/FW.BIN`（待安装包）、`GOOD.BIN`（回滚快照）、`BOOTOK.BIN`（启动成功标记）、
-`REQ.BIN`（应用写给 bootloader 的请求，含令牌防止重复执行）。
+外部 Flash 上的 OTA 文件：`0:/ota/FW.BIN`（待安装包，装完由 bootloader 删除）、`PREV.BIN`（上一版本快照）、
+`BOOTOK.BIN`（启动成功标记）、`REQ.BIN`（应用写给 bootloader 的请求，含令牌防止重复执行）。
 
 注意事项：
 
@@ -108,7 +110,7 @@ A5 5A | LEN_L LEN_H | CMD | SEQ | DATA[LEN] | CRC_L CRC_H
 | 0x26 | FS_MKDIR | len+path | — |
 | 0x27 | FS_STAT | len+path | u8 属性, u32 大小 |
 | 0x28 | FS_SYNC | — | — |
-| 0x30 | OTA_INFO | — | flags, 上传中, 应用占用, GOOD 版本/大小, FW 版本/大小/CRC, 失败次数, 状态 |
+| 0x30 | OTA_INFO | — | flags, 上传中, 应用占用, PREV 版本/大小, FW 版本/大小/CRC, 失败次数, 状态 |
 | 0x31 | OTA_BEGIN | 80 字节包头 | u32 已写（0） |
 | 0x32 | OTA_DATA | u32 包内偏移 + 数据 | u32 累计已写镜像字节数 |
 | 0x33 | OTA_COMMIT | — | —（设备随后重启） |

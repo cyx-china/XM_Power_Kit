@@ -131,6 +131,11 @@ static bool program(const char *path, boot_record_t *rec, uint32_t token, bool r
 
     (void)f_unlink(BOOT_FILE_REQ);
     (void)f_unlink(BOOT_FILE_BOOTOK);
+    if (strcmp(path, BOOT_FILE_FW) == 0)
+    {
+        /* 新包已经搬进内部 Flash，外部 Flash 上的副本不再需要（回滚用的是 PREV.BIN） */
+        (void)f_unlink(BOOT_FILE_FW);
+    }
 
     Boot_Ui_Status(Boot_Txt_Reboot, true);
     Boot_Ui_Progress(100U);
@@ -150,7 +155,7 @@ void Boot_Ota_Boot(void)
     {
         if (req.op == BOOT_OP_ROLLBACK)
         {
-            if (program(BOOT_FILE_GOOD, &rec, req.token, false))
+            if (program(BOOT_FILE_PREV, &rec, req.token, false))
             {
                 return;
             }
@@ -164,7 +169,7 @@ void Boot_Ota_Boot(void)
         }
         /* 新包刷不进去：退回上一个可用版本 */
         Boot_Ui_Error(Boot_Txt_WriteFail);
-        if (program(BOOT_FILE_GOOD, &rec, req.token, false))
+        if (program(BOOT_FILE_PREV, &rec, req.token, false))
         {
             return;
         }
@@ -195,7 +200,7 @@ void Boot_Ota_Boot(void)
             if (rec.fail_count >= ROLLBACK_FAIL_LIMIT)
             {
                 Boot_Ui_Status(Boot_Txt_Rollback, false);
-                if (program(BOOT_FILE_GOOD, &rec, rec.token, false))
+                if (program(BOOT_FILE_PREV, &rec, rec.token, false))
                 {
                     return;
                 }
@@ -204,13 +209,22 @@ void Boot_Ota_Boot(void)
         }
     }
 
-    /* 3) 应用分区无效：用 GOOD.BIN 兜底恢复 */
+    /* 3) 应用分区无效（首次安装 / 搬运中途掉电）：优先装 FW.BIN，再退回 PREV.BIN */
     if (!Boot_App_Valid())
     {
+        FILINFO info;
+
         Boot_Ui_Status(Boot_Txt_Wait, false);
-        if (program(BOOT_FILE_GOOD, &rec, rec.token, false))
+
+        if (f_stat(BOOT_FILE_FW, &info) == FR_OK &&
+            program(BOOT_FILE_FW, &rec, rec.token, true))
         {
             return;
         }
+        if (program(BOOT_FILE_PREV, &rec, rec.token, false))
+        {
+            return;
+        }
+        Boot_Ui_Error(Boot_Txt_NoPkg);
     }
 }
