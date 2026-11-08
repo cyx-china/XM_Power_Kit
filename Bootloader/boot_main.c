@@ -14,6 +14,10 @@ static void Boot_Error(void);
 static void Boot_Clock_Init(void);
 static void Boot_Gpio_Init(void);
 
+/* 启动阶段与屏幕就绪标志：故障时由 Boot_Panic() 用来指示卡在哪一步 */
+volatile uint8_t g_boot_stage    = 0U;
+volatile uint8_t g_boot_lcd_ready = 0U;
+
 /* ---------------------------- 指示灯 ---------------------------- */
 void Boot_Led(bool on)
 {
@@ -113,15 +117,25 @@ static void Boot_Error(void)
 /* ---------------------------- 入口 ---------------------------- */
 int main(void)
 {
-    HAL_Init();                 /* SysTick 1ms，bootloader 里只用来做延时与超时 */
+    /* 上电第一件事：点亮背光。不依赖 HAL_Init 与时钟配置，几微秒内就有光，
+       这样即使后面任何一步出错，屏幕也不会是"完全黑的"，故障一眼可见。 */
+    Boot_Lcd_Backlight(true);
 
+    HAL_Init();                 /* SysTick 1ms，由 boot_it.c 的 SysTick_Handler 驱动 */
+
+    g_boot_stage = 1U;
     Boot_Clock_Init();
+
+    g_boot_stage = 2U;
     Boot_Gpio_Init();
     Boot_Crc32_Init();
-    Boot_Led(false);
+    Boot_Led(true);             /* 指示"正在启动"，跳转前熄灭 */
 
+    g_boot_stage = 3U;
     bool lcd_ok   = Boot_Lcd_Init();
+    g_boot_stage = 4U;
     bool flash_ok = Boot_Flash_Init();
+    g_boot_stage = 5U;
     bool fs_ok    = flash_ok && Boot_Fs_Mount();
 
     /* 屏幕与字库（字库在外部 Flash：0:/font/boot.bin，缺失时只显示进度条） */
@@ -129,13 +143,10 @@ int main(void)
     {
         Boot_Font_Init();
         Boot_Ui_Init(Boot_Font_Ready());
-        if (!Boot_Font_Ready())
-        {
-            Boot_Led(true);
-        }
     }
 
     /* OTA 决策：处理升级/回滚请求、确认上次升级、应用损坏时用快照兜底 */
+    g_boot_stage = 6U;
     if (fs_ok)
     {
         Boot_Ota_Boot();
@@ -145,12 +156,12 @@ int main(void)
         Boot_Ui_Status(Boot_Txt_NoPkg, false);
     }
 
+    g_boot_stage = 7U;
     if (Boot_App_Valid())
     {
-        Boot_Led(true);
         HAL_Delay(20);
         Boot_App_Jump();
-        /* Boot_App_Jump() 正常情况下不返回 */
+        /* Boot_App_Jump() 正常情况下不返回（跳转前会熄灭 LED） */
     }
 
     /* 应用分区无效且暂时无包可刷：慢闪待机，等待 USB/ST-Link 处理 */

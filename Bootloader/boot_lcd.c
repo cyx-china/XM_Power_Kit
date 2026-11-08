@@ -215,6 +215,17 @@ static void lcd_panel_init(void)
     lcd_cmd(0x29);                          /* 显示开 */
 }
 
+/* ============================ 背光 ============================ */
+/* PA9：bootloader 里直接常亮，不做 PWM。
+   应用启动后 MX_TIM1_Init 会把 PA9 重新配成 TIM1_CH2 复用，不会相互影响。
+   这个函数不依赖 HAL_Init，可以在 main() 一开始就调用，让上电瞬间就有光。 */
+void Boot_Lcd_Backlight(bool on)
+{
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    Boot_Gpio_Setup(LCD_BL_PORT, LCD_BL_PIN, false, 0U, 0U, 0U);
+    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
 /* ============================ 对外初始化 ============================ */
 bool Boot_Lcd_Init(void)
 {
@@ -225,15 +236,13 @@ bool Boot_Lcd_Init(void)
     HAL_GPIO_WritePin(LCD_RST_PORT, LCD_RST_PIN, GPIO_PIN_SET);
     Boot_Gpio_Setup(LCD_RST_PORT, LCD_RST_PIN, false, 0U, 0U, 0U);
 
-    /* 背光 PA9：bootloader 里直接常亮，不做 PWM。
-       应用启动后 MX_TIM1_Init 会把 PA9 重新配成 TIM1_CH2 复用，不会相互影响。 */
-    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_SET);
-    Boot_Gpio_Setup(LCD_BL_PORT, LCD_BL_PIN, false, 0U, 0U, 0U);
+    Boot_Lcd_Backlight(true);
 
     boot_fsmc_init();
 
     lcd_hw_reset();
     lcd_panel_init();
 
+    g_boot_lcd_ready = 1U;
     return true;
 }

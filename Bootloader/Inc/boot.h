@@ -125,6 +125,18 @@ void     Boot_App_Jump(void);
 /* ============================ 指示灯 ============================ */
 void     Boot_Led(bool on);
 
+/* ============================ 自检/故障 ============================ */
+/* 当前启动阶段（0=复位后，1=时钟，2=GPIO，3=屏幕，4=外部 Flash，5=文件系统，
+   6=OTA 决策，7=跳转）。故障时 LED 会闪 (g_boot_stage+1) 次。 */
+extern volatile uint8_t g_boot_stage;
+/* 屏幕（FSMC + 面板）已经初始化完成，故障处理时才允许往屏幕写字/填色 */
+extern volatile uint8_t g_boot_lcd_ready;
+
+void     Boot_Panic(uint32_t stage);
+
+/* 背光（PA9）：可以先于点屏打开，保证上电就有光 */
+void     Boot_Lcd_Backlight(bool on);
+
 /* ============================ GPIO 直写（省掉 HAL_GPIO_Init 的 ~430 字节） ============================ */
 /* is_af：0=推挽输出 1=复用推挽；pull：0=无 1=上拉；speed：0=低速 3=最高速；af：0~15 */
 void     Boot_Gpio_Setup(GPIO_TypeDef *port, uint32_t pins, bool is_af,
