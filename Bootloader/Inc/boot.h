@@ -100,4 +100,45 @@ void     Boot_App_Jump(void);
 /* ============================ 指示灯 ============================ */
 void     Boot_Led(bool on);
 
+/* ============================ 屏幕 ============================ */
+bool     Boot_Lcd_Init(void);
+void     Boot_Lcd_SetWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+void     Boot_Lcd_Fill(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color);
+void     Boot_Lcd_Blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels);
+
+/* ============================ 字库（外部 Flash 的 BFNT 文件） ============================ */
+#define BOOT_FONT_PATH  "0:/font/boot.bin"
+
+void     Boot_Font_Init(void);
+bool     Boot_Font_Ready(void);
+uint16_t Boot_Font_TextWidth(const char *utf8);
+void     Boot_Font_DrawText(uint16_t x, uint16_t y, const char *utf8, uint16_t fg, uint16_t bg);
+
+/* ============================ 界面 ============================ */
+extern const char Boot_Txt_Title[];
+extern const char Boot_Txt_Version[];
+extern const char Boot_Txt_Size[];
+extern const char Boot_Txt_Crc[];
+extern const char Boot_Txt_Footer[];
+extern const char Boot_Txt_NoFont[];
+extern const char Boot_Txt_Verify[];
+extern const char Boot_Txt_Erase[];
+extern const char Boot_Txt_Write[];
+extern const char Boot_Txt_Check[];
+extern const char Boot_Txt_Reboot[];
+extern const char Boot_Txt_Rollback[];
+extern const char Boot_Txt_NoPkg[];
+extern const char Boot_Txt_BadPkg[];
+extern const char Boot_Txt_WriteFail[];
+extern const char Boot_Txt_RollbackFail[];
+extern const char Boot_Txt_Wait[];
+extern const char Boot_Txt_Ready[];
+
+void     Boot_Ui_Init(bool font_ok);
+void     Boot_Ui_ClearLine(uint16_t y);
+void     Boot_Ui_Package(const char *version, uint32_t size, uint32_t crc);
+void     Boot_Ui_Progress(uint16_t percent);
+void     Boot_Ui_Status(const char *text, bool ok);
+void     Boot_Ui_Error(const char *text);
+
 #endif /* BOOT_H */

@@ -100,8 +100,20 @@ int main(void)
     Boot_Crc32_Init();
     Boot_Led(false);
 
+    bool lcd_ok   = Boot_Lcd_Init();
     bool flash_ok = Boot_Flash_Init();
     bool fs_ok    = flash_ok && Boot_Fs_Mount();
+
+    /* 屏幕与字库（字库在外部 Flash：0:/font/boot.bin，缺失时只显示进度条） */
+    if (lcd_ok)
+    {
+        Boot_Font_Init();
+        Boot_Ui_Init(Boot_Font_Ready());
+        if (!Boot_Font_Ready())
+        {
+            Boot_Led(true);
+        }
+    }
 
     boot_record_t record;
     Boot_State_Load(&record);
