@@ -143,11 +143,13 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfloat-abi=hard -flto=auto")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -flto=auto")
 # 说明：Release 的优化等级由 cmake/gcc-arm-none-eabi.cmake 中的 CMAKE_C_FLAGS_RELEASE("-Os -g0") 决定。
 
-# 启用 生成HEX文件
+# 启用 生成HEX文件 / OTA 用的裸二进制
 add_custom_command(
         TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:${CMAKE_PROJECT_NAME}> ${CMAKE_PROJECT_NAME}.hex
-        COMMENT "Generating ${CMAKE_PROJECT_NAME}.hex file..."
+        COMMAND ${CMAKE_OBJCOPY} -O binary -j .isr_vector -j .text -j .rodata -j .ARM -j .init_array -j .fini_array -j .data
+                $<TARGET_FILE:${CMAKE_PROJECT_NAME}> ${CMAKE_PROJECT_NAME}.bin
+        COMMENT "Generating ${CMAKE_PROJECT_NAME}.hex / .bin file..."
 )
 
 # OTA Bootloader：独立目标，链接到内部 Flash 0x08000000（16KB），生成 XM_Power_Kit_Boot.elf/.hex

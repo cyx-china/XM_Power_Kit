@@ -21,6 +21,7 @@ class Worker(QThread):
     sig_dir = pyqtSignal(str, list)           # path, entries
     sig_capacity = pyqtSignal(int, int)       # total_kb, free_kb
     sig_progress = pyqtSignal(int, int)       # done, total
+    sig_ota_info = pyqtSignal(dict)           # 升级状态
     sig_done = pyqtSignal(str, bool, str)     # tag, ok, message
     sig_log = pyqtSignal(str)
 
@@ -166,3 +167,21 @@ class Worker(QThread):
     def _job_reboot(self) -> None:
         self._dev.reboot()
         self.sig_status.emit("设备已重启")
+
+    # ------------------------------------------------------------ OTA
+    def _job_ota_info(self) -> None:
+        self.sig_ota_info.emit(self._dev.ota_info())
+
+    def _job_ota_upload(self, head: bytes, bin_path: str) -> None:
+        self.sig_status.emit("正在上传固件…")
+        self._dev.ota_upload(head, bin_path, self._progress, self._cancel)
+        self.sig_status.emit("固件已写入，设备正在重启安装…")
+        self._dev.close()
+        self.sig_connected.emit(False, "")
+
+    def _job_ota_rollback(self) -> None:
+        self.sig_status.emit("正在请求回滚…")
+        self._dev.ota_rollback()
+        self.sig_status.emit("设备正在回滚并重启…")
+        self._dev.close()
+        self.sig_connected.emit(False, "")

@@ -22,8 +22,6 @@
 #define LCD_BL_PORT  GPIOA
 #define LCD_BL_PIN   GPIO_PIN_9
 
-static SRAM_HandleTypeDef s_sram;
-
 /* ============================ 底层读写 ============================ */
 static inline void lcd_cmd(uint16_t cmd)
 {
@@ -86,12 +84,10 @@ void Boot_Lcd_Blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_
     }
 }
 
-/* ============================ FSMC 引脚（HAL 回调） ============================ */
-void HAL_SRAM_MspInit(SRAM_HandleTypeDef *hsram)
+/* ============================ FSMC 初始化（直接写寄存器，省掉 HAL_SRAM） ============================ */
+static void boot_fsmc_init(void)
 {
     GPIO_InitTypeDef gpio = {0};
-
-    (void)hsram;
 
     __HAL_RCC_FSMC_CLK_ENABLE();
     __HAL_RCC_GPIOE_CLK_ENABLE();
@@ -115,6 +111,14 @@ void HAL_SRAM_MspInit(SRAM_HandleTypeDef *hsram)
     gpio.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
     gpio.Alternate = GPIO_AF12_FSMC;
     HAL_GPIO_Init(GPIOD, &gpio);
+
+    /* BCR1：SRAM 模式、16 位、写使能、不使能复用 */
+    FSMC_Bank1->BTCR[0] = FSMC_BCR1_MBKEN | FSMC_BCR1_FACCEN | FSMC_BCR1_WREN |
+                          (1UL << 4);                    /* MWID = 01（16 位） */
+    /* BTR1：ADDSET=5 ADDHLD=15 DATAST=5 BUSTURN=15 CLKDIV=16 DATLAT=17 模式 A
+       与应用里 MX_FSMC_Init 的时序完全一致 */
+    FSMC_Bank1->BTCR[1] = 5UL | (15UL << 4) | (5UL << 8) | (15UL << 16) |
+                          (16UL << 20) | (17UL << 24);
 }
 
 /* ============================ ST7789 初始化 ============================ */
@@ -225,7 +229,6 @@ static void lcd_panel_init(void)
 bool Boot_Lcd_Init(void)
 {
     GPIO_InitTypeDef gpio = {0};
-    FSMC_NORSRAM_TimingTypeDef timing = {0};
 
     __HAL_RCC_GPIOC_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -247,36 +250,7 @@ bool Boot_Lcd_Init(void)
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(LCD_BL_PORT, &gpio);
 
-    /* FSMC：异步 SRAM 模式 A，时序与应用里 MX_FSMC_Init 完全一致 */
-    s_sram.Instance                = FSMC_NORSRAM_DEVICE;
-    s_sram.Extended                = FSMC_NORSRAM_EXTENDED_DEVICE;
-    s_sram.Init.NSBank             = FSMC_NORSRAM_BANK1;
-    s_sram.Init.DataAddressMux     = FSMC_DATA_ADDRESS_MUX_DISABLE;
-    s_sram.Init.MemoryType         = FSMC_MEMORY_TYPE_SRAM;
-    s_sram.Init.MemoryDataWidth    = FSMC_NORSRAM_MEM_BUS_WIDTH_16;
-    s_sram.Init.BurstAccessMode    = FSMC_BURST_ACCESS_MODE_DISABLE;
-    s_sram.Init.WaitSignalPolarity = FSMC_WAIT_SIGNAL_POLARITY_LOW;
-    s_sram.Init.WrapMode           = FSMC_WRAP_MODE_DISABLE;
-    s_sram.Init.WaitSignalActive   = FSMC_WAIT_TIMING_BEFORE_WS;
-    s_sram.Init.WriteOperation     = FSMC_WRITE_OPERATION_ENABLE;
-    s_sram.Init.WaitSignal         = FSMC_WAIT_SIGNAL_DISABLE;
-    s_sram.Init.ExtendedMode       = FSMC_EXTENDED_MODE_DISABLE;
-    s_sram.Init.AsynchronousWait   = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
-    s_sram.Init.WriteBurst         = FSMC_WRITE_BURST_DISABLE;
-    s_sram.Init.PageSize           = FSMC_PAGE_SIZE_NONE;
-
-    timing.AddressSetupTime      = 5;
-    timing.AddressHoldTime       = 15;
-    timing.DataSetupTime         = 5;
-    timing.BusTurnAroundDuration = 15;
-    timing.CLKDivision           = 16;
-    timing.DataLatency           = 17;
-    timing.AccessMode            = FSMC_ACCESS_MODE_A;
-
-    if (HAL_SRAM_Init(&s_sram, &timing, NULL) != HAL_OK)
-    {
-        return false;
-    }
+    boot_fsmc_init();
 
     lcd_hw_reset();
     lcd_panel_init();

@@ -26,8 +26,6 @@ add_executable(${BOOT_NAME}
         ${HAL_DIR}/stm32f4xx_hal_gpio.c
         ${HAL_DIR}/stm32f4xx_hal_flash.c
         ${HAL_DIR}/stm32f4xx_hal_flash_ex.c
-        ${HAL_DIR}/stm32f4xx_hal_sram.c
-        ${HAL_DIR}/stm32f4xx_ll_fsmc.c
 
         ${PROJ_DIR}/FATFS/ff.c
         ${PROJ_DIR}/FATFS/ffunicode.c

@@ -29,6 +29,7 @@ import params as P
 from device import list_ports
 from protocol import PROTO_VER
 from ui_files import FileBrowser
+from ui_ota import OtaView
 from ui_params import ParamView
 from worker import Worker
 
@@ -170,9 +171,11 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.view_params = ParamView()
         self.view_files = FileBrowser()
+        self.view_ota = OtaView()
         self.view_info = self._build_info_tab()
         self.tabs.addTab(self.view_params, "参数配置")
         self.tabs.addTab(self.view_files, "文件管理")
+        self.tabs.addTab(self.view_ota, "固件升级")
         self.tabs.addTab(self.view_info, "设备信息")
         root.addWidget(self.tabs, 1)
 
@@ -251,6 +254,7 @@ class MainWindow(QMainWindow):
         self.worker.sig_dir.connect(self.view_files.set_entries)
         self.worker.sig_capacity.connect(self.view_files.set_capacity)
         self.worker.sig_progress.connect(self._on_progress)
+        self.worker.sig_ota_info.connect(self.view_ota.set_info)
         self.worker.sig_done.connect(self._on_done)
 
         self.btn_refresh_ports.clicked.connect(self.refresh_ports)
@@ -274,6 +278,15 @@ class MainWindow(QMainWindow):
         self.view_files.request_rename.connect(lambda a, b: self.worker.submit("rename", "rename", a, b))
         self.view_files.request_mkdir.connect(lambda p: self.worker.submit("mkdir", "mkdir", p))
         self.view_files.request_cancel.connect(self.worker.cancel_current)
+
+        self.view_ota.request_info.connect(lambda: self.worker.submit("ota_info", "ota_info"))
+        self.view_ota.request_upgrade.connect(
+            lambda head, path: (self.view_ota.set_busy(True),
+                                self.worker.submit("ota", "ota_upload", head, path)))
+        self.view_ota.request_rollback.connect(
+            lambda: (self.view_ota.set_busy(True),
+                     self.worker.submit("ota_rollback", "ota_rollback")))
+        self.view_ota.request_cancel.connect(self.worker.cancel_current)
 
     # ------------------------------------------------------------ 连接
     def refresh_ports(self) -> None:
@@ -314,6 +327,7 @@ class MainWindow(QMainWindow):
             # 连接后自动读取一次
             self._read_params("current")
             self.worker.submit("list", "list", "/")
+            self.worker.submit("ota_info", "ota_info")
         else:
             self.device_label.setText("未连接")
 
@@ -325,6 +339,7 @@ class MainWindow(QMainWindow):
         self.btn_refresh_ports.setEnabled(not ok)
         self.view_params.set_busy(not ok)
         self.view_files.set_connected(ok)
+        self.view_ota.set_connected(ok)
         for b in (self.btn_bt_apply, self.btn_reboot, self.btn_sync_fs):
             b.setEnabled(ok)
 
@@ -353,7 +368,10 @@ class MainWindow(QMainWindow):
             self.current_values = values
 
     def _on_progress(self, done: int, total: int) -> None:
-        self.view_files.set_progress(done, total)
+        if self.tabs.currentWidget() is self.view_ota:
+            self.view_ota.set_progress(done, total)
+        else:
+            self.view_files.set_progress(done, total)
         self.status_progress.setVisible(True)
         if total > 0:
             self.status_progress.setRange(0, 1000)
@@ -366,8 +384,14 @@ class MainWindow(QMainWindow):
         self.status_progress.setRange(0, 100)
         if tag in ("upload", "download", "delete", "mkdir", "rename", "refresh_dir"):
             self.view_files.end_transfer()
+        if tag in ("ota", "ota_rollback"):
+            self.view_ota.end_transfer()
+            self.view_ota.set_busy(False)
         if not ok:
             self.status_label.setText("失败：%s" % message)
+            if tag == "ota_info":
+                # 旧固件没有 OTA 命令：静默即可，不用弹窗
+                return
             QMessageBox.warning(self, "操作失败", message)
             if tag == "connect" or "串口" in message or "已断开" in message:
                 self.connected = False
@@ -387,6 +411,18 @@ class MainWindow(QMainWindow):
                 self.worker.submit("list", "list", self.view_files.cwd)
         elif tag in ("upload", "download", "delete", "mkdir", "rename"):
             self.status_label.setText("完成")
+        elif tag == "ota":
+            self.view_ota.append_log("固件已提交，设备正在重启安装；稍后重新连接即可查看新版本")
+            QMessageBox.information(
+                self, "升级已提交",
+                "固件已写入设备外部 Flash，设备正在重启。\n\n"
+                "bootloader 会在屏幕上显示安装进度，完成后自动启动新固件。\n"
+                "重启完成后请重新连接，在「设备信息」里确认版本号。")
+        elif tag == "ota_rollback":
+            self.view_ota.append_log("回滚请求已提交，设备正在重启")
+            QMessageBox.information(self, "回滚已提交", "设备正在重启并回滚到上一版本，请稍后重新连接。")
+        elif tag == "ota_info" and self.connected:
+            self.view_ota.append_log("已刷新升级状态")
 
     # ------------------------------------------------------------ 动作
     def _read_params(self, kind: str) -> None:
@@ -447,6 +483,7 @@ class MainWindow(QMainWindow):
         self._apply_widths(scale)
         self.view_params.apply_scale(scale)
         self.view_files.apply_scale(scale)
+        self.view_ota.apply_scale(scale)
 
     def _apply_widths(self, scale: float) -> None:
         def px(base: float, minimum: int = 40) -> int:

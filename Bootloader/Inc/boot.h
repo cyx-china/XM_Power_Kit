@@ -45,34 +45,57 @@ typedef struct
     uint32_t serial;         /* 每次升级/回滚自增 */
     uint32_t state;          /* boot_state_e */
     uint32_t fail_count;     /* 升级后连续启动失败次数 */
-    char     version[16];    /* 当前内部 Flash 里的版本串 */
+    char     version[32];    /* 当前内部 Flash 里的版本串 */
     uint32_t token;          /* 已消费的 REQ 令牌 */
     uint32_t crc;            /* 覆盖本结构体 crc 之前的全部字节 */
 } boot_record_t;
 
 /* ============================ 升级包格式 ============================ */
 #define BOOT_PKG_MAGIC      "XMK7OTA1"
-#define BOOT_PKG_HEAD_SIZE  64U
+#define BOOT_PKG_HEAD_SIZE  80U
 
 typedef struct
 {
     char     magic[8];       /* "XMK7OTA1" */
-    char     version[16];    /* 固件版本串，如 "STM32F407VE.261108.Rel.0007" */
+    char     version[32];    /* 固件版本串，如 "STM32F407VE.261108.Rel.0007" */
     uint32_t image_size;     /* 镜像字节数 */
     uint32_t image_crc;      /* 镜像 CRC32 */
-    uint32_t head_crc;       /* 覆盖 0..31 字节的 CRC32 */
+    uint32_t head_crc;       /* 覆盖 0..47 字节的 CRC32 */
     uint32_t load_addr;      /* 目标地址，固定 BOOT_APP_ADDR */
-    char     build_time[8];  /* "YYYYMMDDHHMM" */
+    char     build_time[8];  /* "YYYYMMDD" */
     char     board[16];      /* 机型串 */
 } boot_pkg_head_t;
 
-/* REQ.BIN 内容（8 字节） */
+#define BOOT_PKG_BOARD      "XM_Power_Kit_V7"
+
+/* REQ.BIN 内容（8 字节，由应用写入） */
+#define BOOT_OP_UPGRADE     1U
+#define BOOT_OP_ROLLBACK    2U
+
 typedef struct
 {
-    uint32_t token;          /* 请求令牌，bootloader 处理完写回状态记录避免重复执行 */
-    uint16_t op;             /* 1=升级 FW.BIN，2=回滚 GOOD.BIN */
-    uint16_t crc;
+    uint32_t token;          /* 请求令牌，bootloader 处理完写进状态记录，避免重复执行 */
+    uint16_t op;             /* BOOT_OP_UPGRADE / BOOT_OP_ROLLBACK */
+    uint16_t crc;            /* 覆盖前 6 字节的 CRC32 低 16 位 */
 } boot_req_t;
+
+/* BOOTOK.BIN 内容（44 字节，由应用在启动成功后写入） */
+#define BOOT_BOOTOK_MAGIC   0x314B4F42U      /* 'BOK1' */
+
+typedef struct
+{
+    uint32_t magic;
+    char     version[32];
+    uint32_t token;
+    uint32_t crc;            /* 覆盖前 40 字节 */
+} boot_bootok_t;
+
+/* 升级包解析与搬运：stage 0=擦除 1=写入 2=回读校验 */
+typedef void (*boot_progress_t)(uint8_t stage, uint16_t percent);
+
+bool Boot_Pkg_Load(const char *path, boot_pkg_head_t *head);              /* 读头 + 校验 CRC */
+bool Boot_Pkg_Flash(const char *path, const boot_pkg_head_t *head, boot_progress_t progress);
+void Boot_Ota_Boot(void);                                                 /* 开机决策：升级 / 回滚 / 确认 */
 
 /* ============================ SPI Flash（轮询方式） ============================ */
 bool     Boot_Flash_Init(void);

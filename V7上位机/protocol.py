@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import struct
+import zlib
 
 # ---------------------------------------------------------------- 帧常量
 SOF0 = 0xA5
@@ -21,6 +22,20 @@ PROTO_VER = 2
 HDR_SIZE = 6
 MAX_PAYLOAD = 512
 FS_CHUNK = 432          # 单次文件读写数据量（固件 FS_CHUNK_MAX）
+OTA_CHUNK = 432         # 单次升级数据传输量（与 FS 相同，留足帧头空间）
+
+# ---------------------------------------------------------------- 升级包格式（与固件 boot.h 一致）
+OTA_HEAD_SIZE = 80
+OTA_MAGIC = b"XMK7OTA1"
+OTA_BOARD = "XM_Power_Kit_V7"
+OTA_APP_ADDR = 0x08008000
+OTA_APP_MAX = 480 * 1024
+
+# 偏移不一致时设备回 ST_E_PARAM + 期望偏移，从这里续传
+class OtaResync(Exception):
+    def __init__(self, offset: int):
+        self.offset = offset
+        super().__init__("设备要求从偏移 %d 续传" % offset)
 
 # ---------------------------------------------------------------- 命令码
 CMD_SYS_INFO = 0x01
@@ -40,6 +55,13 @@ CMD_FS_MKDIR = 0x26
 CMD_FS_STAT = 0x27
 CMD_FS_SYNC = 0x28
 
+CMD_OTA_INFO = 0x30
+CMD_OTA_BEGIN = 0x31
+CMD_OTA_DATA = 0x32
+CMD_OTA_COMMIT = 0x33
+CMD_OTA_ABORT = 0x34
+CMD_OTA_ROLLBACK = 0x35
+
 CMD_NAMES = {
     CMD_SYS_INFO: "SYS_INFO",
     CMD_SYS_REBOOT: "SYS_REBOOT",
@@ -55,6 +77,12 @@ CMD_NAMES = {
     CMD_FS_MKDIR: "FS_MKDIR",
     CMD_FS_STAT: "FS_STAT",
     CMD_FS_SYNC: "FS_SYNC",
+    CMD_OTA_INFO: "OTA_INFO",
+    CMD_OTA_BEGIN: "OTA_BEGIN",
+    CMD_OTA_DATA: "OTA_DATA",
+    CMD_OTA_COMMIT: "OTA_COMMIT",
+    CMD_OTA_ABORT: "OTA_ABORT",
+    CMD_OTA_ROLLBACK: "OTA_ROLLBACK",
 }
 
 # ---------------------------------------------------------------- 状态码
@@ -185,6 +213,13 @@ class FrameParser:
             payload = bytes(self._buf[HDR_SIZE:HDR_SIZE + length])
             del self._buf[:total]
             frames.append((cmd, seq, payload))
+
+
+# ---------------------------------------------------------------- CRC32（升级包用）
+def crc32(data: bytes, crc: int = 0) -> int:
+    """标准 CRC-32（poly 0xEDB88320，初值 0xFFFFFFFF，结果取反），与固件 Boot_Crc32 一致。
+    支持增量：crc32(b, crc32(a)) == crc32(a + b)。"""
+    return zlib.crc32(data, crc) & 0xFFFFFFFF
 
 
 class DeviceError(Exception):

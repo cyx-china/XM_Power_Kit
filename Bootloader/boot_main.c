@@ -115,13 +115,15 @@ int main(void)
         }
     }
 
-    boot_record_t record;
-    Boot_State_Load(&record);
-
-    (void)fs_ok;
-    (void)record;
-
-    /* P3 在这里插入：检查 REQ.BIN / FW.BIN，搬运并校验新固件 */
+    /* OTA 决策：处理升级/回滚请求、确认上次升级、应用损坏时用快照兜底 */
+    if (fs_ok)
+    {
+        Boot_Ota_Boot();
+    }
+    else
+    {
+        Boot_Ui_Status(Boot_Txt_NoPkg, false);
+    }
 
     if (Boot_App_Valid())
     {

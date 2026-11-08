@@ -36,9 +36,16 @@ except Exception:
     sys.modules["serial.tools"] = tools_mod
     sys.modules["serial.tools.list_ports"] = ports_mod
 
+import ota as OTA
 import params as P
 import protocol as PR
 from device import Device
+
+
+def PR_parse_head(head: bytes) -> dict:
+    """把设备包头解析成模拟器内部结构（用上位机同一套代码校验）"""
+    info = OTA.parse_head(head)
+    return {"version": info["version"], "size": info["image_size"], "crc": info["image_crc"]}
 
 
 # ============================================================ 模拟设备
@@ -50,6 +57,14 @@ class SimDevice:
         self.params = bytearray(P.PARAM_TOTAL_BYTES)
         struct.pack_into("<h", self.params, 0, 123)
         struct.pack_into("<f", self.params, 4, 1.2345)
+
+        # OTA 状态
+        self.ota_head = None
+        self.ota_image = bytearray()
+        self.ota_good = None
+        self.ota_state = 0
+        self.ota_fail = 0
+        self.ota_req = False
 
     def feed(self, data: bytes) -> bytes:
         out = []
@@ -158,6 +173,61 @@ class SimDevice:
         if cmd in (PR.CMD_FS_SYNC, PR.CMD_SYS_REBOOT, PR.CMD_SYS_BT_BAUD):
             return b"\x00"
 
+        # ---------------- OTA ----------------
+        if cmd == PR.CMD_OTA_INFO:
+            good = self.ota_good or {}
+            head = self.ota_head or {}
+            flags = (0x01 if self.ota_good else 0) | (0x02 if self.ota_head else 0) | \
+                    (0x04 if self.ota_req else 0)
+            body = bytes([flags, 1 if self.ota_head else 0])
+            body += struct.pack("<I", 303020)
+            body += (good.get("version", "") or "").encode().ljust(32, b"\0")[:32]
+            body += struct.pack("<I", good.get("size", 0))
+            body += (head.get("version", "") or "").encode().ljust(32, b"\0")[:32]
+            body += struct.pack("<I", head.get("size", 0))
+            body += struct.pack("<I", head.get("crc", 0))
+            body += bytes([self.ota_fail, self.ota_state])
+            return b"\x00" + body
+
+        if cmd == PR.CMD_OTA_BEGIN:
+            assert len(p) == PR.OTA_HEAD_SIZE, len(p)
+            info = PR_parse_head(p)
+            self.ota_head = info
+            self.ota_image = bytearray()
+            return b"\x00" + struct.pack("<I", 0)
+
+        if cmd == PR.CMD_OTA_DATA:
+            off = struct.unpack("<I", p[0:4])[0]
+            chunk = p[4:]
+            expect = PR.OTA_HEAD_SIZE + len(self.ota_image)
+            if off != expect:
+                return bytes([PR.ST_E_PARAM]) + struct.pack("<I", expect)
+            self.ota_image.extend(chunk)
+            return b"\x00" + struct.pack("<I", len(self.ota_image))
+
+        if cmd == PR.CMD_OTA_COMMIT:
+            if self.ota_head is None:
+                return bytes([PR.ST_E_PARAM])
+            if len(self.ota_image) != self.ota_head["size"]:
+                return bytes([PR.ST_E_PARAM])
+            if PR.crc32(bytes(self.ota_image)) != self.ota_head["crc"]:
+                return bytes([PR.ST_E_CRC])
+            self.ota_good = self.ota_head
+            self.ota_req = True
+            self.ota_state = 1
+            return b"\x00"
+
+        if cmd == PR.CMD_OTA_ABORT:
+            self.ota_head = None
+            self.ota_image = bytearray()
+            return b"\x00"
+
+        if cmd == PR.CMD_OTA_ROLLBACK:
+            if not self.ota_good:
+                return bytes([PR.ST_E_NOTFOUND])
+            self.ota_req = True
+            return b"\x00"
+
         return bytes([PR.ST_E_UNSUPPORTED])
 
 
@@ -250,7 +320,68 @@ def main() -> int:
     except PR.DeviceError as exc:
         assert exc.status == PR.ST_E_NOTFOUND
 
-    print("全部自检通过：协议编解码 / 参数 / 目录 / 上传 / 下载 / 重命名 / 删除 / 错误码")
+    # 6) OTA 升级包与升级流程
+    image = bytes(200) + b"STM32F407VE.261108.Rel.0007\x00" + bytes(range(256)) * 8
+    bin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_selftest_fw.bin")
+    with open(bin_path, "wb") as f:
+        f.write(image)
+    try:
+        pkg = OTA.make_package(bin_path)
+        assert pkg["version"] == "STM32F407VE.261108.Rel.0007", pkg["version"]
+        assert pkg["size"] == len(image)
+        assert pkg["crc"] == PR.crc32(image)
+        head_info = OTA.parse_head(pkg["head"])
+        assert head_info["image_size"] == len(image)
+        assert head_info["load_addr"] == PR.OTA_APP_ADDR
+        assert head_info["board"] == "XM_Power_Kit_V7"
+
+        # 偏移不符 -> OtaResync
+        dev.ota_begin(pkg["head"])
+        try:
+            dev.ota_data(PR.OTA_HEAD_SIZE + 5, b"abc")
+            raise AssertionError("应当抛 OtaResync")
+        except PR.OtaResync as exc:
+            assert exc.offset == PR.OTA_HEAD_SIZE
+        dev.ota_abort()
+
+        # 完整上传（含多块）
+        dev.ota_upload(pkg["head"], bin_path)
+        assert dev.sim.ota_req is True
+        assert bytes(dev.sim.ota_image) == image
+
+        info = dev.ota_info()
+        assert info["has_good"] and info["has_fw"]
+        assert info["good_version"] == pkg["version"]
+        assert info["good_size"] == len(image)
+        assert info["state"] == 1
+        dev.ota_rollback()
+        assert dev.sim.ota_req is True
+
+        # 版本识别失败时要求手动填写
+        plain = b"\x00" * 64
+        with open(bin_path, "wb") as f:
+            f.write(plain)
+        try:
+            OTA.make_package(bin_path)
+            raise AssertionError("没有版本串应当报错")
+        except ValueError:
+            pass
+        with open(bin_path, "wb") as f:
+            f.write(b"\x00" * 8 + b"STM32F407VE.261108.Rel.0007\x00" + bytes(200) * 2000)
+        try:
+            OTA.make_package(bin_path)       # 401 KB 还行，下面试超限
+            big = b"\x00" * 8 + b"STM32F407VE.261108.Rel.0007\x00" + bytes(PR.OTA_APP_MAX)
+            with open(bin_path, "wb") as f:
+                f.write(big)
+            OTA.make_package(bin_path)
+            raise AssertionError("超过分区上限应当报错")
+        except ValueError:
+            pass
+    finally:
+        if os.path.exists(bin_path):
+            os.remove(bin_path)
+
+    print("全部自检通过：协议编解码 / 参数 / 目录 / 上传 / 下载 / 重命名 / 删除 / 错误码 / OTA 升级包")
     return 0
 
 

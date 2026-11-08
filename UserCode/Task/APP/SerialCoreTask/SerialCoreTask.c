@@ -21,6 +21,7 @@
 #include "cmsis_os2.h"
 #include "ff.h"
 #include "os_handles.h"
+#include "OtaService.h"
 #include "stm32f4xx_hal.h"
 #include "UserDefineManage.h"
 #include "UserTask.h"
@@ -88,7 +89,7 @@ static void Serial_HandleSysInfo(const ProtoFrame_t *req) {
 
     p[i++] = (uint8_t)Param_Number;
     i = (uint16_t)(i + ser_put_u16(&p[i], (uint16_t)PARAM_TOTAL_BYTES));
-    i = (uint16_t)(i + ser_put_u16(&p[i], 0x0007U));            // bit0 USB / bit1 BT / bit2 FS
+    i = (uint16_t)(i + ser_put_u16(&p[i], 0x000FU));            // bit0 USB / bit1 BT / bit2 FS / bit3 OTA
     i = (uint16_t)(i + ser_put_u32(&p[i], SerialLink_GetBtBaud()));
 
     uint32_t total_kb = 0U;
@@ -183,10 +184,31 @@ static void Serial_Handle(const ProtoFrame_t *req) {
             break;
         }
 
+        case CMD_OTA_INFO:
+        case CMD_OTA_BEGIN:
+        case CMD_OTA_DATA:
+        case CMD_OTA_COMMIT:
+        case CMD_OTA_ABORT:
+        case CMD_OTA_ROLLBACK: {
+            uint16_t dlen = 0U;
+            uint8_t  st = Ota_Handle(req, &s_rsp[1], &dlen);
+            Serial_ReplyStatus(req, st, dlen);
+            break;
+        }
+
         default:
             Serial_ReplyStatus(req, ST_E_UNSUPPORTED, 0U);
             break;
     }
+}
+
+/* 应答发完再复位，保证主机能收到 COMMIT / ROLLBACK 的 OK */
+static void Serial_RebootIfPending(void) {
+    if (!Ota_RebootPending()) {
+        return;
+    }
+    osDelay(500U);
+    NVIC_SystemReset();
 }
 
 /* ============================ 初始化 / 任务 ============================ */
@@ -204,5 +226,6 @@ void Start_SerialCoreTask(void const * argument) {
             continue;
         }
         Serial_Handle(&s_req);
+        Serial_RebootIfPending();
     }
 }

@@ -64,7 +64,14 @@ typedef enum {
     CMD_FS_INFO         = 0x25,     // 容量信息
     CMD_FS_MKDIR        = 0x26,     // 新建目录 [len][path]
     CMD_FS_STAT         = 0x27,     // 文件属性 [len][path]
-    CMD_FS_SYNC         = 0x28      // 刷新图形层文件/字模缓存
+    CMD_FS_SYNC         = 0x28,     // 刷新图形层文件/字模缓存
+
+    CMD_OTA_INFO        = 0x30,     // 升级状态（包信息、快照、失败计数）
+    CMD_OTA_BEGIN       = 0x31,     // 开始上传 [80 字节包头]
+    CMD_OTA_DATA        = 0x32,     // 上传一块 [offset u32][data]
+    CMD_OTA_COMMIT      = 0x33,     // 校验 + 生成快照 + 写升级请求
+    CMD_OTA_ABORT       = 0x34,     // 放弃本次上传
+    CMD_OTA_ROLLBACK    = 0x35      // 回滚到 GOOD.BIN
 } ProtoCmd_t;
 
 /* ============================== 状态码 ============================== */

@@ -35,6 +35,7 @@
 #include "wave_generator.h"
 #include "Manager/UserDefineManage.h"
 #include "SerialCoreTask.h"
+#include "OtaService.h"
 
 FATFS fs;   FIL fil;    FRESULT res;    UINT br;    // Fatfs所需的全局变量
 
@@ -159,6 +160,10 @@ static bool Sys_Init(void) {
   if (res != FR_OK) {
     Fatfs_pass = false; // 挂载失败
     pass = false;
+  } else {
+    // OTA：向 bootloader 确认本次启动成功，并收尾上一次升级（FW.BIN → GOOD.BIN）
+    // 必须早于界面刷新和其它 Flash 操作，掉电重试全靠这一步
+    Ota_BootConfirm();
   }
 
   // 初始化 输入INA226  // 额定电流16A，分流电阻0.005Ω（R005，16A时压降80mV，在INA226的±81.92mV量程内）

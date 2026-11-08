@@ -14,7 +14,10 @@ from protocol import (
     CMD_FS_DELETE, CMD_FS_INFO, CMD_FS_LIST, CMD_FS_MKDIR, CMD_FS_READ,
     CMD_FS_RENAME, CMD_FS_STAT, CMD_FS_SYNC, CMD_FS_WRITE, CMD_PARAM_GET,
     CMD_PARAM_SET, CMD_SYS_BT_BAUD, CMD_SYS_INFO, CMD_SYS_REBOOT, CMD_NAMES,
-    FS_CHUNK, FrameParser, DeviceError, LinkError, build_frame, STATUS_TEXT,
+    CMD_OTA_ABORT, CMD_OTA_BEGIN, CMD_OTA_COMMIT, CMD_OTA_DATA, CMD_OTA_INFO,
+    CMD_OTA_ROLLBACK,
+    FS_CHUNK, OTA_CHUNK, OTA_HEAD_SIZE, OtaResync,
+    FrameParser, DeviceError, LinkError, build_frame, STATUS_TEXT,
 )
 
 FS_ATTR_DIR = 0x10
@@ -108,8 +111,9 @@ class Device:
                 self._pending_frames.extend(self._parser.feed(data))
 
     # ------------------------------------------------------------ 请求
-    def request(self, cmd: int, payload: bytes = b"", timeout: float = 3.0, retries: int = 2) -> bytes:
-        """发命令并等待应答数据（不含状态字节）。超出重试次数抛 LinkError。"""
+    def request_raw(self, cmd: int, payload: bytes = b"", timeout: float = 3.0,
+                    retries: int = 2):
+        """发命令并返回 (status, data)，非 0 状态码不抛异常（OTA 续传要用到错误里的偏移）。"""
         if not self.is_open:
             raise LinkError("串口未连接")
         self._seq = (self._seq + 1) & 0xFF
@@ -125,16 +129,20 @@ class Device:
                 if rsp is None:
                     break
                 status = rsp[0] if rsp else 0xFF
-                data = rsp[1:]
-                if status != 0:
-                    detail = ""
-                    if status == 2 and data:
-                        from protocol import FRESULT_TEXT
-                        detail = FRESULT_TEXT.get(data[0], "FRESULT=%d" % data[0])
-                    raise DeviceError(status, detail)
-                return data
+                return status, rsp[1:]
             last = "命令 %s 无应答" % CMD_NAMES.get(cmd, hex(cmd))
         raise LinkError(last)
+
+    def request(self, cmd: int, payload: bytes = b"", timeout: float = 3.0, retries: int = 2) -> bytes:
+        """发命令并等待应答数据（不含状态字节）。非 OK 状态码抛 DeviceError。"""
+        status, data = self.request_raw(cmd, payload, timeout, retries)
+        if status != 0:
+            detail = ""
+            if status == 2 and data:
+                from protocol import FRESULT_TEXT
+                detail = FRESULT_TEXT.get(data[0], "FRESULT=%d" % data[0])
+            raise DeviceError(status, detail)
+        return data
 
     # ------------------------------------------------------------ 设备信息
     def get_info(self) -> dict:
@@ -288,6 +296,100 @@ class Device:
                     if progress:
                         progress(done, total)
         self.fs_sync()
+
+    # ------------------------------------------------------------ OTA 升级
+    def ota_info(self) -> dict:
+        """升级状态：包信息、快照、失败计数、是否正在上传"""
+        data = self.request(CMD_OTA_INFO, timeout=5.0)
+        if len(data) < 84:
+            raise LinkError("升级状态长度异常（%d）" % len(data))
+
+        def text(off):
+            return data[off:off + 32].split(b"\0")[0].decode("utf-8", "replace")
+
+        info = {
+            "has_good": bool(data[0] & 0x01),
+            "has_fw": bool(data[0] & 0x02),
+            "has_req": bool(data[0] & 0x04),
+            "has_bootok": bool(data[0] & 0x08),
+            "uploading": bool(data[1]),
+        }
+        info["app_size"] = struct.unpack("<I", data[2:6])[0]
+        info["good_version"] = text(6)
+        info["good_size"] = struct.unpack("<I", data[38:42])[0]
+        info["fw_version"] = text(42)
+        info["fw_size"] = struct.unpack("<I", data[74:78])[0]
+        info["fw_crc"] = struct.unpack("<I", data[78:82])[0]
+        info["fail_count"] = data[82]
+        info["state"] = data[83]
+        return info
+
+    def ota_begin(self, head: bytes) -> None:
+        if len(head) != OTA_HEAD_SIZE:
+            raise ValueError("包头必须 %d 字节" % OTA_HEAD_SIZE)
+        self.request(CMD_OTA_BEGIN, head, timeout=10.0)
+
+    def ota_data(self, offset: int, chunk: bytes) -> int:
+        """发一块镜像数据。offset 为包内偏移（含 80 字节头）。
+        返回设备累计已写入的镜像字节数（不含包头）。
+        设备发现偏移不符会抛 OtaResync（带期望偏移）。"""
+        req = struct.pack("<I", offset) + chunk
+        status, data = self.request_raw(CMD_OTA_DATA, req, timeout=15.0)
+        if status == 0:
+            if len(data) < 4:
+                raise LinkError("升级数据应答异常")
+            return struct.unpack("<I", data[0:4])[0]
+        if status == 1 and len(data) >= 4:
+            raise OtaResync(struct.unpack("<I", data[0:4])[0])
+        raise DeviceError(status)
+
+    def ota_commit(self) -> None:
+        """校验 CRC → 生成回滚快照 → 写升级请求，设备随后自动重启进 bootloader"""
+        self.request(CMD_OTA_COMMIT, timeout=90.0, retries=0)
+
+    def ota_abort(self) -> None:
+        try:
+            self.request(CMD_OTA_ABORT, timeout=10.0, retries=0)
+        except (DeviceError, LinkError):
+            pass
+
+    def ota_rollback(self) -> None:
+        """让设备用 GOOD.BIN 覆盖内部 Flash 并重启"""
+        self.request(CMD_OTA_ROLLBACK, timeout=20.0, retries=0)
+
+    def ota_upload(self, head: bytes, bin_path: str, progress=None, cancel=None) -> None:
+        """完整升级流程：包头 → 分块传镜像（偏移不符自动续传）→ 提交"""
+        total = os.path.getsize(bin_path)
+        self.ota_begin(head)
+        done = 0
+        try:
+            with open(bin_path, "rb") as f:
+                while done < total:
+                    if cancel is not None and cancel.is_set():
+                        raise LinkError("已取消")
+                    f.seek(done)
+                    chunk = f.read(OTA_CHUNK)
+                    if not chunk:
+                        break
+                    try:
+                        n = self.ota_data(OTA_HEAD_SIZE + done, chunk)
+                    except OtaResync as resync:
+                        # 设备那边的写入量与我们不同步：按它给的偏移重来
+                        done = max(0, resync.offset - OTA_HEAD_SIZE)
+                        continue
+                    if n != done + len(chunk):
+                        raise LinkError("写入不完整（%d/%d）" % (n, done + len(chunk)))
+                    done = n
+                    if progress:
+                        progress(done, total)
+        except LinkError:
+            if done < total:
+                self.ota_abort()
+            raise
+        if done != total:
+            self.ota_abort()
+            raise LinkError("升级包传输不完整（%d/%d）" % (done, total))
+        self.ota_commit()
 
     def download(self, remote_path: str, local_path: str, size: int,
                  progress=None, cancel=None) -> None:
