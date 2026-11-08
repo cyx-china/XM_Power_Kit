@@ -19,7 +19,7 @@
 #define COL_TITLE   0xFD20U
 #define COL_SUB     0x8410U
 #define COL_OK      0x07E0U
-#define COL_BAR     0x04DFU
+#define COL_BAR     0x3C1EU     /* 蓝色进度条（刻意避开青色） */
 #define COL_WARN    0xF800U
 
 /* ---------------------------- 布局 ---------------------------- */

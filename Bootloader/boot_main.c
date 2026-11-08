@@ -211,6 +211,14 @@ int main(void)
     if (s_lcd_ok)
     {
         Boot_Font_Init();
+
+        /* 面板复位后是默认不反色，而应用的默认设置是"开反色"，
+           这里先按默认设置补上，避免开机画面变成白底青字 */
+        Boot_Lcd_SetInversion(true);
+
+        /* 背光默认 50%，不刺眼也看得清（应用启动后会按用户参数接管） */
+        Boot_Lcd_BacklightPwm(50U);
+
         Boot_Lcd_Fill(0U, 0U, 319U, 239U, 0x0000U);
     }
 
@@ -237,6 +245,22 @@ int main(void)
             Boot_Ui_Status(Boot_Txt_Provision, true);
         }
         prov = Boot_Storage_Provision();
+    }
+
+    /* 文件系统可用后按用户设置修正反色（ShowFlip=0 → 开反色，与应用一致） */
+    if (s_lcd_ok && fs_ok)
+    {
+        bool invert_on = (Boot_Storage_Param16(BOOT_PARAM_SCREEN_FLIP) == 0U);
+
+        Boot_Lcd_SetInversion(invert_on);
+
+        if (s_ui_shown)
+        {
+            /* 之前已经画过（格式化提示），按新设置重画一遍 */
+            s_ui_shown = false;
+            Boot_Lcd_Fill(0U, 0U, 319U, 239U, 0x0000U);
+            Ui_Show();
+        }
     }
 
     /* ---------------- 开机自检（静默，只记录结果） ---------------- */

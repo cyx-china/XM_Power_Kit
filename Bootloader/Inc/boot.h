@@ -123,6 +123,11 @@ bool     Boot_Fs_Format(void);      /* 卷无文件系统时现场建 FAT16（�
 
 uint8_t  Boot_Storage_Provision(void);
 
+/* 读一个用户参数的 16 位原值（uparam.bin 没有/读不出来就用编译期默认值） */
+#define BOOT_PARAM_SCREEN_BRIGHT    49U     /* Screen_Brightness */
+#define BOOT_PARAM_SCREEN_FLIP      51U     /* Screen_ShowFlip  0=开反色 1=关反色 */
+uint16_t Boot_Storage_Param16(uint8_t index);
+
 /* ============================ CRC32 ============================ */
 void     Boot_Crc32_Init(void);
 uint32_t Boot_Crc32_Update(uint32_t crc, const void *buf, uint32_t len);
@@ -150,6 +155,8 @@ void     Boot_Panic(uint32_t stage);
 
 /* 背光（PA9）：可以先于点屏打开，保证上电就有光 */
 void     Boot_Lcd_Backlight(bool on);
+/* 背光 PWM 调光（PA9 = TIM1_CH2，percent 0~100）。时钟/引脚就绪后调用才有效 */
+void     Boot_Lcd_BacklightPwm(uint8_t percent);
 
 /* ============================ GPIO 直写（省掉 HAL_GPIO_Init 的 ~430 字节） ============================ */
 /* is_af：0=推挽输出 1=复用推挽；pull：0=无 1=上拉；speed：0=低速 3=最高速；af：0~15 */
@@ -161,6 +168,8 @@ bool     Boot_IntFlash_EraseSector(uint32_t sector);
 
 /* ============================ 屏幕 ============================ */
 bool     Boot_Lcd_Init(void);
+/* 面板颜色反色：与应用 InitTask 保持一致（ShowFlip=0 → 开反色 0x21） */
+void     Boot_Lcd_SetInversion(bool invert_on);
 void     Boot_Lcd_SetWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 void     Boot_Lcd_Fill(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color);
 void     Boot_Lcd_Blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels);

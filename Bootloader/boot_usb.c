@@ -15,6 +15,7 @@
 #include "SerialCoreTask.h"
 
 #define BOOT_USB_RX_SIZE    1024U
+#define BOOT_USB_PACKET     64U          /* OTG_FS 的 CDC 端点包长 */
 
 extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
@@ -23,6 +24,11 @@ USBD_HandleTypeDef hUsbDeviceFS;
 static uint8_t           s_rx[BOOT_USB_RX_SIZE];
 static volatile uint32_t s_rx_head = 0U;      /* 中断写 */
 static volatile uint32_t s_rx_tail = 0U;      /* 主循环读 */
+
+/* 驱动收包缓冲必须和环形缓冲分开：
+   否则下一个 OUT 包会直接覆盖 s_rx[0..63]，把还没被主循环取走的第一包数据冲掉，
+   多包长帧（文件写入、升级包）永远凑不齐，表现就是"传大文件卡住"。 */
+static uint8_t s_usb_rx[BOOT_USB_PACKET];
 static volatile uint8_t  s_configured = 0U;
 static volatile uint8_t  s_tx_done   = 1U;
 
@@ -38,7 +44,7 @@ void Error_Handler(void)
 static int8_t CDC_Init_FS(void)
 {
     USBD_CDC_SetTxBuffer(&hUsbDeviceFS, s_tx, 0U);
-    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, s_rx);
+    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, s_usb_rx);
 
     /* SET_CONFIGURATION 走到这里，说明枚举完成、可以收发了 */
     s_configured = 1U;
@@ -76,7 +82,7 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len)
         s_rx_head = next;
     }
 
-    (void)USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
+    (void)USBD_CDC_SetRxBuffer(&hUsbDeviceFS, s_usb_rx);
     (void)USBD_CDC_ReceivePacket(&hUsbDeviceFS);
     return (USBD_OK);
 }

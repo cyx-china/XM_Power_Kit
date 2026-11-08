@@ -171,7 +171,7 @@ void Boot_Proto_OnFrame(const ProtoFrame_t *frame)
 
 void Boot_Proto_Poll(void)
 {
-    uint8_t  chunk[64];
+    uint8_t  chunk[128];      /* 一次多取一些，长帧（文件写入/升级）少绕几圈 */
     uint16_t n;
 
     while ((n = Boot_Usb_Read(chunk, sizeof(chunk))) > 0U)

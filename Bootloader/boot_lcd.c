@@ -226,6 +226,41 @@ void Boot_Lcd_Backlight(bool on)
     HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
+/* PA9 = TIM1_CH2 硬件 PWM：默认 50% 亮度，和应用里的背光调光一致。
+   TIM1 时钟 168MHz / 168 = 1MHz，ARR 999 → 1kHz，避免音频噪声。 */
+void Boot_Lcd_BacklightPwm(uint8_t percent)
+{
+    if (percent > 100U)
+    {
+        percent = 100U;
+    }
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_TIM1_CLK_ENABLE();
+
+    Boot_Gpio_Setup(LCD_BL_PORT, LCD_BL_PIN, true, 0U, 2U, 1U);   /* AF1 */
+
+    TIM1->PSC  = 168U - 1U;
+    TIM1->ARR  = 1000U - 1U;
+    TIM1->CCR2 = (uint32_t)percent * 10U;
+
+    /* OC2M = 110（PWM 模式 1）、OC2PE = 1 */
+    TIM1->CCMR1 = (TIM1->CCMR1 & ~(0xFFUL << 8)) | (6UL << 12) | (1UL << 11);
+    TIM1->CCER |= TIM_CCER_CC2E;
+    TIM1->BDTR |= TIM_BDTR_MOE;
+    TIM1->CR1  |= TIM_CR1_ARPE;
+    TIM1->EGR   = TIM_EGR_UG;
+    TIM1->CR1  |= TIM_CR1_CEN;
+}
+
+/* ============================ 面板反色 ============================ */
+/* 应用的「显示翻转」默认是 0 = 开启颜色反色（0x21）。bootloader 复位了面板，
+   必须自己补上这一条，否则面板回到默认不反色，整个界面会变成白底 + 青色字。 */
+void Boot_Lcd_SetInversion(bool invert_on)
+{
+    lcd_cmd(invert_on ? 0x21U : 0x20U);
+}
+
 /* ============================ 对外初始化 ============================ */
 bool Boot_Lcd_Init(void)
 {

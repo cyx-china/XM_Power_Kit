@@ -76,3 +76,35 @@ uint8_t Boot_Storage_Provision(void)
 
     return flags;
 }
+
+/**
+ * @brief  读一个用户参数的 16 位原值（uparam.bin 每个参数固定 4 字节，低 2 字节有效）
+ * @note   文件不存在或读失败时用编译期内置的默认值，保证新机也有正确表现
+ */
+uint16_t Boot_Storage_Param16(uint8_t index)
+{
+    uint8_t  buf[4];
+    FIL      file;
+    UINT     br = 0U;
+    uint16_t value = 0U;
+
+    if (index >= BOOT_PARAM_COUNT)
+    {
+        return 0U;
+    }
+
+    if (f_open(&file, BOOT_FILE_PARAM, FA_READ | FA_OPEN_EXISTING) == FR_OK)
+    {
+        if ((f_lseek(&file, (FSIZE_t)index * 4U) == FR_OK) &&
+            (f_read(&file, buf, 4U, &br) == FR_OK) && (br == 4U))
+        {
+            value = (uint16_t)buf[0] | ((uint16_t)buf[1] << 8);
+        }
+        f_close(&file);
+        return value;
+    }
+
+    value = (uint16_t)boot_param_default[(uint32_t)index * 4U] |
+            ((uint16_t)boot_param_default[((uint32_t)index * 4U) + 1U] << 8);
+    return value;
+}
