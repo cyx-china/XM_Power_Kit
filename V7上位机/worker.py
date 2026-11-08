@@ -95,8 +95,8 @@ class Worker(QThread):
         except Exception:
             self._dev.close()
             raise
+        self.sig_info.emit(info)          # 先给信息：主窗口据此判断维护模式
         self.sig_connected.emit(True, port)
-        self.sig_info.emit(info)
         try:
             total, free = self._dev.fs_info()
             self.sig_capacity.emit(total, free)
@@ -173,9 +173,15 @@ class Worker(QThread):
         self.sig_ota_info.emit(self._dev.ota_info())
 
     def _job_ota_upload(self, head: bytes, bin_path: str) -> None:
-        self.sig_status.emit("正在上传固件…")
-        self._dev.ota_upload(head, bin_path, self._progress, self._cancel)
-        self.sig_status.emit("固件已写入，设备正在重启安装…")
+        if self._dev.maintenance:
+            # bootloader 维护模式：上传打包好的 FW.BIN，再让设备立刻搬运安装
+            self.sig_status.emit("正在上传固件（维护模式）…")
+            self._dev.ota_maintenance_upgrade(head, bin_path, self._progress, self._cancel)
+            self.sig_status.emit("固件已提交，设备正在写入内部 Flash…")
+        else:
+            self.sig_status.emit("正在上传固件…")
+            self._dev.ota_upload(head, bin_path, self._progress, self._cancel)
+            self.sig_status.emit("固件已写入，设备正在重启安装…")
         self._dev.close()
         self.sig_connected.emit(False, "")
 

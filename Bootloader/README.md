@@ -32,15 +32,15 @@
 ```
 上电
  ├─ 背光立即点亮（不依赖时钟/OS，任何一步出错屏幕都不是黑的）
- ├─ 时钟 168MHz → GPIO/按键 → 屏幕 → 外部 Flash
- ├─ 挂载文件系统 ──失败──> 现场格式化 FAT16（32MB 卷，4096 字节扇区）──再失败──> 自检表常驻
+ ├─ 时钟 168MHz → GPIO/按键 → 屏幕（只清成黑屏，不画 logo）→ 外部 Flash
+ ├─ 挂载文件系统 ──失败──> 亮出自检界面 + “正在格式化 FAT16”（32MB 卷，4096 字节扇区）
  ├─ 出厂文件：建 /font、/font/bootloader、/images、/ota；字库长度不符就重写；缺 uparam.bin 就创建
- ├─ 自检表 6 项逐行显示（时钟/外部Flash/文件系统/配置文件/传感器/应用固件）
- ├─ OTA 决策（见下）
+ ├─ 自检 6 项静默执行（时钟/外部Flash/文件系统/配置文件/传感器/应用固件），正常时不出图
+ ├─ OTA 决策（见下；需要搬运时自己切到升级界面）
  └─ 应用固件
-      ├─ 存在 + 自检全通过   → 立即跳转（无 splash）
-      ├─ 存在 + 有项目未通过 → 显示 8 秒倒计时，按键可停留，超时跳转
-      └─ 不存在 / 文件系统不可用 → 停在维护界面（慢闪 LED）
+      ├─ 存在 + 自检全通过   → 直接跳转（无 logo、无等待、黑屏一闪）
+      ├─ 存在 + 有项目未通过 → 画出自检表 + 8 秒倒计时，按键可停留，超时跳转
+      └─ 不存在 / 文件系统不可用 → 画出自检表并常驻（维护模式，慢闪 LED）
 ```
 
 ## OTA 决策流程
@@ -62,7 +62,7 @@
 
 ## 屏幕提示
 
-**自检界面**（出厂初始化 / 有项目不通过时）：
+**自检界面**（只在要格式化 / 有项目不通过 / 没有应用固件时出现，正常启动完全不出图）：
 
 ```
 XM Power Kit 设备初始化
@@ -83,7 +83,7 @@ XM Power Kit 设备初始化
 （正在校验升级包 / 正在擦除内部 Flash / 正在写入固件 / 正在校验写入结果 / 正在回滚到上一版本），
 以及底部的“请勿断电，完成后自动重启”。
 
-## 屏幕提示
+## 字库与脚本
 
 字库彻底不可用时界面降级为进度条 + 红色提示块，不影响升级与初始化功能。
 
@@ -102,26 +102,36 @@ python Bootloader/tools/gen_param_default.py  # 从 UserDefineManage.c 的默认
 ```bash
 cmake -S . -B build/Release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/Release
-# 产物：build/Release/Bootloader/XM_Power_Kit_Boot.hex（约 29 KB / 48 KB）
+# 产物：build/Release/Bootloader/XM_Power_Kit_Boot.hex（约 42 KB / 48 KB）
 ```
+
+## 维护模式（USB 常驻）
+
+停在维护界面（格式化失败 / 应用无效）时，bootloader 会初始化 USB CDC 并进入维护循环：
+
+- 只有 USB 一条链路（bootloader 不初始化蓝牙），协议与主程序完全相同，上位机代码不用区分；
+- 支持的命令：`SYS_INFO`（特性位 bit4 标记维护模式）、`SYS_REBOOT`、`FS_*` 全部文件操作、
+  `OTA_APPLY`（把 `0:/ota/FW.BIN` 立刻写进内部 Flash 并重启）；
+- 上位机连上后自动识别维护模式：参数配置页置灰，「固件升级」页的按钮变成「写入并安装」——
+  选择 `XM_Power_Kit.bin` 点一下，就自动打包 → 上传到 `0:/ota/FW.BIN` → `OTA_APPLY` → 搬运安装；
+- 「文件管理」页照常可用，可以往设备传字库、图片等文件；
+- 屏幕提示行会随连接状态显示“维护模式：请连接上位机 USB”/“上位机已连接，可升级或传文件”。
 
 ## 首次安装（只需一次）
 
-旧固件没有 OTA 能力，所以第一次得先把升级包放进去，再用 ST-Link 烧 bootloader：
+1. **烧 bootloader**：ST-Link 把 `build/Release/Bootloader/XM_Power_Kit_Boot.hex` 烧到 `0x08000000`
+   （48KB）。这会顺带擦掉旧应用，bootloader 随即进入维护界面；
+2. **上电并连上位机**：等屏幕出现自检表（应用固件：无），用 USB 连上位机；
+3. **写入并安装**：上位机「固件升级」页选 `build/Release/XM_Power_Kit.bin` →
+   点「写入并安装」→ bootloader 校验、擦除、写入、回读、跳转，屏幕显示版本/大小/CRC 与进度；
+4. 以后升级直接用「固件升级」页，不再需要 ST-Link。
 
-1. **打包**：新上位机「固件升级」页选 `build/Release/XM_Power_Kit.bin` → 「导出升级包…」
-   → 存成 `FW.BIN`（80 字节头 + 镜像）；
-2. **上传**：连上旧固件，用「文件管理」把 `FW.BIN` 传到 `0:/ota/`（没有 `/ota` 就先新建）；
-   字库已经内嵌在 bootloader 里，不需要再上传；
-3. **烧 bootloader**：ST-Link 把 `build/Release/Bootloader/XM_Power_Kit_Boot.hex` 烧到 `0x08000000`
-   （48KB），内部 Flash 的应用区会被擦掉，这正是我们要的；
-4. **上电**：bootloader 看到应用区无效、`FW.BIN` 存在 → 自动校验、擦除、写入、回读校验 → 跳转；
-   屏幕上显示版本、大小、CRC 和进度；
-5. 连上新固件，以后升级直接用「固件升级」页，不再需要 ST-Link。
+如果手边没有上位机，也可以把打包好的 `FW.BIN`（80 字节头 + 镜像）先放进 `0:/ota/`，
+bootloader 上电时看到应用区无效会自己安装。
 
 **全新板子（外部 Flash 是空的）**：不需要任何准备。上电 → bootloader 自动格式化、建目录、
-写字库与参数文件 → 自检表显示“外部 Flash 已格式化 / 配置文件已创建” → 停在维护界面等固件，
-接上位机升级即可。
+写字库与参数文件 → 自检表显示“文件系统 已格式化 / 配置文件 已创建” → 停在维护界面等固件，
+接上位机「写入并安装」即可。
 
 ## 恢复手段
 
@@ -129,5 +139,5 @@ cmake --build build/Release
 | --- | --- |
 | 升级后新固件起不来 | 自动：连续 3 次未确认 → 用 `PREV.BIN` 回滚 |
 | 想主动退回上一版 | 上位机「固件升级」→「回滚到上一版本」 |
-| `PREV.BIN` 也没有、应用区损坏 | ST-Link 烧 bootloader + 用文件管理上传 FW.BIN（需先能进系统）或直接 ST-Link 烧应用 |
+| `PREV.BIN` 也没有、应用区损坏 | ST-Link 烧 bootloader → 维护模式下「写入并安装」 |
 | bootloader 自身损坏 | ST-Link 重烧 `XM_Power_Kit_Boot.hex` |

@@ -6,8 +6,9 @@
  *          就现场格式化）-> 出厂文件（目录/字库/参数文件）-> 开机自检表 ->
  *          OTA 决策（升级/回滚/首次安装）-> 应用有效就跳转。
  *
- *          新机（应用分区为空）会停在自检界面，方便用户接上位机刷固件；
- *          应用有效但自检有项目未通过时给 8 秒倒计时，期间按任意键停留。
+ *          一切正常时全程不出图（黑屏一闪）直接跳应用；只有需要格式化、自检未通过、
+ *          没有应用固件时才把自检表画出来——新机停在这里等上位机刷固件，
+ *          已有固件但某项 FAIL 时给 8 秒倒计时，期间按任意键停留。
  ******************************************************************************
  */
 #include "boot.h"
@@ -16,6 +17,11 @@
 static void Boot_Clock_Init(void);
 static void Boot_Gpio_Init(void);
 static void Stay_Forever(void);
+static void Ui_Show(void);
+
+/* 自检表是否已经画到屏幕上（正常启动全程不画） */
+static bool s_ui_shown = false;
+static bool s_lcd_ok   = false;
 
 /* 启动阶段与屏幕就绪标志：故障时由 Boot_Panic() 用来指示卡在哪一步 */
 volatile uint8_t g_boot_stage     = 0U;
@@ -105,17 +111,54 @@ static void Boot_Clock_Init(void)
     }
 }
 
-/* ---------------------------- 停留：慢闪等上位机/ST-Link ---------------------------- */
+/* ---------------------------- 自检表：只在出问题时才画 ---------------------------- */
+static void Ui_Show(void)
+{
+    if (s_ui_shown || !s_lcd_ok)
+    {
+        return;
+    }
+
+    Boot_Ui_Screen(Boot_Txt_InitTitle, Boot_Txt_InitFooter, false);
+    Boot_SelfTest_Paint();
+    s_ui_shown = true;
+}
+
+/* 停留：维护模式（USB CDC + 文件管理/一键升级） */
 static void Stay_Forever(void)
 {
-    Boot_Led(false);
+    bool usb_ok    = Boot_Usb_Init();
+    bool connected = false;
+    bool led       = false;
+    uint32_t tick  = HAL_GetTick();
 
-    while (1)
+    if (!usb_ok)
     {
-        Boot_Led(true);
-        HAL_Delay(400);
-        Boot_Led(false);
-        HAL_Delay(400);
+        Boot_Ui_Hint(Boot_Txt_StayHint, false);
+    }
+
+    for (;;)
+    {
+        if (usb_ok)
+        {
+            Boot_Proto_Poll();
+
+            bool now = Boot_Usb_Configured();
+            if (now != connected)
+            {
+                connected = now;
+                Boot_Ui_Hint(connected ? Boot_Txt_UsbOk : Boot_Txt_UsbWait, false);
+            }
+        }
+
+        if ((HAL_GetTick() - tick) >= 400U)
+        {
+            tick = HAL_GetTick();
+            led  = !led;
+            Boot_Led(led);
+        }
+
+        HAL_Delay(1U);
     }
 }
 
@@ -158,16 +201,17 @@ int main(void)
     Boot_Led(true);             /* 指示"正在启动"，跳转前熄灭 */
 
     g_boot_stage = 3U;
-    bool lcd_ok = Boot_Lcd_Init();
+    s_lcd_ok = Boot_Lcd_Init();
 
     g_boot_stage = 4U;
     bool flash_ok = Boot_Flash_Init();
 
-    /* 屏幕与字库：字库优先外部 Flash，缺失时用内嵌的那份 */
-    if (lcd_ok)
+    /* 屏幕与字库：字库优先外部 Flash，缺失时用内嵌的那份。
+       只清成黑屏，不画界面——正常启动时直接跳应用，不开机 logo。 */
+    if (s_lcd_ok)
     {
         Boot_Font_Init();
-        Boot_Ui_Screen(Boot_Txt_InitTitle, Boot_Txt_InitFooter, false);
+        Boot_Lcd_Fill(0U, 0U, 319U, 239U, 0x0000U);
     }
 
     /* ---------------- 文件系统：挂载失败就现场格式化 ---------------- */
@@ -177,6 +221,7 @@ int main(void)
 
     if (!fs_ok && flash_ok)
     {
+        Ui_Show();                       /* 要格式化了：先把界面亮出来，别让用户面对黑屏 */
         Boot_Ui_Status(Boot_Txt_Formatting, true);
         fs_ok      = Boot_Fs_Format();
         did_format = fs_ok;
@@ -187,14 +232,22 @@ int main(void)
 
     if (fs_ok)
     {
-        Boot_Ui_Status(Boot_Txt_Provision, true);
+        if (s_ui_shown)
+        {
+            Boot_Ui_Status(Boot_Txt_Provision, true);
+        }
         prov = Boot_Storage_Provision();
     }
 
-    /* ---------------- 开机自检表 ---------------- */
+    /* ---------------- 开机自检（静默，只记录结果） ---------------- */
     Boot_SelfTest_Begin();
-    Boot_Ui_Status(Boot_Txt_SelfTest, true);
     (void)Boot_SelfTest_Run(fs_ok, did_format, prov);
+
+    if (s_ui_shown)
+    {
+        Boot_SelfTest_Paint();
+        Boot_Ui_Status(Boot_Txt_SelfTest, true);
+    }
 
     /* ---------------- OTA：升级 / 回滚 / 首次安装 ---------------- */
     g_boot_stage = 6U;
@@ -212,20 +265,22 @@ int main(void)
     /* ---------------- 1) 文件系统不可用 / 没有可用固件：自检表常驻 ---------------- */
     if (!fs_ok || !app_ok)
     {
+        Ui_Show();
+        Boot_SelfTest_Paint();
         Boot_Ui_Status(!fs_ok ? Boot_Txt_FormatFail : Boot_Txt_Stay, false);
         Boot_Ui_Hint(Boot_Txt_StayHint, false);
         Stay_Forever();
     }
 
-    /* ---------------- 2) 全部通过：直接进主程序 ---------------- */
+    /* ---------------- 2) 全部通过：直接进主程序（不出图、不等待） ---------------- */
     if (Boot_SelfTest_AllOk())
     {
-        Boot_Ui_Status(Boot_Txt_Entering, true);
-        HAL_Delay(120);
         Boot_App_Jump();
     }
 
     /* ---------------- 3) 有项目未通过：8 秒倒计时，期间按任意键停留 ---------------- */
+    Ui_Show();
+    Boot_SelfTest_Paint();
     Boot_Ui_Status(Boot_Txt_SomeFail, false);
 
     char hint[40];

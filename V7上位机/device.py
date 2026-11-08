@@ -14,8 +14,9 @@ from protocol import (
     CMD_FS_DELETE, CMD_FS_INFO, CMD_FS_LIST, CMD_FS_MKDIR, CMD_FS_READ,
     CMD_FS_RENAME, CMD_FS_STAT, CMD_FS_SYNC, CMD_FS_WRITE, CMD_PARAM_GET,
     CMD_PARAM_SET, CMD_SYS_BT_BAUD, CMD_SYS_INFO, CMD_SYS_REBOOT, CMD_NAMES,
-    CMD_OTA_ABORT, CMD_OTA_BEGIN, CMD_OTA_COMMIT, CMD_OTA_DATA, CMD_OTA_INFO,
-    CMD_OTA_ROLLBACK,
+    CMD_OTA_ABORT, CMD_OTA_APPLY, CMD_OTA_BEGIN, CMD_OTA_COMMIT, CMD_OTA_DATA,
+    CMD_OTA_INFO, CMD_OTA_ROLLBACK,
+    FEATURE_MAINT,
     FS_CHUNK, OTA_CHUNK, OTA_HEAD_SIZE, OtaResync,
     FrameParser, DeviceError, LinkError, build_frame, STATUS_TEXT,
 )
@@ -40,8 +41,14 @@ class Device:
         self._parser = FrameParser()
         self._seq = 0
         self._pending_frames = []
+        self.features = 0            # 最近一次 SYS_INFO 的特性位
         self.log_tx = None
         self.log_rx = None
+
+    @property
+    def maintenance(self) -> bool:
+        """设备停在 bootloader 维护模式（只有 USB、文件与安装，没有参数/蓝牙）"""
+        return bool(self.features & FEATURE_MAINT)
 
     # ------------------------------------------------------------ 链路
     @property
@@ -66,6 +73,7 @@ class Device:
                 pass
         self._ser = None
         self._parser.reset()
+        self.features = 0
 
     def _write(self, data: bytes) -> None:
         if not self.is_open:
@@ -171,6 +179,7 @@ class Device:
             i += 4
         if len(data) >= i + 4:
             info["free_kb"] = struct.unpack("<I", data[i:i + 4])[0]
+        self.features = info.get("features", 0)
         return info
 
     def set_bt_baud(self, baud: int) -> None:
@@ -356,6 +365,38 @@ class Device:
     def ota_rollback(self) -> None:
         """让设备用 PREV.BIN（升级前的版本）覆盖内部 Flash 并重启"""
         self.request(CMD_OTA_ROLLBACK, timeout=20.0, retries=0)
+
+    def ota_apply(self) -> None:
+        """维护模式（bootloader）：把外部 Flash 里的 /ota/FW.BIN 写进内部 Flash 并重启"""
+        self.request(CMD_OTA_APPLY, timeout=120.0, retries=0)
+
+    def ota_maintenance_upgrade(self, head: bytes, bin_path: str,
+                                progress=None, cancel=None) -> None:
+        """维护模式一键升级：打包 → 传到 /ota/FW.BIN → 请求安装（设备总线缆上只连 USB）"""
+        import tempfile
+
+        with open(bin_path, "rb") as f:
+            image = f.read()
+        total = len(head) + len(image)
+        fd, tmp = tempfile.mkstemp(suffix=".xmkota")
+        os.close(fd)
+        try:
+            with open(tmp, "wb") as f:
+                f.write(head)
+                f.write(image)
+            try:
+                self.fs_mkdir("/ota")
+            except DeviceError:
+                pass                       # 目录已存在
+            self.upload(tmp, "/ota/FW.BIN", progress, cancel)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        if progress:
+            progress(total, total)
+        self.ota_apply()
 
     def ota_upload(self, head: bytes, bin_path: str, progress=None, cancel=None) -> None:
         """完整升级流程：包头 → 分块传镜像（偏移不符自动续传）→ 提交"""

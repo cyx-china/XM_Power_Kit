@@ -27,7 +27,7 @@ from PyQt5.QtWidgets import (
 
 import params as P
 from device import list_ports
-from protocol import PROTO_VER
+from protocol import PROTO_VER, FEATURE_MAINT
 from ui_files import FileBrowser
 from ui_ota import OtaView
 from ui_params import ParamView
@@ -113,6 +113,7 @@ class MainWindow(QMainWindow):
         self.current_values = None          # 最近一次读取的当前参数
         self.device_info = {}
         self.connected = False
+        self.maintenance = False
 
         self._scale = 0.0
         self._scale_timer = QTimer(self)    # 拖拽窗口时延时重算，避免每个像素都重建样式
@@ -323,13 +324,15 @@ class MainWindow(QMainWindow):
         self._set_connected(ok)
         if ok:
             self.device_label.setText("已连接 %s" % port)
-            self.tabs.setTabText(0, "参数配置")
-            # 连接后自动读取一次
-            self._read_params("current")
+            # 连接后自动读取一次（维护模式没有参数，读会失败，跳过）
+            if not self.maintenance:
+                self._read_params("current")
+                self.worker.submit("ota_info", "ota_info")
+            self.tabs.setCurrentWidget(self.view_ota if self.maintenance else self.view_params)
             self.worker.submit("list", "list", "/")
-            self.worker.submit("ota_info", "ota_info")
         else:
             self.device_label.setText("未连接")
+            self.maintenance = False
 
     def _set_connected(self, ok: bool) -> None:
         self.btn_connect.setText("断开" if ok else "连接")
@@ -340,21 +343,37 @@ class MainWindow(QMainWindow):
         self.view_params.set_busy(not ok)
         self.view_files.set_connected(ok)
         self.view_ota.set_connected(ok)
-        for b in (self.btn_bt_apply, self.btn_reboot, self.btn_sync_fs):
+        self.btn_bt_apply.setEnabled(ok and not self.maintenance)
+        for b in (self.btn_reboot, self.btn_sync_fs):
             b.setEnabled(ok)
 
     # ------------------------------------------------------------ 回调
+    def _on_maintenance(self, maint: bool) -> None:
+        """bootloader 维护模式：参数配置不可用，升级页改成“写入并安装”"""
+        self.maintenance = maint
+        self.view_ota.set_mode(maint)
+        self.tabs.setTabEnabled(0, not maint)
+        self.tabs.setTabText(0, "参数配置（维护模式）" if maint else "参数配置")
+        self.btn_bt_apply.setEnabled(self.connected and not maint)
+        if maint:
+            self.status_label.setText("设备处于 bootloader 维护模式：可升级固件、管理文件")
+
     def _on_info(self, info: dict) -> None:
         self.device_info = info
+        self._on_maintenance(bool(info.get("features", 0) & FEATURE_MAINT))
         self.info_labels["firmware"].setText(info.get("firmware", "—"))
         self.info_labels["proto"].setText("v%d (上位机 v%d)" % (info.get("proto", 0), PROTO_VER))
-        self.info_labels["params"].setText("%s 个 / %s 字节"
-                                           % (info.get("param_count", "?"),
-                                              info.get("param_bytes", "?")))
-        bt = info.get("bt_baud")
-        if bt:
-            self.info_labels["bt_baud"].setText(str(bt))
-            self.bt_baud_combo.setCurrentText(str(bt))
+        if self.maintenance:
+            self.info_labels["params"].setText("维护模式下不适用")
+            self.info_labels["bt_baud"].setText("维护模式不支持")
+        else:
+            self.info_labels["params"].setText("%s 个 / %s 字节"
+                                               % (info.get("param_count", "?"),
+                                                  info.get("param_bytes", "?")))
+            bt = info.get("bt_baud")
+            if bt:
+                self.info_labels["bt_baud"].setText(str(bt))
+                self.bt_baud_combo.setCurrentText(str(bt))
         total = info.get("total_kb", 0)
         free = info.get("free_kb", 0)
         if total:
@@ -412,12 +431,14 @@ class MainWindow(QMainWindow):
         elif tag in ("upload", "download", "delete", "mkdir", "rename"):
             self.status_label.setText("完成")
         elif tag == "ota":
-            self.view_ota.append_log("固件已提交，设备正在重启安装；稍后重新连接即可查看新版本")
+            self.view_ota.append_log("固件已提交，设备正在安装；稍后重新连接即可查看新版本")
+            note = ("固件已上传到设备，bootloader 正在写入内部 Flash。\n\n"
+                    if self.maintenance else
+                    "固件已写入设备外部 Flash，设备正在重启。\n\n")
             QMessageBox.information(
                 self, "升级已提交",
-                "固件已写入设备外部 Flash，设备正在重启。\n\n"
-                "bootloader 会在屏幕上显示安装进度，完成后自动启动新固件。\n"
-                "重启完成后请重新连接，在「设备信息」里确认版本号。")
+                note + "安装期间屏幕上会显示进度，完成后自动启动新固件。\n"
+                       "重启完成后请重新连接，在「设备信息」里确认版本号。")
         elif tag == "ota_rollback":
             self.view_ota.append_log("回滚请求已提交，设备正在重启")
             QMessageBox.information(self, "回滚已提交", "设备正在重启并回滚到上一版本，请稍后重新连接。")

@@ -65,6 +65,7 @@ class SimDevice:
         self.ota_state = 0
         self.ota_fail = 0
         self.ota_req = False
+        self.maint = False           # True 表示模拟停在 bootloader 维护模式
 
     def feed(self, data: bytes) -> bytes:
         out = []
@@ -83,9 +84,16 @@ class SimDevice:
 
     def _handle(self, cmd, p):
         if cmd == PR.CMD_SYS_INFO:
-            ver = b"STM32F407VE.TEST.Rel.9999"
+            if self.maint:
+                ver = b"XM Power Kit Bootloader"
+                features = 0x001D          # USB|FS|OTA|维护模式
+            else:
+                ver = b"STM32F407VE.TEST.Rel.9999"
+                features = 0x0007
             body = bytes([PR.PROTO_VER, len(ver)]) + ver
-            body += bytes([P.PARAM_TOTAL_COUNT]) + struct.pack("<HHII", P.PARAM_TOTAL_BYTES, 7, 115200, 0)
+            body += bytes([0 if self.maint else P.PARAM_TOTAL_COUNT])
+            body += struct.pack("<HHII", 0 if self.maint else P.PARAM_TOTAL_BYTES,
+                                features, 0 if self.maint else 115200, 0)
             body += struct.pack("<II", 32768, 20000)
             return b"\x00" + body
 
@@ -169,6 +177,17 @@ class SimDevice:
             if path in self.files:
                 return b"\x00" + bytes([0x20]) + struct.pack("<I", len(self.files[path]))
             return bytes([PR.ST_E_NOTFOUND, 4])
+
+        if cmd == PR.CMD_OTA_APPLY:
+            # 维护模式：校验 /ota/FW.BIN 后写升级请求（真实设备随后重启搬运）
+            pkg = self.files.get("/ota/FW.BIN")
+            if not pkg:
+                return bytes([PR.ST_E_NOTFOUND, 4])
+            head = PR_parse_head(bytes(pkg[:PR.OTA_HEAD_SIZE]))
+            self.ota_head = head
+            self.ota_image = bytearray(pkg[PR.OTA_HEAD_SIZE:])
+            self.ota_req = True
+            return b"\x00"
 
         if cmd in (PR.CMD_FS_SYNC, PR.CMD_SYS_REBOOT, PR.CMD_SYS_BT_BAUD):
             return b"\x00"
@@ -377,11 +396,29 @@ def main() -> int:
             raise AssertionError("超过分区上限应当报错")
         except ValueError:
             pass
+        # 7) 维护模式（bootloader 常驻）一键升级
+        sim_maint = FakeDevice()
+        sim_maint.sim.maint = True
+        minfo = sim_maint.get_info()
+        assert minfo["features"] & PR.FEATURE_MAINT, minfo
+        assert sim_maint.maintenance is True
+        assert sim_maint.get_info()["param_count"] == 0
+        image2 = bytes(64) + b"STM32F407VE.261108.Rel.0007\x00" + bytes(range(128)) * 6
+        with open(bin_path, "wb") as f:
+            f.write(image2)
+        pkg2 = OTA.make_package(bin_path)
+        head2 = OTA.build_head(pkg2["version"], pkg2["size"], pkg2["crc"], pkg2["build_time"])
+        sim_maint.ota_maintenance_upgrade(head2, bin_path)
+        written = bytes(sim_maint.sim.files["/ota/FW.BIN"])
+        assert written == head2 + image2, (len(written), len(head2) + len(image2))
+        assert sim_maint.sim.ota_req is True
+        assert bytes(sim_maint.sim.ota_image) == image2
     finally:
         if os.path.exists(bin_path):
             os.remove(bin_path)
 
-    print("全部自检通过：协议编解码 / 参数 / 目录 / 上传 / 下载 / 重命名 / 删除 / 错误码 / OTA 升级包")
+    print("全部自检通过：协议编解码 / 参数 / 目录 / 上传 / 下载 / 重命名 / 删除 / 错误码 / "
+          "OTA 升级包 / 维护模式一键升级")
     return 0
 
 

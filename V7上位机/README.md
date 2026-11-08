@@ -31,7 +31,7 @@ python selftest.py
 | --- | --- |
 | 参数配置 | 5 个大类、18 个分组，共 56 个参数；可读当前值/默认值，修改后统一写入；表头「新值」留空表示不修改 |
 | 文件管理 | 浏览设备外部 Flash 上的 FATFS（类似资源管理器）；上传/下载/删除/重命名/新建文件夹；显示容量与传输进度，可取消 |
-| 固件升级 | 选择 `XM_Power_Kit.bin`（自动识别版本/CRC）→ 写入设备外部 Flash → 设备重启由 bootloader 安装；可一键回滚到上一版本 |
+| 固件升级 | 选择 `XM_Power_Kit.bin`（自动识别版本/CRC）→ 写入设备并安装；可一键回滚到上一版本。设备停在 bootloader 时自动切到「维护模式」，按钮变成「写入并安装」 |
 | 设备信息 | 固件版本、协议版本、参数数量、Flash 容量、蓝牙波特率设置、刷新字库缓存、重启设备 |
 
 连接后会自动读取一次当前参数与根目录。
@@ -46,16 +46,18 @@ python selftest.py
 3. 回到设备信息页点「刷新字库缓存」——手动绘制的界面立即使用新字模；
 4. LVGL 界面的字体是启动时 `lv_font_load` 加载的，需点「重启设备」才生效。
 
+bootloader 自带的界面字库已经编译进固件，第一次开机由它自己写到 `0:/font/bootloader/boot.bin`，
+不需要手动上传（要换字时重新跑 `Bootloader/tools/gen_boot_font.py` 再重新编译 bootloader 即可）。
+
 ### 固件升级（OTA）
 
 升级包 = 80 字节包头 + 裸镜像（`.bin`）。包头字段：magic `"XMK7OTA1"`、版本串（32B）、镜像大小、镜像 CRC32、
-包头 CRC32、目标地址（0x08008000）、构建日期（8B）、机型（16B）。
+包头 CRC32、目标地址（0x08010000）、构建日期（8B）、机型（16B）。
 
 流程：
 
 1. 编译固件，得到 `build/Release/XM_Power_Kit.bin`（CMake 的 POST_BUILD 会自动生成 `.bin` 和 `.hex`）；
 2. 「固件升级」页 →「选择文件」→ 自动读出镜像里的版本串（就是 `SYS_VERSION_CODE`）并算出 CRC32；
-   「导出升级包…」可以另外存一份带头部的 `FW.BIN`，用于首次安装（见 `Bootloader/README.md`）；
 3. 点「开始升级」：`OTA_BEGIN` 写包头 → `OTA_DATA` 分块传镜像（432 字节/块）→ `OTA_COMMIT` 校验并让设备重启；
 4. 设备重启后进入 bootloader：校验包 CRC → 擦除应用分区 → 写入 → 回读校验 → 跳转新固件，屏幕上显示进度；
 5. 新固件第一次启动时写 `BOOTOK.BIN` 确认，bootloader 从此认为本次升级成功。
@@ -67,16 +69,27 @@ python selftest.py
 - 也可以手动点「回滚到上一版本」，设备重启后 bootloader 直接用 `PREV.BIN` 覆盖；
 - 升级成功后 `PREV.BIN` 会保留下来，所以“退回上一版”在任何时候都可用；再升一次级它会更新成新的上一版。
 
+### 维护模式（设备停在 bootloader）
+
+设备屏幕一直停在「设备初始化 / 自检未通过」界面时，bootloader 会常驻并打开 USB CDC。此时用本上位机连接：
+
+- 连接后自动切到「固件升级」页，按钮显示为「写入并安装」，参数配置页不可用（bootloader 没有参数与蓝牙）；
+- 「写入并安装」会把镜像打包成 `FW.BIN` 传到 `0:/ota/FW.BIN`，再发 `OTA_APPLY` 让设备立刻搬运安装，
+  装上以后重启就进主程序——新板子首次安装和刷砖恢复都走这一条路，**不再需要手工传文件**；
+- 「文件管理」页照常可用，可以往设备上传字库、图片等文件；
+- 维护模式只走 USB（bootloader 不初始化蓝牙）。
+
 外部 Flash 上的 OTA 文件：`0:/ota/FW.BIN`（待安装包，装完由 bootloader 删除）、`PREV.BIN`（上一版本快照）、
 `BOOTOK.BIN`（启动成功标记）、`REQ.BIN`（应用写给 bootloader 的请求，含令牌防止重复执行）。
 
 注意事项：
 
 - 升级期间不要断电；上传中断只会留下不完整的 `FW.BIN`，没有 `REQ.BIN` 的设备照常启动旧固件；
-- 内部 Flash 分区：`0x08000000`+16KB = bootloader，`0x08004000`+16KB = OTA 状态记录，`0x08008000`+480KB = 应用；
+- 内部 Flash 分区：`0x08000000`+48KB = bootloader，`0x0800C000`+16KB = OTA 状态记录，`0x08010000`+448KB = 应用；
 - 首次使用需要先用 ST-Link 把 `build/Release/Bootloader/XM_Power_Kit_Boot.hex` 烧到 `0x08000000`（只需一次）；
-- bootloader 屏幕界面用的字库是 `0:/font/boot.bin`，由 `python tools/gen_boot_font.py` 生成，
-  首次也要通过文件管理页上传到设备的 `/font` 目录（缺字库时界面降级成进度条+色块，但不影响升级）。
+  之后新板子直接上电即可，bootloader 会现场格式化外部 Flash、建目录、写字库与参数文件，然后停在维护界面等上位机装固件；
+- bootloader 界面字库已编译进固件（`Bootloader/boot_font.bin` → `.rodata`），不依赖外部文件；
+  外部 `0:/font/bootloader/boot.bin` 存在时优先用它，方便换字体。
 
 ### 蓝牙
 
@@ -96,7 +109,7 @@ A5 5A | LEN_L LEN_H | CMD | SEQ | DATA[LEN] | CRC_L CRC_H
 
 | CMD | 名称 | 请求 | 应答 |
 | --- | --- | --- | --- |
-| 0x01 | SYS_INFO | — | proto, 固件版本串, 参数个数, 参数字节数, 特性位, 蓝牙波特率, 总容量, 剩余容量 |
+| 0x01 | SYS_INFO | — | proto, 固件版本串, 参数个数, 参数字节数, 特性位（bit0 USB / bit1 蓝牙 / bit2 文件 / bit3 OTA / bit4 维护模式）, 蓝牙波特率, 总容量, 剩余容量 |
 | 0x02 | SYS_REBOOT | — | — |
 | 0x03 | SYS_BT_BAUD | u32 波特率 | — |
 | 0x10 | PARAM_GET | u8 kind（0 当前 / 1 默认） | 224 字节参数 |
@@ -116,6 +129,7 @@ A5 5A | LEN_L LEN_H | CMD | SEQ | DATA[LEN] | CRC_L CRC_H
 | 0x33 | OTA_COMMIT | — | —（设备随后重启） |
 | 0x34 | OTA_ABORT | — | — |
 | 0x35 | OTA_ROLLBACK | — | —（设备随后重启） |
+| 0x36 | OTA_APPLY | — | —（维护模式：把 `/ota/FW.BIN` 立刻写进内部 Flash，设备随后重启） |
 
 状态码：0 成功、1 参数错误、2 文件系统错误（附带 FRESULT）、3 不存在、4 数据过长、5 忙、6 不支持、7 校验失败。
 

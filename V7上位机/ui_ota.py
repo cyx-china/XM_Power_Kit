@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""固件升级页：选择 .bin / .xmkota，校验后经串口写入设备外部 Flash，再交给 bootloader 安装。
+"""固件升级页：选择 .bin，校验后写入设备并安装。
 
-流程：
-    选择文件 → 本地校验（大小/CRC/版本） → 开始升级
-        → OTA_BEGIN 写包头 → OTA_DATA 分块传镜像 → OTA_COMMIT
-        → 设备生成回滚快照、写升级请求、自动重启
-        → bootloader 校验搬运、点亮屏幕显示进度、跳转新固件
+两种模式（连接后按设备特性位自动切换）：
+    正常运行（主程序）：OTA_BEGIN 写包头 → OTA_DATA 分块传镜像 → OTA_COMMIT
+        → 设备生成回滚快照、写升级请求、自动重启 → bootloader 搬运安装
+    维护模式（bootloader 常驻）：上传打包好的 FW.BIN → OTA_APPLY
+        → bootloader 立刻搬运安装，适合新板子/固件无法启动时救砖
 """
 from __future__ import annotations
 
@@ -40,6 +40,7 @@ class OtaView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pkg = None
+        self._maint = False
         self._build()
 
     # ------------------------------------------------------------ 界面
@@ -57,16 +58,14 @@ class OtaView(QWidget):
         self.file_edit.setReadOnly(True)
         self.file_edit.setPlaceholderText("选择编译输出的 XM_Power_Kit.bin（或已打包的 .xmkota）")
         self.btn_browse = QPushButton("选择文件")
-        self.btn_export = QPushButton("导出升级包…")
         pg.addWidget(QLabel("文件"), 0, 0)
         pg.addWidget(self.file_edit, 0, 1)
         pg.addWidget(self.btn_browse, 0, 2)
-        pg.addWidget(self.btn_export, 0, 3)
 
         self.version_edit = QLineEdit()
         self.version_edit.setPlaceholderText("从镜像里自动识别，识别不到请手动填写")
         pg.addWidget(QLabel("版本"), 1, 0)
-        pg.addWidget(self.version_edit, 1, 1, 1, 3)
+        pg.addWidget(self.version_edit, 1, 1, 1, 2)
 
         mono = QFont("Consolas")
         mono.setStyleHint(QFont.Monospace)
@@ -81,6 +80,7 @@ class OtaView(QWidget):
 
         # ---- 设备状态 ----
         dev_box = QGroupBox("设备状态")
+        self.dev_box = dev_box
         dg = QGridLayout(dev_box)
         dg.setColumnStretch(1, 1)
         self.labels = {}
@@ -124,13 +124,12 @@ class OtaView(QWidget):
         self.log.setPlaceholderText("升级过程日志")
         root.addWidget(self.log, 1)
 
-        tip = QLabel("升级期间请勿断电。设备会自动重启并进入 bootloader，屏幕会显示安装进度，"
-                     "完成后自动跳转到新固件。")
-        tip.setStyleSheet("color:#a6adc8;")
-        root.addWidget(tip)
+        self.tip = QLabel("升级期间请勿断电。设备会自动重启并进入 bootloader，屏幕会显示安装进度，"
+                          "完成后自动跳转到新固件。")
+        self.tip.setStyleSheet("color:#a6adc8;")
+        root.addWidget(self.tip)
 
         self.btn_browse.clicked.connect(self._browse)
-        self.btn_export.clicked.connect(self._export)
         self.btn_upgrade.clicked.connect(self._upgrade)
         self.btn_rollback.clicked.connect(self._rollback)
         self.btn_refresh.clicked.connect(self.request_info.emit)
@@ -157,29 +156,6 @@ class OtaView(QWidget):
         if not ota.sniff_version(pkg["image"]):
             self.append_log("提示：镜像里没找到版本串，请确认「版本」填写正确（用于启动确认比对）")
 
-    def _export(self) -> None:
-        """把当前镜像打包成 80 字节头的 .xmkota，供「文件管理」直接上传成 /ota/FW.BIN"""
-        if self._pkg is None:
-            QMessageBox.information(self, "提示", "请先选择固件文件")
-            return
-        version = self.version_edit.text().strip()
-        default = os.path.join(os.path.dirname(self.file_edit.text()) or ".", "FW.BIN")
-        path, _ = QFileDialog.getSaveFileName(self, "导出升级包", default,
-                                              "升级包 (*.xmkota *.bin)")
-        if not path:
-            return
-        try:
-            pkg = ota.write_package(self.file_edit.text(), path, version)
-        except Exception as exc:                       # noqa: BLE001
-            QMessageBox.warning(self, "导出失败", str(exc))
-            return
-        self.append_log("已导出升级包 %s（版本 %s，%d 字节）"
-                        % (path, pkg["version"], pkg["size"]))
-        QMessageBox.information(
-            self, "已导出",
-            "升级包已保存到：\n%s\n\n"
-            "首次安装 bootloader 时，用它到「文件管理」里上传成 /ota/FW.BIN。" % path)
-
     def _upgrade(self) -> None:
         if self._pkg is None:
             QMessageBox.information(self, "提示", "请先选择固件文件")
@@ -191,10 +167,14 @@ class OtaView(QWidget):
         except Exception as exc:                       # noqa: BLE001
             QMessageBox.warning(self, "版本有误", str(exc))
             return
-        if QMessageBox.question(
-                self, "确认升级",
-                "把固件 %s（%s）写入设备并重启安装？\n\n升级期间请勿断电。"
-                % (version, fmt_size(pkg["size"]))) != QMessageBox.Yes:
+        if self._maint:
+            hint = ("设备当前处于维护模式（bootloader）。\n\n"
+                    "把固件 %s（%s）上传到设备并立刻写入内部 Flash？\n\n"
+                    "写入期间请勿断电。" % (version, fmt_size(pkg["size"])))
+        else:
+            hint = ("把固件 %s（%s）写入设备并重启安装？\n\n升级期间请勿断电。"
+                    % (version, fmt_size(pkg["size"])))
+        if QMessageBox.question(self, "确认升级", hint) != QMessageBox.Yes:
             return
         self.append_log("开始升级：%s，%s" % (version, fmt_size(pkg["size"])))
         self.request_upgrade.emit(head, self.file_edit.text())
@@ -207,6 +187,23 @@ class OtaView(QWidget):
             return
         self.append_log("请求回滚到上一版本…")
         self.request_rollback.emit()
+
+    # ------------------------------------------------------------ 模式
+    def set_mode(self, maint: bool) -> None:
+        """维护模式（boot 常驻）下只能“写入并安装”，没有回滚与升级状态"""
+        self._maint = maint
+        self.btn_upgrade.setText("写入并安装" if maint else "开始升级")
+        self.btn_rollback.setVisible(not maint)
+        self.dev_box.setTitle("设备状态（维护模式不提供升级状态）" if maint else "设备状态")
+        if maint:
+            for v in self.labels.values():
+                v.setText("—")
+        self.tip.setText(
+            "设备停在 bootloader 维护模式：固件会直接写入内部 Flash 并重启，"
+            "适合新板子首次安装或固件无法启动时恢复。升级期间请勿断电。"
+            if maint else
+            "升级期间请勿断电。设备会自动重启并进入 bootloader，屏幕会显示安装进度，"
+            "完成后自动跳转到新固件。")
 
     # ------------------------------------------------------------ 状态更新
     def set_info(self, info: dict) -> None:
@@ -225,7 +222,7 @@ class OtaView(QWidget):
         self.labels["state"].setText(state)
         fail = info.get("fail_count", 0)
         self.labels["fail"].setText(str(fail) + ("（连续 3 次将自动回滚）" if fail else ""))
-        self.btn_rollback.setEnabled(bool(info.get("has_prev")))
+        self.btn_rollback.setEnabled(bool(info.get("has_prev")) and not self._maint)
 
     def set_progress(self, done: int, total: int) -> None:
         self.progress.setVisible(True)
@@ -247,12 +244,12 @@ class OtaView(QWidget):
 
     def set_busy(self, busy: bool) -> None:
         for b in (self.btn_upgrade, self.btn_rollback, self.btn_refresh,
-                  self.btn_browse, self.btn_export):
+                  self.btn_browse):
             b.setEnabled(not busy)
 
     def set_connected(self, ok: bool) -> None:
         for b in (self.btn_upgrade, self.btn_rollback, self.btn_refresh,
-                  self.btn_browse, self.btn_export):
+                  self.btn_browse):
             b.setEnabled(ok)
         self.btn_upgrade.setEnabled(ok and self._pkg is not None)
         if not ok:

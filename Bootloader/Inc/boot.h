@@ -205,6 +205,8 @@ extern const char Boot_Txt_Stay[];
 extern const char Boot_Txt_StayHint[];
 extern const char Boot_Txt_JumpIn[];
 extern const char Boot_Txt_Entering[];
+extern const char Boot_Txt_UsbWait[];
+extern const char Boot_Txt_UsbOk[];
 
 void     Boot_Ui_Screen(const char *title, const char *footer, bool with_bar);
 void     Boot_Ui_ClearLine(uint16_t y);
@@ -243,8 +245,16 @@ extern boot_item_t g_boot_items[BOOT_ITEM_NUM];
 
 void     Boot_Item_Set(uint8_t index, uint8_t state, const char *value);
 void     Boot_SelfTest_Begin(void);
+void     Boot_SelfTest_Paint(void);   /* 把记录下来的自检结果一次画到屏幕上 */
 bool     Boot_SelfTest_Run(bool fs_ok, bool did_format, uint8_t prov_flags);
 bool     Boot_SelfTest_AllOk(void);
+
+/* ============================ USB CDC 维护模式 ============================ */
+bool     Boot_Usb_Init(void);
+bool     Boot_Usb_Configured(void);
+uint16_t Boot_Usb_Read(uint8_t *out, uint16_t max);
+bool     Boot_Usb_Send(const uint8_t *data, uint16_t len);
+void     Boot_Proto_Poll(void);
 
 /* ============================ I2C 自检（只探测器件是否应答） ============================ */
 bool     Boot_I2c_Init(void);

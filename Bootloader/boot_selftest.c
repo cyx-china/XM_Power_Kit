@@ -67,14 +67,9 @@ void Boot_Item_Set(uint8_t index, uint8_t state, const char *value)
         return;
     }
 
+    /* 只记录，不画屏：正常启动时全程不出图，出问题时由 Boot_SelfTest_Paint() 一次画全 */
     g_boot_items[index].state = state;
     text_copy(g_boot_items[index].value, (value != NULL) ? value : "");
-
-    /* 已经切到升级界面时不要再往屏幕上画自检行（会和进度条/状态行打架） */
-    if (!Boot_Ui_HasBar())
-    {
-        Boot_Ui_Item(index, g_boot_items[index].label, g_boot_items[index].value, state);
-    }
 }
 
 void Boot_SelfTest_Begin(void)
@@ -82,6 +77,14 @@ void Boot_SelfTest_Begin(void)
     for (uint8_t i = 0U; i < BOOT_ITEM_NUM; i++)
     {
         Boot_Item_Set(i, BOOT_ITEM_PENDING, "");
+    }
+}
+
+void Boot_SelfTest_Paint(void)
+{
+    for (uint8_t i = 0U; i < BOOT_ITEM_NUM; i++)
+    {
+        Boot_Ui_Item(i, g_boot_items[i].label, g_boot_items[i].value, g_boot_items[i].state);
     }
 }
 

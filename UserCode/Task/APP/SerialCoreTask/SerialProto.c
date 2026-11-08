@@ -16,8 +16,14 @@
 
 #include <string.h>
 
+#ifdef BOOTLOADER
+/* bootloader 单线程：组好的帧直接回调处理，不需要队列 */
+#include "boot.h"
+extern void Boot_Proto_OnFrame(const ProtoFrame_t *frame);
+#else
 #include "cmsis_os2.h"
 #include "os_handles.h"
+#endif
 
 /* ============================ CRC16-CCITT-FALSE ============================ */
 static const uint16_t s_crc_table[256] = {
@@ -154,8 +160,12 @@ void SerialProto_Feed(LinkId_t link, const uint8_t *data, uint32_t len) {
             continue;
         }
 
+#ifdef BOOTLOADER
+        static ProtoFrame_t frame;              /* bootloader 栈很小，放静态区 */
+#else
         /* 5. 投递到命令队列（中断安全，超时必须为 0） */
         ProtoFrame_t frame;
+#endif
         frame.link = (uint8_t)link;
         frame.cmd  = a->buf[4];
         frame.seq  = a->buf[5];
@@ -163,7 +173,11 @@ void SerialProto_Feed(LinkId_t link, const uint8_t *data, uint32_t len) {
         if (payload_len > 0U) {
             memcpy(frame.data, &a->buf[PROTO_HDR_SIZE], (size_t)payload_len);
         }
+#ifdef BOOTLOADER
+        Boot_Proto_OnFrame(&frame);
+#else
         (void)osMessageQueuePut(SerialReqQueueHandle, &frame, 0U, 0U);
+#endif
 
         /* 6. 移除已处理的帧 */
         a->len = (uint16_t)(a->len - total);
@@ -195,5 +209,12 @@ void SerialProto_Send(LinkId_t link, uint8_t cmd, uint8_t seq,
     uint16_t crc = proto_crc16(&s_tx[2], (uint32_t)len + 4U);
     (void)ser_put_u16(&s_tx[PROTO_HDR_SIZE + len], crc);
 
+#ifdef BOOTLOADER
+    if (link == LINK_USB)
+    {
+        (void)Boot_Usb_Send(s_tx, (uint16_t)(len + PROTO_HDR_SIZE + PROTO_CRC_SIZE));
+    }
+#else
     (void)SerialLink_Send(link, s_tx, (uint16_t)(len + PROTO_HDR_SIZE + PROTO_CRC_SIZE));
+#endif
 }

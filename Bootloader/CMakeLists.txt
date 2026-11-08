@@ -50,6 +50,19 @@ add_executable(${BOOT_NAME}
 
         ${PROJ_DIR}/FATFS/ff.c
         ${PROJ_DIR}/FATFS/ffunicode.c
+
+        # USB CDC 维护模式：复用工程里已有的 USB Device 库与协议/文件服务
+        ${PROJ_DIR}/USB_DEVICE/App/usbd_desc.c
+        ${PROJ_DIR}/USB_DEVICE/Target/usbd_conf.c
+        ${PROJ_DIR}/Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_core.c
+        ${PROJ_DIR}/Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ctlreq.c
+        ${PROJ_DIR}/Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ioreq.c
+        ${PROJ_DIR}/Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c
+        ${HAL_DIR}/stm32f4xx_hal_pcd.c
+        ${HAL_DIR}/stm32f4xx_hal_pcd_ex.c
+        ${HAL_DIR}/stm32f4xx_ll_usb.c
+        ${PROJ_DIR}/UserCode/Task/APP/SerialCoreTask/SerialProto.c
+        ${PROJ_DIR}/UserCode/Task/APP/SerialCoreTask/FileService.c
 )
 
 target_include_directories(${BOOT_NAME} PRIVATE
@@ -59,6 +72,12 @@ target_include_directories(${BOOT_NAME} PRIVATE
         ${PROJ_DIR}/Drivers/CMSIS/Device/ST/STM32F4xx/Include
         ${PROJ_DIR}/Drivers/CMSIS/Include
         ${PROJ_DIR}/FATFS
+        ${PROJ_DIR}/USB_DEVICE/App
+        ${PROJ_DIR}/USB_DEVICE/Target
+        ${PROJ_DIR}/Middlewares/ST/STM32_USB_Device_Library/Core/Inc
+        ${PROJ_DIR}/Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc
+        ${PROJ_DIR}/UserCode/Task/APP/SerialCoreTask
+        ${PROJ_DIR}/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
 )
 
 target_compile_definitions(${BOOT_NAME} PRIVATE

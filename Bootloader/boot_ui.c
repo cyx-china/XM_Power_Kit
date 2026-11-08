@@ -77,6 +77,8 @@ const char Boot_Txt_Stay[]       = "已停留维护界面";
 const char Boot_Txt_StayHint[]   = "请用上位机或 ST-Link 处理";
 const char Boot_Txt_JumpIn[]     = "秒后进入系统，按键停留";
 const char Boot_Txt_Entering[]   = "正在进入系统";
+const char Boot_Txt_UsbWait[]    = "维护模式：请连接上位机 USB";
+const char Boot_Txt_UsbOk[]      = "上位机已连接，可升级或传文件";
 
 static uint16_t s_last_percent = 0xFFFFU;
 static uint16_t s_status_y     = ROW_STATUS_OTA;

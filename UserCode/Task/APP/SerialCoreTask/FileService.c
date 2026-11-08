@@ -23,9 +23,14 @@
 
 #include <string.h>
 
-#include "cmsis_os2.h"
 #include "ff.h"
+
+#ifdef BOOTLOADER
+#include "boot.h"
+#else
+#include "cmsis_os2.h"
 #include "graphics.h"
+#endif
 
 #define FS_PATH_MAX     128U
 #define FS_RSP_MAX      (PROTO_MAX_PAYLOAD - 1U)     // 应答里还要放 1 字节状态码
@@ -93,6 +98,9 @@ static uint8_t fs_map_result(FRESULT fr) {
 
 /* 请求图形层关闭常驻文件并清空字模缓存，避免覆盖/删除文件时被占用 */
 void FileService_InvalidateGfx(void) {
+#ifdef BOOTLOADER
+    /* bootloader 没有图形层缓存，什么也不用做 */
+#else
     GFX_RequestCacheInvalidate();
     uint32_t t0 = osKernelGetTickCount();
     while (!GFX_CacheInvalidateDone()) {
@@ -101,6 +109,7 @@ void FileService_InvalidateGfx(void) {
         }
         osDelay(2U);
     }
+#endif
 }
 
 bool FileService_GetCapacity(uint32_t *total_kb, uint32_t *free_kb) {

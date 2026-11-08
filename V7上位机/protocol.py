@@ -19,6 +19,14 @@ import zlib
 SOF0 = 0xA5
 SOF1 = 0x5A
 PROTO_VER = 2
+
+# SYS_INFO 里的特性位（与 SerialCoreTask.c 一致）
+FEATURE_USB = 0x0001
+FEATURE_BT = 0x0002
+FEATURE_FS = 0x0004
+FEATURE_OTA = 0x0008
+FEATURE_MAINT = 0x0010      # 处于 bootloader 维护模式：无参数、无蓝牙
+
 HDR_SIZE = 6
 MAX_PAYLOAD = 512
 FS_CHUNK = 432          # 单次文件读写数据量（固件 FS_CHUNK_MAX）
@@ -61,6 +69,7 @@ CMD_OTA_DATA = 0x32
 CMD_OTA_COMMIT = 0x33
 CMD_OTA_ABORT = 0x34
 CMD_OTA_ROLLBACK = 0x35
+CMD_OTA_APPLY = 0x36    # 维护模式：把 /ota/FW.BIN 写进内部 Flash 并重启
 
 CMD_NAMES = {
     CMD_SYS_INFO: "SYS_INFO",
@@ -83,6 +92,7 @@ CMD_NAMES = {
     CMD_OTA_COMMIT: "OTA_COMMIT",
     CMD_OTA_ABORT: "OTA_ABORT",
     CMD_OTA_ROLLBACK: "OTA_ROLLBACK",
+    CMD_OTA_APPLY: "OTA_APPLY",
 }
 
 # ---------------------------------------------------------------- 状态码
