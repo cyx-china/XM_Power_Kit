@@ -79,7 +79,7 @@ class FileBrowser(QWidget):
         self.table.setHorizontalHeaderLabels(["名称", "大小", "类型"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         hdr = self.table.horizontalHeader()
@@ -181,6 +181,11 @@ class FileBrowser(QWidget):
             return self._entries[row]
         return None
 
+    def selected_entries(self):
+        """当前选中的条目（支持 Ctrl/Shift 多选），按列表顺序返回"""
+        rows = sorted({idx.row() for idx in self.table.selectionModel().selectedRows()})
+        return [self._entries[r] for r in rows if 0 <= r < len(self._entries)]
+
     def set_connected(self, ok: bool) -> None:
         for b in (self.btn_up, self.btn_refresh, self.btn_upload, self.btn_download,
                   self.btn_mkdir, self.btn_rename, self.btn_delete):
@@ -215,17 +220,27 @@ class FileBrowser(QWidget):
             self.request_upload.emit(p, join_path(self.cwd, name))
 
     def _download(self) -> None:
-        e = self.current_entry()
-        if e is None:
-            QMessageBox.information(self, "提示", "请先在列表中选择一个文件")
+        picked = self.selected_entries()
+        if not picked:
+            e = self.current_entry()
+            picked = [e] if e is not None else []
+        files = [e for e in picked if not e["is_dir"]]
+        if not files:
+            QMessageBox.information(self, "提示", "请先在列表中选择要下载的文件（可按住 Ctrl/Shift 多选）")
             return
-        if e["is_dir"]:
-            QMessageBox.information(self, "提示", "暂不支持下载整个文件夹，请进入文件夹后逐个下载")
+        if len(files) == 1:
+            e = files[0]
+            path, _ = QFileDialog.getSaveFileName(self, "保存到", e["name"])
+            if not path:
+                return
+            self.request_download.emit(join_path(self.cwd, e["name"]), path, e["size"])
             return
-        path, _ = QFileDialog.getSaveFileName(self, "保存到", e["name"])
-        if not path:
+        folder = QFileDialog.getExistingDirectory(self, "选择保存文件夹（下载 %d 个文件）" % len(files))
+        if not folder:
             return
-        self.request_download.emit(join_path(self.cwd, e["name"]), path, e["size"])
+        for e in files:
+            self.request_download.emit(join_path(self.cwd, e["name"]),
+                                       os.path.join(folder, e["name"]), e["size"])
 
     def _mkdir(self) -> None:
         name, ok = QInputDialog.getText(self, "新建文件夹", "文件夹名称：")
