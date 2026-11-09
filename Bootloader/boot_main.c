@@ -295,6 +295,22 @@ int main(void)
     Stay_Forever();
 #endif
 
+    /* ---------------- 上电按住任意键：跳过系统，直接停在维护模式 ----------------
+       应用起不来（白屏/黑屏）时，也能用 USB 传文件、补字库或重装固件。 */
+    if (Boot_Key_Pressed())
+    {
+        HAL_Delay(30U);                 /* 去抖：确实按住才认 */
+
+        if (Boot_Key_Pressed())
+        {
+            Ui_Show();
+            Boot_SelfTest_Paint();
+            Boot_Ui_Status(Boot_Txt_KeyHold, true);
+            Boot_Ui_Hint(Boot_Txt_StayHint, false);
+            Stay_Forever();
+        }
+    }
+
     /* ---------------- OTA：升级 / 回滚 / 首次安装 ---------------- */
     g_boot_stage = 6U;
     if (fs_ok)

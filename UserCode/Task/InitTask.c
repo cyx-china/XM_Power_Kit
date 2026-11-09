@@ -198,7 +198,13 @@ static bool Sys_Init(void) {
   }
 
   // 设置屏幕亮度（按 TIM1 实际 ARR 换算，见 SwitchManager.c）
-  PWM_SetBrightness((uint8_t)UserParam.Screen_Brightness);
+  // 参数文件被写坏/清零时亮度会是 0，看起来就像"白屏/黑屏"，这里兜底到默认值
+  uint8_t brightness = (uint8_t)UserParam.Screen_Brightness;
+
+  if ((brightness < 10U) || (brightness > 100U)) {
+    brightness = 100U;
+  }
+  PWM_SetBrightness(brightness);
 
   // 设置睡眠时间
   SleepCounter = UserParam.Screen_Sleeptime;

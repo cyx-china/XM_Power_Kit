@@ -237,7 +237,10 @@ void Ota_BootConfirm(void) {
     if (write_bootok(SYS_VERSION_CODE)) {
         /* BOOTOK.BIN 要留给 bootloader 读（它确认后自己删），这里不能删 */
         (void)f_unlink(OTA_FILE_REQ);
-        UserParam_SaveAllValues();             /* 让参数与镜像保持一致 */
+        /* 注意：这里绝对不能调用 UserParam_SaveAllValues()。
+           本函数在 Sys_Init() 里跑在 UserParam_LoadAllValues() 之前，
+           此时 UserParam 还是全 0，保存会把 uparam.bin 整片清零
+           （表现为亮度 0、校准全废，开机像白屏/黑屏）。 */
     }
 }
 

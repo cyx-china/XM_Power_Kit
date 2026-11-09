@@ -80,6 +80,7 @@ const char Boot_Txt_Entering[]   = "正在进入系统";
 const char Boot_Txt_UsbWait[]    = "维护模式：请连接上位机 USB";
 const char Boot_Txt_UsbOk[]      = "上位机已连接，可升级或传文件";
 const char Boot_Txt_ForceHint[]  = "一次性工具：格式化后请烧回正式固件";
+const char Boot_Txt_KeyHold[]    = "按住按键：已停在维护模式";
 
 static uint16_t s_last_percent = 0xFFFFU;
 static uint16_t s_status_y     = ROW_STATUS_OTA;

@@ -251,6 +251,7 @@ extern const char Boot_Txt_Entering[];
 extern const char Boot_Txt_UsbWait[];
 extern const char Boot_Txt_UsbOk[];
 extern const char Boot_Txt_ForceHint[];
+extern const char Boot_Txt_KeyHold[];
 
 void     Boot_Ui_Screen(const char *title, const char *footer, bool with_bar);
 void     Boot_Ui_ClearLine(uint16_t y);
