@@ -90,7 +90,8 @@ static void read_record(ota_record_t *rec) {
 
     *rec = *flash;
     if (rec->magic != OTA_REC_MAGIC ||
-        rec->crc != crc_update(0xFFFFFFFFU, rec, (uint32_t)offsetof(ota_record_t, crc))) {
+        ((rec->crc != crc_update(0U, rec, (uint32_t)offsetof(ota_record_t, crc))) &&
+         (rec->crc != crc_update(0xFFFFFFFFU, rec, (uint32_t)offsetof(ota_record_t, crc))))) {
         memset(rec, 0, sizeof(*rec));
     }
 }
@@ -138,7 +139,7 @@ static bool write_bootok(const char *version) {
     ok.magic = 0x314B4F42U;                 /* 'BOK1' */
     strncpy(ok.version, version, sizeof(ok.version) - 1U);
     ok.token = next_token() - 1U;
-    ok.crc   = crc_update(0xFFFFFFFFU, &ok, 40U);
+    ok.crc   = crc_update(0U, &ok, 40U);
 
     (void)f_mkdir(OTA_DIR);
     if (f_open(&file, OTA_FILE_BOOTOK, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) {
@@ -162,7 +163,7 @@ static bool write_req(uint16_t op) {
 
     req.token = next_token();
     req.op    = op;
-    req.crc   = (uint16_t)(crc_update(0xFFFFFFFFU, &req, 6U) & 0xFFFFU);
+    req.crc   = (uint16_t)(crc_update(0U, &req, 6U) & 0xFFFFU);
 
     (void)f_mkdir(OTA_DIR);
     if (f_open(&file, OTA_FILE_REQ, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) {
@@ -184,10 +185,10 @@ static bool snapshot_current(void) {
     memcpy(head.magic, OTA_MAGIC, 8U);
     strncpy(head.version, SYS_VERSION_CODE, sizeof(head.version) - 1U);
     head.image_size = size;
-    head.image_crc  = crc_update(0xFFFFFFFFU, (const void *)OTA_APP_ADDR, size);
+    head.image_crc  = crc_update(0U, (const void *)OTA_APP_ADDR, size);
     head.load_addr  = OTA_APP_ADDR;
     memcpy(head.board, OTA_BOARD, strlen(OTA_BOARD));
-    head.head_crc   = crc_update(0xFFFFFFFFU, &head, 48U);
+    head.head_crc   = crc_update(0U, &head, 48U);
 
     if (f_open(&file, OTA_FILE_PREV, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) {
         return false;
@@ -286,7 +287,8 @@ static uint8_t ota_begin(const ProtoFrame_t *req, uint8_t *out, uint16_t *out_le
     if (memcmp(s_head.magic, OTA_MAGIC, 8U) != 0) {
         return ST_E_PARAM;
     }
-    if (s_head.head_crc != crc_update(0xFFFFFFFFU, &s_head, 48U)) {
+    if ((s_head.head_crc != crc_update(0U, &s_head, 48U)) &&
+        (s_head.head_crc != crc_update(0xFFFFFFFFU, &s_head, 48U))) {
         return ST_E_CRC;
     }
     if (s_head.load_addr != OTA_APP_ADDR) {
@@ -317,7 +319,7 @@ static uint8_t ota_begin(const ProtoFrame_t *req, uint8_t *out, uint16_t *out_le
 
     s_open    = true;
     s_written = 0U;
-    s_crc     = 0xFFFFFFFFU;
+    s_crc     = 0U;
 
     (void)ser_put_u32(out, 0U);
     *out_len = 4U;

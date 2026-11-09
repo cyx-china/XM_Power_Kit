@@ -156,6 +156,7 @@ uint16_t Boot_Storage_Param16(uint8_t index);
 void     Boot_Crc32_Init(void);
 uint32_t Boot_Crc32_Update(uint32_t crc, const void *buf, uint32_t len);
 uint32_t Boot_Crc32(const void *buf, uint32_t len);
+uint32_t Boot_Crc32_Legacy(const void *buf, uint32_t len);   /* 兼容早期固件的非标准初值写法 */
 
 /* ============================ 状态记录（内部 Flash sector1） ============================ */
 void     Boot_State_Load(boot_record_t *rec);

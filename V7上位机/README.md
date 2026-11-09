@@ -113,6 +113,7 @@ A5 5A | LEN_L LEN_H | CMD | SEQ | DATA[LEN] | CRC_L CRC_H
 
 - `LEN`：负载长度（0~512，小端）
 - `CRC16`：CCITT-FALSE（poly 0x1021，初值 0xFFFF），覆盖 `LEN` 到 `DATA` 末尾
+- 升级包里的 CRC32 是标准 CRC-32（多项式 0xEDB88320，初值/结果取反，与 `zlib.crc32` 相同）
 - 应答：`CMD`/`SEQ` 原样返回，`DATA[0]` 为状态码（0 = 成功），`DATA[1..]` 为数据
 
 | CMD | 名称 | 请求 | 应答 |

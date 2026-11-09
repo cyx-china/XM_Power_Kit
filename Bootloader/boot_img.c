@@ -104,7 +104,8 @@ bool Boot_Pkg_Load(const char *path, boot_pkg_info_t *info)
 {
     FIL     file;
     UINT    read = 0U;
-    uint32_t crc = 0xFFFFFFFFU;
+    uint32_t crc = 0U;                  /* 标准 CRC32（与上位机 zlib 一致） */
+    uint32_t crc_old = 0xFFFFFFFFU;     /* 早期固件写法，兼容旧包 */
     uint32_t left;
     boot_pkg_head_t head;
     ver_scan_t scan;
@@ -139,7 +140,8 @@ bool Boot_Pkg_Load(const char *path, boot_pkg_info_t *info)
         {
             info->reason = BOOT_PKG_E_HEAD;
 
-            if ((head.head_crc != Boot_Crc32(&head, 48U)) ||
+            if (((head.head_crc != Boot_Crc32(&head, 48U)) &&
+                 (head.head_crc != Boot_Crc32_Legacy(&head, 48U))) ||
                 (head.load_addr != BOOT_APP_ADDR) ||
                 (head.image_size == 0U) ||
                 (head.image_size > BOOT_APP_SIZE) ||
@@ -197,7 +199,8 @@ bool Boot_Pkg_Load(const char *path, boot_pkg_info_t *info)
             info->reason = BOOT_PKG_E_READ;
             return false;
         }
-        crc = Boot_Crc32_Update(crc, s_buf, want);
+        crc     = Boot_Crc32_Update(crc, s_buf, want);
+        crc_old = Boot_Crc32_Update(crc_old, s_buf, want);
         if (!has_head)
         {
             ver_feed(&scan, s_buf, want);
@@ -219,7 +222,7 @@ bool Boot_Pkg_Load(const char *path, boot_pkg_info_t *info)
         return true;
     }
 
-    if (info->got_crc != info->want_crc)
+    if ((info->got_crc != info->want_crc) && (crc_old != info->want_crc))
     {
         info->reason = BOOT_PKG_E_CRC;
         return false;
@@ -331,12 +334,14 @@ bool Boot_Pkg_Flash(const char *path, const boot_pkg_info_t *info, boot_progress
         progress(2U, 0U);
     }
 
-    uint32_t crc = 0xFFFFFFFFU;
+    uint32_t crc = 0U;
+    uint32_t crc_old = 0xFFFFFFFFU;
     for (uint32_t a = BOOT_APP_ADDR; a < end; a += CHUNK_SIZE)
     {
         uint32_t n = ((end - a) > CHUNK_SIZE) ? CHUNK_SIZE : (end - a);
 
-        crc = Boot_Crc32_Update(crc, (const void *)a, n);
+        crc     = Boot_Crc32_Update(crc, (const void *)a, n);
+        crc_old = Boot_Crc32_Update(crc_old, (const void *)a, n);
         if (progress != NULL)
         {
             progress(2U, (uint16_t)(((a - BOOT_APP_ADDR) * 100U) / info->image_size));
@@ -348,7 +353,7 @@ bool Boot_Pkg_Flash(const char *path, const boot_pkg_info_t *info, boot_progress
         progress(2U, 100U);
     }
 
-    return crc == info->want_crc;
+    return (crc == info->want_crc) || (crc_old == info->want_crc);
 }
 
 /* ---------------------------- 找待安装的包 ---------------------------- */

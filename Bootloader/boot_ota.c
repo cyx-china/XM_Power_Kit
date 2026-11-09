@@ -27,7 +27,8 @@ static bool read_req(boot_req_t *req)
     }
     (void)f_close(&file);
 
-    return req->crc == (uint16_t)(Boot_Crc32(req, 6U) & 0xFFFFU);
+    return (req->crc == (uint16_t)(Boot_Crc32(req, 6U) & 0xFFFFU)) ||
+           (req->crc == (uint16_t)(Boot_Crc32_Legacy(req, 6U) & 0xFFFFU));
 }
 
 static bool read_bootok(boot_bootok_t *ok)
@@ -48,7 +49,7 @@ static bool read_bootok(boot_bootok_t *ok)
     (void)f_close(&file);
 
     return ok->magic == BOOT_BOOTOK_MAGIC &&
-           ok->crc == Boot_Crc32(ok, 40U);
+           ((ok->crc == Boot_Crc32(ok, 40U)) || (ok->crc == Boot_Crc32_Legacy(ok, 40U)));
 }
 
 /* 进度：擦除 0~30%，写入 30~90%，回读校验 90~100% */

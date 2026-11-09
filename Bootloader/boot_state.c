@@ -38,7 +38,8 @@ bool Boot_IntFlash_EraseSector(uint32_t sector)
 
 static uint32_t record_crc(const boot_record_t *rec)
 {
-    return Boot_Crc32(rec, (uint32_t)offsetof(boot_record_t, crc));
+    return (Boot_Crc32(rec, (uint32_t)offsetof(boot_record_t, crc)) == rec->crc) ||
+           (Boot_Crc32_Legacy(rec, (uint32_t)offsetof(boot_record_t, crc)) == rec->crc);
 }
 
 void Boot_State_Load(boot_record_t *rec)

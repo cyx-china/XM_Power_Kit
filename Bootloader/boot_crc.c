@@ -1,7 +1,8 @@
 /**
  ******************************************************************************
  * @file    boot_crc.c
- * @brief   与上位机 / 应用侧完全一致的 CRC32（多项式 0xEDB88320，初值 0xFFFFFFFF）
+ * @brief   与上位机 / 应用侧完全一致的 CRC32/ISO-HDLC（多项式 0xEDB88320；
+ *          内部寄存器初值 0xFFFFFFFF、结果取反 —— 与 zlib.crc32 / 常见工具的 CRC32 相同）
  ******************************************************************************
  */
 #include "boot.h"
@@ -42,5 +43,13 @@ uint32_t Boot_Crc32_Update(uint32_t crc, const void *buf, uint32_t len)
 
 uint32_t Boot_Crc32(const void *buf, uint32_t len)
 {
+    /* 首次调用必须传 0（Update 内部先取反得到寄存器初值 0xFFFFFFFF） */
+    return Boot_Crc32_Update(0U, buf, len);
+}
+
+uint32_t Boot_Crc32_Legacy(const void *buf, uint32_t len)
+{
+    /* 早期固件把首次初值传成了 0xFFFFFFFF（内部寄存器实际从 0 开始），
+       结果与标准值不同。这里保留同样的算法，用于兼容那时写下的升级包与记录。 */
     return Boot_Crc32_Update(0xFFFFFFFFU, buf, len);
 }
