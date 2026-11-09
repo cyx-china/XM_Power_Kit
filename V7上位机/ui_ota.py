@@ -147,6 +147,7 @@ class OtaView(QWidget):
             QMessageBox.warning(self, "文件有误", str(exc))
             return
         self._pkg = pkg
+        self.btn_upgrade.setEnabled(True)      # 选好文件后按钮要能点（以前要断线重连才行）
         self.file_edit.setText(path)
         self.version_edit.setText(pkg["version"])
         self.size_label.setText("%s（%d 字节）" % (fmt_size(pkg["size"]), pkg["size"]))
@@ -157,16 +158,22 @@ class OtaView(QWidget):
             self.append_log("提示：镜像里没找到版本串，请确认「版本」填写正确（用于启动确认比对）")
 
     def _upgrade(self) -> None:
-        if self._pkg is None:
+        path = self.file_edit.text().strip()
+        if not path:
             QMessageBox.information(self, "提示", "请先选择固件文件")
             return
         version = self.version_edit.text().strip()
-        pkg = self._pkg
+        # 按“现在磁盘上的文件”重新打包：固件重新编译过也不会出现包头对不上
         try:
-            head = ota.build_head(version, pkg["size"], pkg["crc"], pkg["build_time"])
+            pkg = ota.make_package(path, version)
         except Exception as exc:                       # noqa: BLE001
-            QMessageBox.warning(self, "版本有误", str(exc))
+            QMessageBox.warning(self, "文件有误", str(exc))
             return
+        self._pkg = pkg
+        self.version_edit.setText(pkg["version"])
+        self.size_label.setText("%s（%d 字节）" % (fmt_size(pkg["size"]), pkg["size"]))
+        self.crc_label.setText("0x%08X" % pkg["crc"])
+        head = pkg["head"]
         if self._maint:
             hint = ("设备当前处于维护模式（bootloader）。\n\n"
                     "把固件 %s（%s）上传到设备并立刻写入内部 Flash？\n\n"

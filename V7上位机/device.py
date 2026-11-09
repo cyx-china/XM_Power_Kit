@@ -19,6 +19,7 @@ from protocol import (
     FEATURE_MAINT,
     FS_CHUNK, OTA_CHUNK, OTA_HEAD_SIZE, OtaResync,
     FrameParser, DeviceError, LinkError, build_frame, STATUS_TEXT,
+    ST_E_CRC, ST_E_NOTFOUND,
 )
 
 FS_ATTR_DIR = 0x10
@@ -33,6 +34,29 @@ def list_ports():
             desc = desc[:34] + "…"
         out.append((p.device, desc))
     return out
+
+
+_APPLY_REASON = {
+    1: "打不开升级包文件",
+    2: "升级包包头非法（长度/地址/机型不符）",
+    3: "升级包镜像 CRC 与包头不符",
+    4: "升级包文件比包头声明的短（上传不完整）",
+    5: "升级包文件太小",
+}
+
+
+def _apply_detail(status: int, data: bytes) -> str:
+    """解析设备对 OTA_APPLY 的失败说明"""
+    if status == ST_E_NOTFOUND:
+        return "设备 /ota 目录里没有找到升级包"
+    if status == ST_E_CRC and len(data) >= 13:
+        reason = data[0]
+        size = struct.unpack("<I", data[1:5])[0]
+        want = struct.unpack("<I", data[5:9])[0]
+        got = struct.unpack("<I", data[9:13])[0]
+        return "%s（文件 %d 字节，期望 CRC 0x%08X，实际 0x%08X）" % (
+            _APPLY_REASON.get(reason, "原因码 %d" % reason), size, want, got)
+    return ""
 
 
 class Device:
@@ -367,16 +391,41 @@ class Device:
         self.request(CMD_OTA_ROLLBACK, timeout=20.0, retries=0)
 
     def ota_apply(self) -> None:
-        """维护模式（bootloader）：把外部 Flash 里的 /ota/FW.BIN 写进内部 Flash 并重启"""
-        self.request(CMD_OTA_APPLY, timeout=120.0, retries=0)
+        """维护模式（bootloader）：把外部 Flash 里的升级包写进内部 Flash 并重启"""
+        status, data = self.request_raw(CMD_OTA_APPLY, b"", timeout=120.0)
+        if status == 0:
+            return
+        raise DeviceError(status, _apply_detail(status, data))
+
+    # ------------------------------------------------------------ 上传校验
+    def verify_remote_file(self, remote_path: str, data: bytes) -> None:
+        """上传后回读校验：长度、头 80 字节、尾 64 字节都要一致"""
+        _attr, size = self.fs_stat(remote_path)
+        if size != len(data):
+            raise LinkError("设备端文件长度 %d 字节，应为 %d 字节（写入不完整）"
+                            % (size, len(data)))
+        head_n = min(80, len(data))
+        if head_n:
+            got = self.fs_read(remote_path, 0, head_n)
+            if got != data[:head_n]:
+                raise LinkError("设备端文件开头与本地不一致（写入出错）")
+        tail_n = min(64, len(data))
+        if tail_n:
+            got = self.fs_read(remote_path, len(data) - tail_n, tail_n)
+            if got != data[-tail_n:]:
+                raise LinkError("设备端文件结尾与本地不一致（写入不完整）")
 
     def ota_maintenance_upgrade(self, head: bytes, bin_path: str,
                                 progress=None, cancel=None) -> None:
-        """维护模式一键升级：打包 → 传到 /ota/FW.BIN → 请求安装（设备总线缆上只连 USB）"""
+        """维护模式一键升级：打包 → 传到 /ota/FW.BIN → 回读校验 → 请求安装。
+        包头按“当前文件”重新算一次，避免界面上的包头和实际文件对不上。"""
         import tempfile
 
-        with open(bin_path, "rb") as f:
-            image = f.read()
+        import ota as ota_mod
+
+        pkg = ota_mod.make_package(bin_path)     # 以磁盘上的实际文件为准
+        head = pkg["head"]
+        image = pkg["image"]
         total = len(head) + len(image)
         fd, tmp = tempfile.mkstemp(suffix=".xmkota")
         os.close(fd)
@@ -396,6 +445,8 @@ class Device:
                 pass
         if progress:
             progress(total, total)
+        # 回读校验，确认设备端拿到的就是刚上传的包，再让设备搬运
+        self.verify_remote_file("/ota/FW.BIN", head + image)
         self.ota_apply()
 
     def ota_upload(self, head: bytes, bin_path: str, progress=None, cancel=None) -> None:

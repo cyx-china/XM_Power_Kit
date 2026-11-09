@@ -410,7 +410,9 @@ def main() -> int:
         head2 = OTA.build_head(pkg2["version"], pkg2["size"], pkg2["crc"], pkg2["build_time"])
         sim_maint.ota_maintenance_upgrade(head2, bin_path)
         written = bytes(sim_maint.sim.files["/ota/FW.BIN"])
-        assert written == head2 + image2, (len(written), len(head2) + len(image2))
+        # 上传后会按“当前文件”重建包头并回读校验，所以按同一套规则再算一遍比对
+        fresh = OTA.make_package(bin_path)
+        assert written == fresh["head"] + image2, (len(written), len(fresh["head"]) + len(image2))
         assert sim_maint.sim.ota_req is True
         assert bytes(sim_maint.sim.ota_image) == image2
     finally:

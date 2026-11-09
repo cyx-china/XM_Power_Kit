@@ -92,22 +92,22 @@ static void ui_progress(uint8_t stage, uint16_t percent)
 
 static bool program(const char *path, boot_record_t *rec, uint32_t token, bool require_confirm)
 {
-    boot_pkg_head_t head;
+    boot_pkg_info_t pkg;
 
     /* 从自检界面切到升级界面（进度条 + 包信息） */
     Boot_Ui_Screen(Boot_Txt_Title, Boot_Txt_Footer, true);
     Boot_Ui_Status(Boot_Txt_Verify, true);
     Boot_Ui_Progress(0U);
 
-    if (!Boot_Pkg_Load(path, &head))
+    if (!Boot_Pkg_Load(path, &pkg))
     {
         Boot_Ui_Error(Boot_Txt_BadPkg);
         return false;
     }
 
-    Boot_Ui_Package(head.version, head.image_size, head.image_crc);
+    Boot_Ui_Package(pkg.version, pkg.image_size, pkg.want_crc);
 
-    if (!Boot_Pkg_Flash(path, &head, ui_progress))
+    if (!Boot_Pkg_Flash(path, &pkg, ui_progress))
     {
         Boot_Ui_Error(Boot_Txt_WriteFail);
         return false;
@@ -115,9 +115,9 @@ static bool program(const char *path, boot_record_t *rec, uint32_t token, bool r
 
     /* 标记：新版已写入，等应用自己写 BOOTOK 确认 */
     memset(rec->version, 0, sizeof(rec->version));
-    for (uint32_t i = 0U; i < (sizeof(rec->version) - 1U) && head.version[i] != '\0'; i++)
+    for (uint32_t i = 0U; i < (sizeof(rec->version) - 1U) && pkg.version[i] != '\0'; i++)
     {
-        rec->version[i] = head.version[i];
+        rec->version[i] = pkg.version[i];
     }
     rec->serial++;
     rec->token      = token;
@@ -132,10 +132,10 @@ static bool program(const char *path, boot_record_t *rec, uint32_t token, bool r
 
     (void)f_unlink(BOOT_FILE_REQ);
     (void)f_unlink(BOOT_FILE_BOOTOK);
-    if (strcmp(path, BOOT_FILE_FW) == 0)
+    if (strcmp(path, BOOT_FILE_PREV) != 0)
     {
         /* 新包已经搬进内部 Flash，外部 Flash 上的副本不再需要（回滚用的是 PREV.BIN） */
-        (void)f_unlink(BOOT_FILE_FW);
+        (void)f_unlink(path);
     }
 
     Boot_Ui_Status(Boot_Txt_Reboot, true);
@@ -148,8 +148,13 @@ void Boot_Ota_Boot(void)
 {
     boot_record_t rec;
     boot_req_t    req;
+    char          path[64];
+    bool          have_pkg;
 
     Boot_State_Load(&rec);
+
+    /* 待安装的包：优先 FW.BIN，没有就扫 /ota 里第一个 .BIN */
+    have_pkg = Boot_FindPackage(path, sizeof(path));
 
     /* 1) 应用写了 REQ.BIN：按请求搬运 */
     if (read_req(&req) && req.token != rec.token)
@@ -164,7 +169,7 @@ void Boot_Ota_Boot(void)
             return;
         }
 
-        if (program(BOOT_FILE_FW, &rec, req.token, true))
+        if (have_pkg && program(path, &rec, req.token, true))
         {
             return;
         }
@@ -210,15 +215,14 @@ void Boot_Ota_Boot(void)
         }
     }
 
-    /* 3) 应用分区无效（首次安装 / 搬运中途掉电）：优先装 FW.BIN，再退回 PREV.BIN */
+    /* 3) 应用分区无效（首次安装 / 搬运中途掉电）：优先装升级包，再退回 PREV.BIN */
     if (!Boot_App_Valid())
     {
         FILINFO info;
 
         Boot_Ui_Status(Boot_Txt_Wait, false);
 
-        if (f_stat(BOOT_FILE_FW, &info) == FR_OK &&
-            program(BOOT_FILE_FW, &rec, rec.token, true))
+        if (have_pkg && program(path, &rec, rec.token, true))
         {
             return;
         }

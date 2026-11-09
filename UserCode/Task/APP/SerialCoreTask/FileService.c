@@ -293,7 +293,11 @@ static uint8_t fs_write(const uint8_t *p, uint16_t n, uint8_t *out, uint16_t *ou
     if (fr == FR_OK) {
         fr = f_write(&fil, src, wlen, &bw);
     }
-    (void)f_close(&fil);
+    /* f_close 才真正把窗口缓冲/目录项落盘，它的错误不能被吞掉 */
+    FRESULT fc = f_close(&fil);
+    if (fr == FR_OK) {
+        fr = fc;
+    }
 
     if (fr != FR_OK) {
         out[0] = (uint8_t)fr;

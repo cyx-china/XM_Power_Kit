@@ -77,17 +77,29 @@ static uint8_t cmd_info(uint8_t *out, uint16_t *out_len)
  *         真正的擦写发生在下一次启动的 bootloader 里（Boot_Ota_Boot），
  *         这样掉电/中断都能幂等重来，也复用同一套搬运代码。
  */
-static uint8_t cmd_apply(void)
+static uint8_t cmd_apply(uint8_t *out, uint16_t *out_len)
 {
-    boot_pkg_head_t head;
+    char            path[64];
+    boot_pkg_info_t pkg;
     boot_record_t   rec;
     boot_req_t      req;
     FIL             file;
     UINT            bw = 0U;
     FRESULT         fr;
 
-    if (!Boot_Pkg_Load(BOOT_FILE_FW, &head))
+    if (!Boot_FindPackage(path, sizeof(path)))
     {
+        return ST_E_NOTFOUND;
+    }
+
+    if (!Boot_Pkg_Load(path, &pkg))
+    {
+        /* 把失败原因回给上位机：原因码 / 文件长度 / 期望 CRC / 实际 CRC */
+        out[0] = pkg.reason;
+        (void)ser_put_u32(&out[1], pkg.file_size);
+        (void)ser_put_u32(&out[5], pkg.want_crc);
+        (void)ser_put_u32(&out[9], pkg.got_crc);
+        *out_len = 13U;
         return ST_E_CRC;
     }
 
@@ -140,7 +152,7 @@ static void handle(const ProtoFrame_t *req)
         break;
 
     case CMD_OTA_APPLY:
-        status = cmd_apply();
+        status = cmd_apply(s_rsp, &len);
         reboot = (status == ST_OK);
         break;
 

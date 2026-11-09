@@ -92,12 +92,36 @@ typedef struct
     uint32_t crc;            /* 覆盖前 40 字节 */
 } boot_bootok_t;
 
+/* 升级包解析结果 / 失败原因 */
+#define BOOT_PKG_OK         0U
+#define BOOT_PKG_E_OPEN     1U      /* 打不开文件 */
+#define BOOT_PKG_E_HEAD     2U      /* 包头非法（magic/head_crc/地址/长度/机型） */
+#define BOOT_PKG_E_CRC      3U      /* 镜像 CRC 与包头不符 */
+#define BOOT_PKG_E_READ     4U      /* 文件比包头声明的短 / 读失败 */
+#define BOOT_PKG_E_EMPTY    5U      /* 文件长度不够一个镜像 */
+
+typedef struct
+{
+    uint32_t file_size;          /* 文件总长度 */
+    uint32_t data_offset;        /* 镜像数据起点（带包头=80，裸 .bin=0） */
+    uint32_t image_size;         /* 镜像字节数 */
+    uint32_t want_crc;           /* 期望 CRC（包头里写的；裸 .bin 就是算出来的） */
+    uint32_t got_crc;            /* 实际算出来的 CRC */
+    uint8_t  has_head;           /* 1=文件带 80 字节包头 */
+    uint8_t  reason;             /* BOOT_PKG_E_xxx */
+    char     version[32];        /* 版本串（包头里取，裸镜像从字符串里嗅出来） */
+} boot_pkg_info_t;
+
 /* 升级包解析与搬运：stage 0=擦除 1=写入 2=回读校验 */
 typedef void (*boot_progress_t)(uint8_t stage, uint16_t percent);
 
-bool Boot_Pkg_Load(const char *path, boot_pkg_head_t *head);              /* 读头 + 校验 CRC */
-bool Boot_Pkg_Flash(const char *path, const boot_pkg_head_t *head, boot_progress_t progress);
+/* 解析升级包：带包头按包头校验，裸 .bin 直接按整文件当作镜像 */
+bool Boot_Pkg_Load(const char *path, boot_pkg_info_t *info);
+bool Boot_Pkg_Flash(const char *path, const boot_pkg_info_t *info, boot_progress_t progress);
 void Boot_Ota_Boot(void);                                                 /* 开机决策：升级 / 回滚 / 确认 */
+
+/* 找待安装的升级包：优先 0:/ota/FW.BIN，没有就扫 /ota 下第一个 .BIN（排除 PREV/BOOTOK/REQ） */
+bool Boot_FindPackage(char *path, uint32_t size);
 
 /* ============================ SPI Flash（轮询方式） ============================ */
 bool     Boot_Flash_Init(void);
