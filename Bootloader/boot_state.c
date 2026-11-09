@@ -8,6 +8,7 @@
 #include "boot.h"
 #include "stm32f4xx_hal.h"
 #include <stddef.h>
+#include <string.h>
 
 /* ---------------------------- 擦扇区（直写 FLASH 寄存器） ---------------------------- */
 #define SNB_SHIFT   3U
@@ -36,10 +37,19 @@ bool Boot_IntFlash_EraseSector(uint32_t sector)
     return ok;
 }
 
+/* 记录本身的 CRC32（覆盖 crc 之前的字节） */
 static uint32_t record_crc(const boot_record_t *rec)
 {
-    return (Boot_Crc32(rec, (uint32_t)offsetof(boot_record_t, crc)) == rec->crc) ||
-           (Boot_Crc32_Legacy(rec, (uint32_t)offsetof(boot_record_t, crc)) == rec->crc);
+    return Boot_Crc32(rec, (uint32_t)offsetof(boot_record_t, crc));
+}
+
+/* 校验：标准写法与早期固件的写法都认 */
+static bool record_ok(const boot_record_t *rec)
+{
+    uint32_t crc = record_crc(rec);
+
+    return (rec->crc == crc) ||
+           (rec->crc == Boot_Crc32_Legacy(rec, (uint32_t)offsetof(boot_record_t, crc)));
 }
 
 void Boot_State_Load(boot_record_t *rec)
@@ -48,16 +58,15 @@ void Boot_State_Load(boot_record_t *rec)
 
     *rec = *flash;
 
-    if (rec->magic != BOOT_REC_MAGIC || rec->crc != record_crc(rec))
+    if (rec->magic != BOOT_REC_MAGIC || !record_ok(rec))
     {
-        /* 空白或损坏：回落成“稳定、无失败”的默认记录（不写 Flash，等真正需要时再写） */
-        rec->magic      = BOOT_REC_MAGIC;
-        rec->serial     = 0U;
-        rec->state      = BOOT_ST_IDLE;
-        rec->fail_count = 0U;
-        rec->version[0] = '\0';
-        rec->token      = 0U;
-        rec->crc        = record_crc(rec);
+        /* 空白或损坏：回落成“稳定、无失败”的默认记录，并立刻写回一份合法的。
+           必须写回：应用侧要靠这份记录算升级请求令牌（token），记录非法会让它算错，
+           请求被当成“已消费”直接忽略（表现为点了升级却直接进主程序）。 */
+        memset(rec, 0, sizeof(*rec));
+        rec->magic = BOOT_REC_MAGIC;
+        rec->state = BOOT_ST_IDLE;
+        (void)Boot_State_Save(rec);
     }
 }
 

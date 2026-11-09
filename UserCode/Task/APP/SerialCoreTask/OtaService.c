@@ -89,21 +89,25 @@ static void read_record(ota_record_t *rec) {
     const ota_record_t *flash = (const ota_record_t *)OTA_REC_ADDR;
 
     *rec = *flash;
-    if (rec->magic != OTA_REC_MAGIC ||
-        ((rec->crc != crc_update(0U, rec, (uint32_t)offsetof(ota_record_t, crc))) &&
-         (rec->crc != crc_update(0xFFFFFFFFU, rec, (uint32_t)offsetof(ota_record_t, crc))))) {
+    /* 这里只做只读判断（令牌 / 状态），CRC 校验交给 bootloader：
+       早期 bootloader 写记录时 CRC 算错（恒为 0），若在这里也校验 CRC，
+       就会把合法记录当无效 → 令牌算错 → 升级请求被当成“已消费”被忽略。
+       所以只要 magic 对就采信内容。 */
+    if (rec->magic != OTA_REC_MAGIC) {
         memset(rec, 0, sizeof(*rec));
     }
 }
 
 static uint32_t next_token(void) {
-    ota_record_t rec;
+    /* 直接用 bootloader 写的令牌字段 +1。空白 Flash 是 0xFFFFFFFF，按 0 处理。
+       这样一定比 bootloader 记录里的那个值大，不会被误判成“已消费的请求”。 */
+    const ota_record_t *flash = (const ota_record_t *)OTA_REC_ADDR;
+    uint32_t token = flash->token;
 
-    read_record(&rec);
-    if (rec.magic != OTA_REC_MAGIC) {
-        return 1U;
+    if (token == 0xFFFFFFFFU) {
+        token = 0U;
     }
-    return rec.token + 1U;
+    return token + 1U;
 }
 
 static bool head_from_file(const char *path, ota_head_t *head) {

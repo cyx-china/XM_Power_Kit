@@ -157,9 +157,14 @@ void Boot_Ota_Boot(void)
     /* 待安装的包：优先 FW.BIN，没有就扫 /ota 里第一个 .BIN */
     have_pkg = Boot_FindPackage(path, sizeof(path));
 
-    /* 1) 应用写了 REQ.BIN：按请求搬运 */
-    if (read_req(&req) && req.token != rec.token)
+    /* 1) 应用写了 REQ.BIN：按请求搬运。
+          读完立刻删掉（“消费”掉）：不再靠令牌比对来判断是否已处理过——
+          令牌一旦和应用侧算的不一致，请求就会被静默忽略（点了升级却直接进主程序）。
+          真的中途掉电也不会卡住：应用区无效时下面第 3 步会用同一个包续装。 */
+    if (read_req(&req))
     {
+        (void)f_unlink(BOOT_FILE_REQ);
+
         if (req.op == BOOT_OP_ROLLBACK)
         {
             if (program(BOOT_FILE_PREV, &rec, req.token, false))
