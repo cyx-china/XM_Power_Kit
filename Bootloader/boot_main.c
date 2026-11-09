@@ -227,6 +227,16 @@ int main(void)
     bool fs_ok      = flash_ok && Boot_Fs_Mount();
     bool did_format = false;
 
+#if BOOT_FORCE_FORMAT
+    /* 一次性工具固件：不看原来有没有文件系统，一律强制格式化 */
+    if (flash_ok)
+    {
+        Ui_Show();
+        Boot_Ui_Status(Boot_Txt_Formatting, true);
+        fs_ok      = Boot_Fs_Format();
+        did_format = fs_ok;
+    }
+#else
     if (!fs_ok && flash_ok)
     {
         Ui_Show();                       /* 要格式化了：先把界面亮出来，别让用户面对黑屏 */
@@ -234,6 +244,7 @@ int main(void)
         fs_ok      = Boot_Fs_Format();
         did_format = fs_ok;
     }
+#endif
 
     /* ---------------- 出厂文件：目录 / 字库 / 参数文件 ---------------- */
     uint8_t prov = 0U;
@@ -272,6 +283,17 @@ int main(void)
         Boot_SelfTest_Paint();
         Boot_Ui_Status(Boot_Txt_SelfTest, true);
     }
+
+#if BOOT_FORCE_FORMAT
+    /* ---------------- 一次性工具固件：格式化完就停在这里 ----------------
+       停在维护模式，可以直接用上位机 USB 把字库/固件传进去；
+       烧回正式 bootloader 后才会正常运行系统。 */
+    Ui_Show();
+    Boot_SelfTest_Paint();
+    Boot_Ui_Status(fs_ok ? Boot_Txt_Formatted : Boot_Txt_FormatFail, fs_ok);
+    Boot_Ui_Hint(Boot_Txt_ForceHint, false);
+    Stay_Forever();
+#endif
 
     /* ---------------- OTA：升级 / 回滚 / 首次安装 ---------------- */
     g_boot_stage = 6U;

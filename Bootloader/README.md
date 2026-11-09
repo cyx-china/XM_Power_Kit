@@ -122,8 +122,33 @@ python Bootloader/tools/gen_param_default.py  # 从 UserDefineManage.c 的默认
 ```bash
 cmake -S . -B build/Release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/Release
-# 产物：build/Release/Bootloader/XM_Power_Kit_Boot.hex（约 42 KB / 48 KB）
+# 产物：build/Release/Bootloader/XM_Power_Kit_Boot.hex（约 43 KB / 48 KB）
 ```
+
+## 一次性工具固件：强制格式化外部 Flash
+
+外部 Flash 被人为改乱（残留文件、卷损坏、想彻底清空重来）时，可以编一块“上电就格式化”的
+一次性 bootloader：
+
+```bash
+cmake -S . -B build/FormatOnce -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake \
+      -DCMAKE_BUILD_TYPE=Release -DBOOT_FORCE_FORMAT=ON
+cmake --build build/FormatOnce --target XM_Power_Kit_Boot
+# 产物：build/FormatOnce/Bootloader/XM_Power_Kit_Boot_FormatOnce.hex（约 40 KB）
+```
+
+行为：上电 → 无条件 `f_mkfs` 重建 FAT 卷 → 补齐 `/font`、`/font/bootloader`、`/images`、`/ota`
+与默认 `/uparam.bin` → 屏幕显示“外部 Flash 已格式化” → **停在维护模式**（USB 可用，可立刻
+用上位机传文件）。
+
+注意事项：
+
+- 这块固件**每次上电都会清空外部 Flash**，只能临时用；用完立刻把正式 bootloader 烧回去；
+- 格式化会删掉全部字库、图片和 `/uparam.bin`（校准数据），动手前先用上位机「文件管理」
+  把 `/font`、`/images`、`/uparam.bin` 备份到电脑，格式化后再传回去；
+- 应用分区不受影响（只动外部 Flash），格式化完重新烧正式 bootloader 即可正常进系统；
+- 工具固件的 `BOOT_FORCE_FORMAT` 默认是 0，正式产物不受影响。
 
 ## 维护模式（USB 常驻）
 

@@ -18,6 +18,15 @@
 #define BOOT_APP_ADDR       0x08010000U        /* 应用：sector2 起 */
 #define BOOT_APP_SIZE       (448U * 1024U)     /* sector2~7 共 480KB */
 
+/* ======================== 一次性工具固件开关 ======================== */
+/* 置 1：上电无条件格式化外部 Flash，随后停在维护模式（USB 可用），
+   用于出厂/救援时清空整片 Flash 再重新写入文件。
+   警告：这种固件每次上电都会清空外部 Flash，正常固件必须保持 0。
+   编译：cmake ... -DCMAKE_C_FLAGS="-DBOOT_FORCE_FORMAT=1"，产物另存。 */
+#ifndef BOOT_FORCE_FORMAT
+#define BOOT_FORCE_FORMAT 0
+#endif
+
 #define BOOT_RAM_START      0x20000000U
 #define BOOT_RAM_END        0x20020000U        /* 128KB SRAM */
 
@@ -241,6 +250,7 @@ extern const char Boot_Txt_JumpIn[];
 extern const char Boot_Txt_Entering[];
 extern const char Boot_Txt_UsbWait[];
 extern const char Boot_Txt_UsbOk[];
+extern const char Boot_Txt_ForceHint[];
 
 void     Boot_Ui_Screen(const char *title, const char *footer, bool with_bar);
 void     Boot_Ui_ClearLine(uint16_t y);

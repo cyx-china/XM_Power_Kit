@@ -32,6 +32,12 @@ add_custom_command(
         VERBATIM
 )
 
+# 一次性工具固件：置 ON 后上电无条件格式化外部 Flash，并停在维护模式。
+# 产物会改名为 XM_Power_Kit_Boot_FormatOnce.hex，避免与正式 bootloader 混淆。
+# 用法：cmake -S . -B build/FormatOnce -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake \
+#              -DCMAKE_BUILD_TYPE=Release -DBOOT_FORCE_FORMAT=ON
+option(BOOT_FORCE_FORMAT "Force-format external flash on every boot (one-shot tool build)" OFF)
+
 add_executable(${BOOT_NAME}
         ${BOOT_SOURCES}
         ${BOOT_FONT_OBJ}
@@ -86,6 +92,11 @@ target_compile_definitions(${BOOT_NAME} PRIVATE
         BOOTLOADER
 )
 
+if(BOOT_FORCE_FORMAT)
+    target_compile_definitions(${BOOT_NAME} PRIVATE BOOT_FORCE_FORMAT=1)
+    set_target_properties(${BOOT_NAME} PROPERTIES OUTPUT_NAME "${BOOT_NAME}_FormatOnce")
+endif()
+
 target_compile_options(${BOOT_NAME} PRIVATE
         -Os -g0
         -Wall -Wextra
@@ -102,6 +113,7 @@ target_link_options(${BOOT_NAME} PRIVATE
 
 add_custom_command(
         TARGET ${BOOT_NAME} POST_BUILD
-        COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:${BOOT_NAME}> ${BOOT_NAME}.hex
+        COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:${BOOT_NAME}>
+                $<TARGET_FILE_DIR:${BOOT_NAME}>/$<TARGET_FILE_BASE_NAME:${BOOT_NAME}>.hex
         COMMENT "Generating ${BOOT_NAME}.hex file..."
 )
