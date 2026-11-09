@@ -194,6 +194,7 @@ void     Boot_Lcd_BacklightPwm(uint8_t percent);
 
 /* ============================ GPIO 直写（省掉 HAL_GPIO_Init 的 ~430 字节） ============================ */
 /* is_af：0=推挽输出 1=复用推挽；pull：0=无 1=上拉；speed：0=低速 3=最高速；af：0~15 */
+void     Boot_Gpio_Input(GPIO_TypeDef *port, uint32_t pins, uint32_t pull);
 void     Boot_Gpio_Setup(GPIO_TypeDef *port, uint32_t pins, bool is_af,
                          uint32_t pull, uint32_t speed, uint32_t af);
 

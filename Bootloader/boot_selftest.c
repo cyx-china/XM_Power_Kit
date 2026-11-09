@@ -185,9 +185,9 @@ void Boot_Key_Init(void)
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOE_CLK_ENABLE();
 
-    /* 上拉输入，按下为低 */
-    Boot_Gpio_Setup(GPIOB, GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, false, 1U, 0U, 0U);
-    Boot_Gpio_Setup(GPIOE, GPIO_PIN_4, false, 1U, 0U, 0U);
+    /* 上拉输入，按下为低（必须用输入模式，不能用 Boot_Gpio_Setup） */
+    Boot_Gpio_Input(GPIOB, GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, 1U);
+    Boot_Gpio_Input(GPIOE, GPIO_PIN_4, 1U);
 }
 
 bool Boot_Key_Pressed(void)

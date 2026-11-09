@@ -67,6 +67,24 @@ void Boot_Gpio_Setup(GPIO_TypeDef *port, uint32_t pins, bool is_af,
     }
 }
 
+/* ---------------------------- GPIO 输入模式 ---------------------------- */
+/* MODER=00 才是输入。Boot_Gpio_Setup 的非复用分支写的是输出模式（驱动 LCD_RST/CS/背光/LED 用），
+   按键这类"上拉输入"必须走这个函数，否则引脚被当输出拉低，读回来永远是"按下"。 */
+void Boot_Gpio_Input(GPIO_TypeDef *port, uint32_t pins, uint32_t pull)
+{
+    for (uint32_t i = 0U; i < 16U; i++)
+    {
+        if ((pins & (1UL << i)) == 0UL)
+        {
+            continue;
+        }
+
+        port->MODER &= ~(3UL << (i * 2U));
+        port->OTYPER &= ~(1UL << i);
+        port->PUPDR = (port->PUPDR & ~(3UL << (i * 2U))) | ((pull & 3UL) << (i * 2U));
+    }
+}
+
 static void Boot_Gpio_Init(void)
 {
     __HAL_RCC_GPIOC_CLK_ENABLE();

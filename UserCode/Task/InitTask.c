@@ -209,8 +209,13 @@ static bool Sys_Init(void) {
   // 设置睡眠时间
   SleepCounter = UserParam.Screen_Sleeptime;
 
-  // 设置蜂鸣器音量
-  __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, ((UserParam.Beezer_Volume - 1) / 2));
+  // 设置蜂鸣器音量（音量 0 会让 CCR 变成 32767，三极管常通发热，这里兜底）
+  uint16_t volume = UserParam.Beezer_Volume;
+
+  if ((volume < 1U) || (volume > 100U)) {
+    volume = 100U;
+  }
+  __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, ((volume - 1U) / 2U));
 
   DpsRelease_ON();
 
