@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""文件管理页：浏览外部 Flash 上的 FATFS 目录，上传/下载/删除/重命名文件。"""
+"""文件管理页：浏览外部 Flash 上的 FATFS 目录，上传/下载/删除/重命名文件。
+
+- 支持把资源管理器里的文件/文件夹直接拖进来上传（文件夹会递归建立目录）；
+- 支持多选批量下载（按远端结构镜像到本地目录）与批量删除（文件夹递归删除）。
+"""
 from __future__ import annotations
 
 import os
@@ -8,8 +12,8 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QFont
 from PyQt5.QtWidgets import (
     QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
-    QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMenu, QMessageBox, QProgressBar, QPushButton,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 _COL_NAME, _COL_SIZE, _COL_TYPE = range(3)
@@ -39,9 +43,9 @@ def fmt_size(n: int) -> str:
 
 class FileBrowser(QWidget):
     request_list = pyqtSignal(str)
-    request_upload = pyqtSignal(str, str)          # 本地路径, 远端路径
-    request_download = pyqtSignal(str, str, int)   # 远端路径, 本地路径, 大小
-    request_delete = pyqtSignal(str)
+    request_upload = pyqtSignal(list, str)      # 本地路径们（文件或文件夹）, 远端目录
+    request_download = pyqtSignal(list, str)    # 远端路径们, 本地目录
+    request_delete = pyqtSignal(list)           # 远端路径们
     request_rename = pyqtSignal(str, str)
     request_mkdir = pyqtSignal(str)
     request_cancel = pyqtSignal()
@@ -50,6 +54,7 @@ class FileBrowser(QWidget):
         super().__init__(parent)
         self.cwd = "/"
         self._entries = []
+        self._last_local = os.path.expanduser("~")
         self._build()
 
     # ------------------------------------------------------------ 界面
@@ -65,12 +70,14 @@ class FileBrowser(QWidget):
         self.btn_refresh = QPushButton("⟳ 刷新")
         self.btn_upload = QPushButton("上传文件")
         self.btn_upload.setObjectName("PrimaryButton")
+        self.btn_upload_dir = QPushButton("上传文件夹")
         self.btn_download = QPushButton("下载")
         self.btn_mkdir = QPushButton("新建文件夹")
         self.btn_rename = QPushButton("重命名")
         self.btn_delete = QPushButton("删除")
         for w in (self.btn_up, self.path_edit, self.btn_refresh, self.btn_upload,
-                  self.btn_download, self.btn_mkdir, self.btn_rename, self.btn_delete):
+                  self.btn_upload_dir, self.btn_download, self.btn_mkdir,
+                  self.btn_rename, self.btn_delete):
             bar.addWidget(w)
         self.path_edit.setMinimumWidth(240)
         root.addLayout(bar)
@@ -89,6 +96,9 @@ class FileBrowser(QWidget):
         self.table.setColumnWidth(_COL_SIZE, 120)
         self.table.setColumnWidth(_COL_TYPE, 100)
         self.table.verticalHeader().setDefaultSectionSize(28)
+        # 拖拽交给 FileBrowser 自己处理，避免表格抢走放下事件
+        self.table.setAcceptDrops(False)
+        self.table.viewport().setAcceptDrops(False)
         root.addWidget(self.table, 1)
 
         bottom = QHBoxLayout()
@@ -110,12 +120,17 @@ class FileBrowser(QWidget):
         self.btn_up.clicked.connect(self._go_up)
         self.btn_refresh.clicked.connect(lambda: self.request_list.emit(self.cwd))
         self.btn_upload.clicked.connect(self._upload)
+        self.btn_upload_dir.clicked.connect(self._upload_dir)
         self.btn_download.clicked.connect(self._download)
         self.btn_mkdir.clicked.connect(self._mkdir)
         self.btn_rename.clicked.connect(self._rename)
         self.btn_delete.clicked.connect(self._delete)
         self.btn_cancel.clicked.connect(self.request_cancel.emit)
         self.table.doubleClicked.connect(self._activated)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._context_menu)
+
+        self.setAcceptDrops(True)
 
     # ------------------------------------------------------------ 数据
     def set_entries(self, path: str, entries: list) -> None:
@@ -187,8 +202,8 @@ class FileBrowser(QWidget):
         return [self._entries[r] for r in rows if 0 <= r < len(self._entries)]
 
     def set_connected(self, ok: bool) -> None:
-        for b in (self.btn_up, self.btn_refresh, self.btn_upload, self.btn_download,
-                  self.btn_mkdir, self.btn_rename, self.btn_delete):
+        for b in (self.btn_up, self.btn_refresh, self.btn_upload, self.btn_upload_dir,
+                  self.btn_download, self.btn_mkdir, self.btn_rename, self.btn_delete):
             b.setEnabled(ok)
         if not ok:
             self.table.setRowCount(0)
@@ -198,11 +213,55 @@ class FileBrowser(QWidget):
             self.capacity_label.setText("容量：—")
             self.end_transfer()
 
+    # ------------------------------------------------------------ 拖拽上传
+    @staticmethod
+    def _drop_paths(event) -> list:
+        if not event.mimeData().hasUrls():
+            return []
+        paths = []
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                p = url.toLocalFile()
+                if p and os.path.exists(p):
+                    paths.append(p)
+        return paths
+
+    def _drop_highlight(self, on: bool) -> None:
+        self.path_edit.setText(self.cwd + ("      松开鼠标即可上传到此处" if on else ""))
+
+    def dragEnterEvent(self, event) -> None:
+        if self._drop_paths(event):
+            event.setDropAction(Qt.CopyAction)
+            event.acceptProposedAction()
+            self._drop_highlight(True)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if self._drop_paths(event):
+            event.setDropAction(Qt.CopyAction)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._drop_highlight(False)
+
+    def dropEvent(self, event) -> None:
+        self._drop_highlight(False)
+        paths = self._drop_paths(event)
+        if not paths:
+            event.ignore()
+            return
+        event.setDropAction(Qt.CopyAction)
+        event.acceptProposedAction()
+        self.request_upload.emit(paths, self.cwd)
+
     # ------------------------------------------------------------ 交互
     def _go_up(self) -> None:
         self.request_list.emit(parent_path(self.cwd))
 
-    def _activated(self, index) -> None:
+    def _activated(self, index=None) -> None:
         e = self.current_entry()
         if e is None:
             return
@@ -212,35 +271,34 @@ class FileBrowser(QWidget):
             self._download()
 
     def _upload(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "选择要上传到设备外部 Flash 的文件")
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择要上传的文件", self._last_local)
         if not paths:
             return
-        for p in paths:
-            name = os.path.basename(p)
-            self.request_upload.emit(p, join_path(self.cwd, name))
+        self._last_local = os.path.dirname(paths[0]) or self._last_local
+        self.request_upload.emit(list(paths), self.cwd)
+
+    def _upload_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "选择要上传的文件夹（会递归上传）",
+                                                  self._last_local)
+        if not folder:
+            return
+        self._last_local = folder
+        self.request_upload.emit([folder], self.cwd)
 
     def _download(self) -> None:
         picked = self.selected_entries()
         if not picked:
             e = self.current_entry()
             picked = [e] if e is not None else []
-        files = [e for e in picked if not e["is_dir"]]
-        if not files:
-            QMessageBox.information(self, "提示", "请先在列表中选择要下载的文件（可按住 Ctrl/Shift 多选）")
+        if not picked:
+            QMessageBox.information(self, "提示", "请先在列表中选择要下载的文件或文件夹")
             return
-        if len(files) == 1:
-            e = files[0]
-            path, _ = QFileDialog.getSaveFileName(self, "保存到", e["name"])
-            if not path:
-                return
-            self.request_download.emit(join_path(self.cwd, e["name"]), path, e["size"])
-            return
-        folder = QFileDialog.getExistingDirectory(self, "选择保存文件夹（下载 %d 个文件）" % len(files))
+        folder = QFileDialog.getExistingDirectory(self, "选择保存位置（按原目录结构保存）",
+                                                  self._last_local)
         if not folder:
             return
-        for e in files:
-            self.request_download.emit(join_path(self.cwd, e["name"]),
-                                       os.path.join(folder, e["name"]), e["size"])
+        self._last_local = folder
+        self.request_download.emit([join_path(self.cwd, e["name"]) for e in picked], folder)
 
     def _mkdir(self) -> None:
         name, ok = QInputDialog.getText(self, "新建文件夹", "文件夹名称：")
@@ -259,13 +317,63 @@ class FileBrowser(QWidget):
         self.request_rename.emit(join_path(self.cwd, e["name"]), join_path(self.cwd, name.strip()))
 
     def _delete(self) -> None:
-        e = self.current_entry()
-        if e is None:
+        picked = self.selected_entries()
+        if not picked:
+            e = self.current_entry()
+            picked = [e] if e is not None else []
+        if not picked:
             QMessageBox.information(self, "提示", "请先选择要删除的文件或文件夹")
             return
-        tip = "确定删除「%s」吗？" % e["name"]
-        if e["is_dir"]:
-            tip += "\n（文件夹必须为空才能删除）"
-        if QMessageBox.question(self, "确认删除", tip) != QMessageBox.Yes:
+        n_dir = sum(1 for e in picked if e["is_dir"])
+        files = [e for e in picked if not e["is_dir"]]
+        parts = []
+        if n_dir:
+            parts.append("%d 个文件夹（连同其中的内容）" % n_dir)
+        if files:
+            parts.append("%d 个文件（%s）" % (len(files), fmt_size(sum(x["size"] for x in files))))
+        tip = "确定删除选中的 %s 吗？\n\n删除后无法恢复。" % "、".join(parts)
+        if QMessageBox.question(self, "确认删除", tip,
+                                QMessageBox.Yes | QMessageBox.No,
+                                QMessageBox.No) != QMessageBox.Yes:
             return
-        self.request_delete.emit(join_path(self.cwd, e["name"]))
+        self.request_delete.emit([join_path(self.cwd, e["name"]) for e in picked])
+
+    def _context_menu(self, pos) -> None:
+        picked = self.selected_entries()
+        menu = QMenu(self)
+        act_open = menu.addAction("打开")
+        act_dl = menu.addAction("下载到…")
+        menu.addSeparator()
+        act_ul = menu.addAction("上传文件到当前目录…")
+        act_uld = menu.addAction("上传文件夹到当前目录…")
+        menu.addSeparator()
+        act_new = menu.addAction("新建文件夹…")
+        act_ren = menu.addAction("重命名…")
+        act_del = menu.addAction("删除")
+        menu.addSeparator()
+        act_ref = menu.addAction("刷新")
+
+        act_open.setEnabled(len(picked) == 1 and picked[0]["is_dir"])
+        act_dl.setEnabled(bool(picked))
+        act_ren.setEnabled(len(picked) == 1)
+        act_del.setEnabled(bool(picked))
+
+        act = menu.exec_(self.table.viewport().mapToGlobal(pos))
+        if act is None:
+            return
+        if act is act_open:
+            self._activated()
+        elif act is act_dl:
+            self._download()
+        elif act is act_ul:
+            self._upload()
+        elif act is act_uld:
+            self._upload_dir()
+        elif act is act_new:
+            self._mkdir()
+        elif act is act_ren:
+            self._rename()
+        elif act is act_del:
+            self._delete()
+        elif act is act_ref:
+            self.request_list.emit(self.cwd)

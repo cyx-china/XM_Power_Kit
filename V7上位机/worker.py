@@ -2,12 +2,14 @@
 """后台工作线程：串口收发与文件传输都在这里执行，避免卡住界面。"""
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import traceback
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
+import filetree
 import params as P
 from device import Device
 from protocol import DeviceError, LinkError
@@ -31,6 +33,8 @@ class Worker(QThread):
         self._dev = Device()
         self._cancel = threading.Event()
         self._alive = True
+        self._done_msg = ""          # 任务结束时附带的说明（批量操作的汇总）
+        self._done_ok = True         # 批量操作是否有失败项
         self._dev.log_tx = self._log_tx
         self._dev.log_rx = self._log_rx
 
@@ -63,10 +67,12 @@ class Worker(QThread):
             except queue.Empty:
                 continue
             self._cancel.clear()
+            self._done_msg = ""
+            self._done_ok = True
             try:
                 handler = getattr(self, "_job_" + name)
                 handler(*args)
-                self.sig_done.emit(tag, True, "")
+                self.sig_done.emit(tag, self._done_ok, self._done_msg)
             except DeviceError as exc:
                 self.sig_done.emit(tag, False, str(exc))
             except LinkError as exc:
@@ -86,7 +92,7 @@ class Worker(QThread):
             raise LinkError("已取消")
         self.sig_progress.emit(done, total)
 
-    # ------------------------------------------------------------ 任务
+    # ------------------------------------------------------------ 连接与参数
     def _job_connect(self, port: str, baud: int) -> None:
         self.sig_status.emit("正在连接 %s ..." % port)
         self._dev.open(port, baud)
@@ -124,6 +130,7 @@ class Worker(QThread):
         self._dev.set_params_raw(raw)
         self.sig_status.emit("参数写入完成（部分设置需重启设备生效）")
 
+    # ------------------------------------------------------------ 文件浏览
     def _job_list(self, path: str) -> None:
         entries = self._dev.fs_list(path)
         entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
@@ -133,22 +140,6 @@ class Worker(QThread):
             self.sig_capacity.emit(total, free)
         except (DeviceError, LinkError):
             pass
-
-    def _job_upload(self, local_path: str, remote_path: str) -> None:
-        self.sig_status.emit("正在上传 %s ..." % remote_path)
-        self._dev.upload(local_path, remote_path, self._progress, self._cancel)
-        self.sig_status.emit("上传完成：%s" % remote_path)
-        self.sig_done.emit("refresh_dir", True, "")
-
-    def _job_download(self, remote_path: str, local_path: str, size: int) -> None:
-        self.sig_status.emit("正在下载 %s ..." % remote_path)
-        self._dev.download(remote_path, local_path, size, self._progress, self._cancel)
-        self.sig_status.emit("下载完成：%s" % local_path)
-
-    def _job_delete(self, path: str) -> None:
-        self._dev.fs_delete(path)
-        self.sig_status.emit("已删除：%s" % path)
-        self.sig_done.emit("refresh_dir", True, "")
 
     def _job_mkdir(self, path: str) -> None:
         self._dev.fs_mkdir(path)
@@ -160,6 +151,105 @@ class Worker(QThread):
         self.sig_status.emit("已重命名：%s -> %s" % (old, new))
         self.sig_done.emit("refresh_dir", True, "")
 
+    # ------------------------------------------------------------ 批量文件操作
+    def _job_upload_tree(self, local_paths, remote_dir: str) -> None:
+        """拖拽/多选上传：文件直接传，文件夹递归建目录后传"""
+        dirs, plan, total, skipped = filetree.build_upload_plan(local_paths, remote_dir)
+        self.sig_status.emit("正在上传 %d 个文件，共 %s …"
+                             % (len(plan), filetree.human_size(total)))
+        for d in dirs:
+            if self._cancel.is_set():
+                raise LinkError("已取消")
+            self._dev.ensure_dir(d)
+
+        failed = []
+        done = 0
+        for i, (local, remote, size) in enumerate(plan, 1):
+            if self._cancel.is_set():
+                raise LinkError("已取消")
+            self.sig_status.emit("上传 %d/%d：%s" % (i, len(plan), os.path.basename(local)))
+            base = done
+            try:
+                self._dev.upload(local, remote,
+                                 lambda d, t, base=base: self._progress(base + d, total),
+                                 self._cancel)
+            except DeviceError as exc:            # 单个文件失败不中断整批
+                failed.append("%s：%s" % (remote, exc))
+            done += size
+            self._progress(done, total)
+
+        self.sig_done.emit("refresh_dir", True, "")
+        msg = "已上传 %d 个文件，共 %s" % (len(plan) - len(failed), filetree.human_size(total))
+        if skipped:
+            msg += "；跳过 %d 个（路径超过 %d 字节）" % (len(skipped), filetree.MAX_REMOTE_PATH)
+        if failed:
+            msg += "；%d 个失败：\n%s" % (len(failed), "\n".join(failed[:8]))
+            self._done_ok = False
+        self._done_msg = msg
+
+    def _job_download_tree(self, remotes, local_dir: str) -> None:
+        """批量下载：文件直接下，文件夹按远端结构镜像到本地目录"""
+        dirs, plan = filetree.build_download_plan(self._dev, remotes)
+        total = sum(size for _rp, size, _rel in plan)
+        for rel in dirs:
+            os.makedirs(os.path.join(local_dir, *rel.split("/")), exist_ok=True)
+
+        self.sig_status.emit("正在下载 %d 个文件，共 %s …"
+                             % (len(plan), filetree.human_size(total)))
+        failed = []
+        done = 0
+        for i, (remote, size, rel) in enumerate(plan, 1):
+            if self._cancel.is_set():
+                raise LinkError("已取消")
+            self.sig_status.emit("下载 %d/%d：%s" % (i, len(plan), rel))
+            dst = os.path.join(local_dir, *rel.split("/"))
+            base = done
+            try:
+                self._dev.download(remote, dst, size,
+                                   lambda d, t, base=base: self._progress(base + d, total),
+                                   self._cancel)
+            except DeviceError as exc:
+                failed.append("%s：%s" % (rel, exc))
+            done += size
+            self._progress(done, total)
+
+        msg = "已下载 %d 个文件，共 %s" % (len(plan) - len(failed), filetree.human_size(total))
+        if failed:
+            msg += "；%d 个失败：\n%s" % (len(failed), "\n".join(failed[:8]))
+            self._done_ok = False
+        self._done_msg = msg
+
+    def _job_delete_tree(self, remotes) -> None:
+        """批量删除：文件夹递归删（先文件后目录，设备端不能删非空目录）"""
+        dirs, files = filetree.build_delete_plan(self._dev, remotes)
+        total = len(files) + len(dirs)
+        file_set = set(files)
+        ok_files = ok_dirs = 0
+        failed = []
+        done = 0
+        for rp in files + dirs:
+            if self._cancel.is_set():
+                raise LinkError("已取消")
+            self.sig_status.emit("删除 %s …" % rp)
+            try:
+                self._dev.fs_delete(rp)
+                if rp in file_set:
+                    ok_files += 1
+                else:
+                    ok_dirs += 1
+            except DeviceError as exc:
+                failed.append("%s：%s" % (rp, exc))
+            done += 1
+            self._progress(done, total)
+
+        self.sig_done.emit("refresh_dir", True, "")
+        msg = "已删除 %d 个文件、%d 个文件夹" % (ok_files, ok_dirs)
+        if failed:
+            msg += "；%d 项失败：\n%s" % (len(failed), "\n".join(failed[:8]))
+            self._done_ok = False
+        self._done_msg = msg
+
+    # ------------------------------------------------------------ 其他
     def _job_bt_baud(self, baud: int) -> None:
         self._dev.set_bt_baud(baud)
         self.sig_status.emit("蓝牙波特率已设为 %d（重新连接蓝牙后生效）" % baud)

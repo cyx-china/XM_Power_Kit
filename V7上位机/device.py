@@ -19,7 +19,7 @@ from protocol import (
     FEATURE_MAINT,
     FS_CHUNK, OTA_CHUNK, OTA_HEAD_SIZE, OtaResync,
     FrameParser, DeviceError, LinkError, build_frame, STATUS_TEXT,
-    ST_E_CRC, ST_E_NOTFOUND,
+    ST_E_CRC, ST_E_FS, ST_E_NOTFOUND,
 )
 
 FS_ATTR_DIR = 0x10
@@ -305,6 +305,44 @@ class Device:
 
     def fs_sync(self) -> None:
         self.request(CMD_FS_SYNC, timeout=5.0)
+
+    def walk(self, root: str, max_depth: int = 8, max_items: int = 5000):
+        """递归列举 root 下的全部条目（不含 root 本身），返回 [(路径, 是否目录, 大小)]"""
+        out = []
+        stack = [(root, 0)]
+        while stack:
+            path, depth = stack.pop()
+            if depth >= max_depth:
+                raise LinkError("目录层级过深（超过 %d 层）" % max_depth)
+            for e in self.fs_list(path):
+                rp = (path.rstrip("/") + "/" + e["name"]) if path not in ("", "/") else "/" + e["name"]
+                if len(out) >= max_items:
+                    raise LinkError("条目过多（超过 %d 项），请分批操作" % max_items)
+                out.append((rp, e["is_dir"], e["size"]))
+                if e["is_dir"]:
+                    stack.append((rp, depth + 1))
+        return out
+
+    def ensure_dir(self, path: str) -> None:
+        """目录不存在才创建（设备端 f_mkdir 对已存在目录会报错）"""
+        try:
+            attr, _ = self.fs_stat(path)
+        except DeviceError as exc:
+            if exc.status != ST_E_NOTFOUND:
+                raise
+        else:
+            if attr & FS_ATTR_DIR:
+                return
+            raise DeviceError(ST_E_FS, "同名文件已存在，无法建立目录：%s" % path)
+        try:
+            self.fs_mkdir(path)
+        except DeviceError as exc:
+            if exc.status != ST_E_FS:        # FS 错多半是“已存在”，复查一次确认
+                raise
+            attr, _ = self.fs_stat(path)
+            if not attr & FS_ATTR_DIR:
+                raise exc
+
 
     # ------------------------------------------------------------ 文件传输
     def upload(self, local_path: str, remote_path: str, progress=None, cancel=None) -> None:

@@ -157,10 +157,20 @@ class SimDevice:
             if path in self.files:
                 del self.files[path]
                 return b"\x00"
+            if path in self.dirs:
+                # 与 FATFS 的 f_unlink 一致：非空目录不能删
+                prefix = path.rstrip("/") + "/"
+                if any(k.startswith(prefix) for k in list(self.files) + list(self.dirs)):
+                    return bytes([PR.ST_E_FS, 0]) + "目录非空".encode()
+                self.dirs.discard(path)
+                return b"\x00"
             return bytes([PR.ST_E_NOTFOUND, 4])
 
         if cmd == PR.CMD_FS_MKDIR:
-            self.dirs.add(self._path(p))
+            path = self._path(p)
+            if path in self.dirs:
+                return bytes([PR.ST_E_FS, 0]) + "已存在".encode()
+            self.dirs.add(path)
             return b"\x00"
 
         if cmd == PR.CMD_FS_RENAME:
@@ -174,6 +184,8 @@ class SimDevice:
 
         if cmd == PR.CMD_FS_STAT:
             path = self._path(p)
+            if path in self.dirs:
+                return b"\x00" + bytes([0x10]) + struct.pack("<I", 0)
             if path in self.files:
                 return b"\x00" + bytes([0x20]) + struct.pack("<I", len(self.files[path]))
             return bytes([PR.ST_E_NOTFOUND, 4])
@@ -419,9 +431,98 @@ def main() -> int:
         if os.path.exists(bin_path):
             os.remove(bin_path)
 
+    # 8) 批量操作：递归列举 / 上传目录 / 下载目录 / 删除目录
+    _test_batch()
+
     print("全部自检通过：协议编解码 / 参数 / 目录 / 上传 / 下载 / 重命名 / 删除 / 错误码 / "
-          "OTA 升级包 / 维护模式一键升级")
+          "OTA 升级包 / 维护模式一键升级 / 批量上传下载删除")
     return 0
+
+
+def _test_batch() -> None:
+    import shutil
+    import tempfile
+
+    import filetree
+
+    dev = FakeDevice()
+    dev.sim.dirs.update({"/font/sub", "/images"})
+    dev.sim.files["/font/sub/deep.bin"] = bytearray(b"deep" * 10)
+
+    # 递归列举
+    tree = dev.walk("/font")
+    assert ("/font/sub", True, 0) in tree, tree
+    assert ("/font/sub/deep.bin", False, 40) in tree, tree
+    assert ("/font/demo.bin", False, 1024) in tree, tree
+
+    # ensure_dir 幂等；同名文件不能被当目录
+    dev.ensure_dir("/images")
+    dev.ensure_dir("/images/new")
+    assert "/images/new" in dev.sim.dirs
+    try:
+        dev.ensure_dir("/font/demo.bin")
+        raise AssertionError("同名文件不该被当成目录")
+    except PR.DeviceError:
+        pass
+
+    work = tempfile.mkdtemp(prefix="xmk_batch_")
+    try:
+        # 上传一个本地目录（递归建目录 + 按字节推进度）
+        src_dir = os.path.join(work, "pack")
+        os.makedirs(os.path.join(src_dir, "inner"))
+        with open(os.path.join(src_dir, "a.bin"), "wb") as f:
+            f.write(b"A" * 300)
+        with open(os.path.join(src_dir, "inner", "b.bin"), "wb") as f:
+            f.write(b"B" * 120)
+
+        dirs, plan, total, skipped = filetree.build_upload_plan([src_dir], "/font")
+        assert dirs == ["/font/pack", "/font/pack/inner"], dirs
+        assert [p[1] for p in plan] == ["/font/pack/a.bin", "/font/pack/inner/b.bin"], plan
+        assert total == 420 and not skipped
+        for d in dirs:
+            dev.ensure_dir(d)
+        for local, remote, _size in plan:
+            dev.upload(local, remote)
+        assert bytes(dev.sim.files["/font/pack/inner/b.bin"]) == b"B" * 120
+
+        # 下载目录：按远端结构镜像到本地
+        out_dir = os.path.join(work, "out")
+        os.makedirs(out_dir)
+        dl_dirs, dl_files = filetree.build_download_plan(dev, ["/font/pack"])
+        assert "pack/inner" in dl_dirs, dl_dirs
+        assert [f[2] for f in dl_files] == ["pack/a.bin", "pack/inner/b.bin"], dl_files
+        for rel in dl_dirs:
+            os.makedirs(os.path.join(out_dir, *rel.split("/")), exist_ok=True)
+        for remote, size, rel in dl_files:
+            dev.download(remote, os.path.join(out_dir, *rel.split("/")), size)
+        with open(os.path.join(out_dir, "pack", "inner", "b.bin"), "rb") as f:
+            assert f.read() == b"B" * 120
+
+        # 删除目录：先文件后目录（设备端不允许删非空目录）
+        del_dirs, del_files = filetree.build_delete_plan(dev, ["/font/pack"])
+        assert del_files == ["/font/pack/a.bin", "/font/pack/inner/b.bin"], del_files
+        assert del_dirs == ["/font/pack/inner", "/font/pack"], del_dirs
+        for rp in del_files + del_dirs:
+            dev.fs_delete(rp)
+        assert "/font/pack" not in dev.sim.dirs
+        assert not any(k.startswith("/font/pack/") for k in dev.sim.files)
+
+        # 顺序反了必须失败（验证我们确实依赖“深的先删”）
+        dev.sim.dirs.add("/font/tmpdir")
+        dev.sim.files["/font/tmpdir/x.bin"] = bytearray(b"x")
+        try:
+            dev.fs_delete("/font/tmpdir")
+            raise AssertionError("非空目录应当删不掉")
+        except PR.DeviceError:
+            pass
+        dev.fs_delete("/font/tmpdir/x.bin")
+        dev.fs_delete("/font/tmpdir")
+
+        # 空目录也能被 walk 到（下载时只需建目录）
+        dev.sim.dirs.add("/font/empty")
+        assert ("/font/empty", True, 0) in dev.walk("/font")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":

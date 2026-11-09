@@ -6,7 +6,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('icon.ico', '.')],
     hiddenimports=['serial', 'serial.tools', 'serial.tools.list_ports'],
     hookspath=[],
     hooksconfig={},
@@ -36,4 +36,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='icon.ico',
 )

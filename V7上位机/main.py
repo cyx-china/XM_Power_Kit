@@ -98,6 +98,31 @@ def build_style(scale: float) -> str:
     )
 
 
+def _res_path(name: str) -> str:
+    """打包成 exe 后资源在 sys._MEIPASS，源码运行时在本文件同目录"""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, name)
+
+
+def _app_icon():
+    from PyQt5.QtGui import QIcon
+    path = _res_path("icon.ico")
+    if not os.path.exists(path):
+        path = _res_path("icon.png")
+    return QIcon(path) if os.path.exists(path) else None
+
+
+def _set_app_user_model_id() -> None:
+    """让任务栏用我们自己的图标而不是 python.exe 的"""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Xuemeng.XMPowerKit.V7")
+    except Exception:
+        pass
+
+
 def _log_path() -> str:
     base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, "xm_power_kit_log_%s.txt" % datetime.now().strftime("%Y%m%d"))
@@ -107,6 +132,9 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("XM Power Kit V7 上位机")
+        icon = _app_icon()
+        if icon is not None:
+            self.setWindowIcon(icon)
         self.resize(BASE_W, BASE_H)
         self.setMinimumSize(int(BASE_W * SCALE_MIN), int(BASE_H * SCALE_MIN))
 
@@ -270,12 +298,15 @@ class MainWindow(QMainWindow):
 
         self.view_files.request_list.connect(lambda p: self.worker.submit("list", "list", p))
         self.view_files.request_upload.connect(
-            lambda local, remote: (self.view_files.set_progress(0, 0),
-                                   self.worker.submit("upload", "upload", local, remote)))
+            lambda paths, remote_dir: (self.view_files.set_progress(0, 0),
+                                       self.worker.submit("upload", "upload_tree", paths, remote_dir)))
         self.view_files.request_download.connect(
-            lambda remote, local, size: (self.view_files.set_progress(0, size),
-                                         self.worker.submit("download", "download", remote, local, size)))
-        self.view_files.request_delete.connect(lambda p: self.worker.submit("delete", "delete", p))
+            lambda remotes, local_dir: (self.view_files.set_progress(0, 0),
+                                        self.worker.submit("download", "download_tree",
+                                                           remotes, local_dir)))
+        self.view_files.request_delete.connect(
+            lambda remotes: (self.view_files.set_progress(0, 0),
+                             self.worker.submit("delete", "delete_tree", remotes)))
         self.view_files.request_rename.connect(lambda a, b: self.worker.submit("rename", "rename", a, b))
         self.view_files.request_mkdir.connect(lambda p: self.worker.submit("mkdir", "mkdir", p))
         self.view_files.request_cancel.connect(self.worker.cancel_current)
@@ -411,7 +442,8 @@ class MainWindow(QMainWindow):
             if tag == "ota_info":
                 # 旧固件没有 OTA 命令：静默即可，不用弹窗
                 return
-            QMessageBox.warning(self, "操作失败", message)
+            title = "部分操作失败" if tag in ("upload", "download", "delete") else "操作失败"
+            QMessageBox.warning(self, title, message)
             if tag == "connect" or "串口" in message or "已断开" in message:
                 self.connected = False
                 self._set_connected(False)
@@ -428,7 +460,9 @@ class MainWindow(QMainWindow):
         elif tag == "refresh_dir":
             if self.connected:
                 self.worker.submit("list", "list", self.view_files.cwd)
-        elif tag in ("upload", "download", "delete", "mkdir", "rename"):
+        elif tag in ("upload", "download", "delete"):
+            self.status_label.setText(message or "完成")
+        elif tag in ("mkdir", "rename"):
             self.status_label.setText("完成")
         elif tag == "ota":
             self.view_ota.append_log("固件已提交，设备正在安装；稍后重新连接即可查看新版本")
@@ -530,7 +564,11 @@ def main() -> int:
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    _set_app_user_model_id()
     app = QApplication(sys.argv)
+    _icon = _app_icon()
+    if _icon is not None:
+        app.setWindowIcon(_icon)
     win = MainWindow()
     win.show()
     return app.exec_()
