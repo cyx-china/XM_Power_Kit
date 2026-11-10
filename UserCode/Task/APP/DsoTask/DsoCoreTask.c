@@ -1323,10 +1323,12 @@ static void dso_m1_dump(void) {
     __HAL_LINKDMA(&hadc1, DMA_Handle, hdma_adc1);
 
     __HAL_TIM_SET_PRESCALER(&htim8, 0);
-    // 触发 80 kSa/s → 合成 240 kSa/s：1 kHz 方波正好 240 个样本一个周期，
-    // 若一次触发实际搬了 4 个字节，周期会变成 320，一眼就能分辨。
+    // 触发 80 kSa/s → 合成 240 kSa/s：1 kHz 正弦在这套速率下是 240 字节一个周期，
+    // 一次触发实际搬几个字节、三个 ADC 的样本怎么排，看波形形状就能定。
     __HAL_TIM_SET_AUTORELOAD(&htim8, 1799);
     __HAL_TIM_SET_COUNTER(&htim8, 0);
+    head.rsrv[0] = 1799U;                          // 记下这次用的 ARR，方便事后对照
+    osDelay(50);                                   // 等前端模拟通路稳定（衰减/耦合刚切过）
 
     /* ① 单脉冲：只发一次 TRGO */
     memset(DSO_ADC_BUFFER, 0, sizeof(DSO_ADC_BUFFER));
@@ -1373,12 +1375,6 @@ static uint8_t s_m1_done = 1;
 #endif
 
 void Resume_DsoCoreTask(void) {
-#if DSO_M1_ENABLE
-    if (!s_m1_done) {
-        s_m1_done = 1;
-        dso_m1_dump();      // 【临时】生成 0:/dump.bin，用于核对三重交替的数据排布
-    }
-#endif
     DSO_ADC_SetMulti(true);        // 正常使用时都用三重交替（校准流程会临时关掉）
 
     /* ==================== 新增：恢复所有变量默认值并清零缓冲区 ==================== */
@@ -1431,6 +1427,13 @@ void Resume_DsoCoreTask(void) {
     Calculat_ZoomFactors();                 // 计算缩放因子（依赖已重置的 TimeBase、V_div）
     Div_Set(div_500mv);            // 设置硬件衰减/放大组合
     OSC_Couple_Ctrl(Couple_DC);             // 耦合方式：DC
+
+#if DSO_M1_ENABLE
+    if (!s_m1_done) {
+        s_m1_done = 1;
+        dso_m1_dump();      // 【临时】生成 0:/dump.bin，用于核对三重交替的数据排布
+    }
+#endif
 
     DrawDsoMainBasicElement();              // 绘制基础界面
     osDelay(100);                      // 延时确保界面绘制完成
