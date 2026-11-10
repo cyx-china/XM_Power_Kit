@@ -13,6 +13,7 @@
 
 
 void DSO_ADC_Init(void);
+void DSO_ADC_SetMulti(bool on);
 static void DrawDsoCalibratePage(void);
 static void CB_DSO_CAL_ADC_ConvCplt(ADC_HandleTypeDef *hadc);
 
@@ -84,6 +85,8 @@ void DSO_Calibrate_Enter(void) {
     OSC_Attenuation_Ctrl(Attenuation_1);
     OSC_Magnify_Ctrl(Magnify_1);
 
+    // 校准要"一个触发一个样本"，先关掉三重交替，回到只用 ADC1 的模式
+    DSO_ADC_SetMulti(false);
     DSO_ADC_Init();
     HAL_ADC_RegisterCallback(&hadc1, HAL_ADC_CONVERSION_COMPLETE_CB_ID, CB_DSO_CAL_ADC_ConvCplt);   // 注册DMA回调
     HAL_ADC_Start_DMA(&hadc1, (uint32_t *)DSO_CAL_ADC_BUFFER, 128);                      // 启动ADC & DMA

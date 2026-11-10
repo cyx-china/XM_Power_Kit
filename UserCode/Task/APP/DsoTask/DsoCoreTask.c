@@ -32,6 +32,7 @@
 #include "SwitchManager.h"
 #include "tim.h"
 #include "UserDefineManage.h"
+#include "ff.h"
 
 /* ============================ 静态全局缓冲区定义 ============================ */
 // ADC环形缓冲区：存储ADC采样的原始数据，采用环形结构循环存储
@@ -222,13 +223,13 @@ void CB_DSO_ADC_ConvCplt(ADC_HandleTypeDef *hadc) {
  *         原来不判返回值，一旦流/状态机出错就会静默定格在最后一帧，看起来像死机。
  */
 static bool Dso_StartCapture(void) {
-    (void)HAL_ADC_Stop_DMA(&hadc1);                            // 本来没在采也允许，返回值忽略
+    (void)HAL_ADCEx_MultiModeStop_DMA(&hadc1);                 // 本来没在采也允许，返回值忽略
     __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_EOC | ADC_FLAG_OVR); // 清掉上一次可能残留的标志
-    if (HAL_ADC_Start_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK) {
+    if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK) {
         return true;
     }
-    (void)HAL_ADC_Stop_DMA(&hadc1);                            // 再兜一次：先停干净再重试
-    return HAL_ADC_Start_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK;
+    (void)HAL_ADCEx_MultiModeStop_DMA(&hadc1);                 // 再兜一次：先停干净再重试
+    return HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK;
 }
 
 /**
@@ -702,7 +703,7 @@ void TimeBase_Set(TimeBase_e base) {
     Is_Trig = false;                                    // 重置触发标志
     Is_conv_finish = false;                             // 重置ADC转换完成标志
     post_trigger_counting = false;                      // 重置后触发计数标志
-    HAL_ADC_Stop_DMA(&hadc1);                           // 关闭ADC & DMA
+    HAL_ADCEx_MultiModeStop_DMA(&hadc1);                // 关闭ADC & DMA
 
     // 配置TIM8（ADC采样触发源）参数
     __HAL_TIM_SET_PRESCALER(&htim8, time_base[TimeBase].trigger_timer_psc);
@@ -813,14 +814,9 @@ static int16_t Current_Original_Offset(void) {
  */
 static void ApplyStretchToBuffer(void) {
 
-    // 根据时基确定拉伸因子
-    float stretch_factor;
-    switch (TimeBase) {
-        case time_20us:  stretch_factor = 2.5f;     break;
-        case time_10us:  stretch_factor = 5.0f;     break;
-        case time_5us:   stretch_factor = 10.0f;    break;
-        default:         stretch_factor = 1.0f;     break;
-    }
+    // 拉伸因子直接取自时基表：三重交替把真实采样率提高了 3 倍，
+    // 同样显示窗口内的真实点也多了 3 倍，所以原来靠插值撑出来的几档倍率降到了 1/3
+    const float stretch_factor = time_base[TimeBase].stretch;
 
     // 时基拉伸处理
     if (stretch_factor <= 1.1f) {
@@ -1062,6 +1058,65 @@ static void format_voltage(float voltage_v, char *buffer, size_t buffer_size) {
     fmt_fixed_unit(buffer, buffer_size, rounded, 2, 5, FMT_ZERO_PAD, "V");
 }
 
+/* ============================ 三重交替采样（ADC1+ADC2+ADC3） ============================ */
+/*
+ * 三个 ADC 采同一个引脚 PA3（ADC123_IN3），由主机 ADC1 的外部触发（TIM8 TRGO）统一发起；
+ * 采样时刻由 ADC_CCR.DELAY 错开，DMA（模式1）每个序列按 ADC1→ADC2→ADC3 传 3 个字节，
+ * 所以合成采样率是单 ADC 的 3 倍：2.4 MSa/s → 7.2 MSa/s。
+ */
+static ADC_HandleTypeDef s_dso_hadc2;                  // 从机 ADC2
+static ADC_HandleTypeDef s_dso_hadc3;                  // 从机 ADC3
+static bool              s_adc_multi = true;           // true: 三重交替；false: 只用 ADC1（校准流程）
+
+void DSO_ADC_SetMulti(bool on) {
+    s_adc_multi = on;
+}
+
+/**
+ * @brief  配置一个参与多模式的 ADC（主机/从机参数略有差别）
+ * @param  h: ADC 句柄
+ * @param  inst: ADC1/ADC2/ADC3
+ * @param  is_master: 主机(ADC1)负责外部触发与 DMA 请求，从机只跟着多模式硬件走
+ */
+static void dso_adc_config(ADC_HandleTypeDef *h, ADC_TypeDef *inst, bool is_master) {
+    ADC_ChannelConfTypeDef ch = {0};
+
+    h->Instance = inst;
+    h->Init.ClockPrescaler        = ADC_CLOCK_SYNC_PCLK_DIV2;   // ADCCLK = 72/2 = 36 MHz
+    h->Init.Resolution            = ADC_RESOLUTION_8B;          // 8 位（与 8 位采样缓冲一致）
+    h->Init.ScanConvMode          = DISABLE;                    // 单通道
+    h->Init.ContinuousConvMode    = DISABLE;                    // 不连续转换，由 TIM8 触发
+    h->Init.DiscontinuousConvMode = DISABLE;
+    h->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
+    h->Init.NbrOfConversion       = 1;
+    h->Init.EOCSelection          = ADC_EOC_SEQ_CONV;
+    if (is_master) {
+        h->Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_RISING;
+        h->Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T8_TRGO;
+        h->Init.DMAContinuousRequests = ENABLE;
+    } else {
+        // 从机的触发由多模式硬件统一调度，自己的触发源与 DMA 请求都不参与
+        h->Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
+        h->Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T8_TRGO;
+        h->Init.DMAContinuousRequests = DISABLE;
+    }
+    if (HAL_ADC_Init(h) != HAL_OK) {
+        Error_Handler();
+    }
+
+    ch.Channel      = ADC_CHANNEL_3;                 // PA3 = ADC123_IN3
+    ch.Rank         = 1;
+    ch.SamplingTime = ADC_SAMPLETIME_3CYCLES;        // 最短采样时间（15 个 ADCCLK ≈ 417 ns）
+    if (HAL_ADC_ConfigChannel(h, &ch) != HAL_OK) {
+        Error_Handler();
+    }
+
+    if (!is_master) {
+        // HAL_ADCEx_MultiModeStart_DMA 只会打开主机，从机必须自己置 ADON（配置通道之后才能打开）
+        SET_BIT(inst->CR2, ADC_CR2_ADON);
+    }
+}
+
 /* ============================ 硬件初始化/反初始化函数 ============================ */
 /**
  * @brief  初始化DSO的ADC采集相关硬件
@@ -1069,32 +1124,27 @@ static void format_voltage(float voltage_v, char *buffer, size_t buffer_size) {
  * @retval None
  */
 void DSO_ADC_Init(void) {
-    ADC_ChannelConfTypeDef sConfig = {0};
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-    // 配置ADC1核心参数
-    hadc1.Instance = ADC1;
-    hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
-    hadc1.Init.Resolution = ADC_RESOLUTION_8B;          // 8位分辨率
-    hadc1.Init.ScanConvMode = DISABLE;                  // 单通道模式
-    hadc1.Init.ContinuousConvMode = DISABLE;            // 非连续转换（由TIM8触发）
-    hadc1.Init.DiscontinuousConvMode = DISABLE;
-    hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING; // 上升沿触发
-    hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T8_TRGO; // TIM8 TRGO触发
-    hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;         // 右对齐
-    hadc1.Init.NbrOfConversion = 1;                     // 单次转换
-    hadc1.Init.DMAContinuousRequests = ENABLE;          // 开启DMA连续请求
-    hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
-    if (HAL_ADC_Init(&hadc1) != HAL_OK) {
-        Error_Handler();
-    }
+    /* ---------- 三重交替采样：ADC1(主机) + ADC2/ADC3(从机) ---------- */
+    dso_adc_config(&hadc1, ADC1, true);
+    __HAL_RCC_ADC2_CLK_ENABLE();
+    __HAL_RCC_ADC3_CLK_ENABLE();
+    if (s_adc_multi) {
+        dso_adc_config(&s_dso_hadc2, ADC2, false);
+        dso_adc_config(&s_dso_hadc3, ADC3, false);
 
-    // 配置ADC通道3（PA3）
-    sConfig.Channel = ADC_CHANNEL_3;
-    sConfig.Rank = 1;
-    sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES; // 最短采样时间（提高采样率）
-    if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
-        Error_Handler();
+        // 多模式必须在三个 ADC 都配置好之后再设（HAL_ADC_Init 会清掉 CCR 的 MULTI 位）
+        ADC_MultiModeTypeDef mm = {0};
+        mm.Mode             = ADC_TRIPLEMODE_INTERL;          // 三重交替
+        mm.DMAAccessMode    = ADC_DMAACCESSMODE_1;            // DMA 模式1：CDR 里的数据按 1→2→3 逐个搬（宽度由 DMA 决定）
+        mm.TwoSamplingDelay = ADC_TWOSAMPLINGDELAY_5CYCLES;   // 错开 5 个 ADCCLK ≈ 139 ns
+        if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &mm) != HAL_OK) {
+            Error_Handler();
+        }
+    } else {
+        // 校准流程要求"一个触发一个样本"：强制回到独立模式
+        ADC->CCR &= ~(ADC_CCR_MULTI | ADC_CCR_DMA | ADC_CCR_DDS);
     }
 
     // 使能时钟
@@ -1138,13 +1188,20 @@ void DSO_ADC_Init(void) {
  */
 void DSO_ADC_DeInit(void) {
     // 停止ADC和DMA
+    HAL_ADCEx_MultiModeStop_DMA(&hadc1);
     HAL_ADC_Stop(&hadc1);
-    HAL_ADC_Stop_DMA(&hadc1);
     HAL_DMA_PollForTransfer(&hdma_adc1, HAL_DMA_FULL_TRANSFER, 100);
+
+    // 退出多重模式：ADC1 恢复独立工作（DPS 等其它 APP 会重新初始化 ADC1）
+    ADC->CCR &= ~(ADC_CCR_MULTI | ADC_CCR_DMA | ADC_CCR_DDS);
+    __HAL_ADC_DISABLE(&s_dso_hadc2);                       // 从机 ADON 也一起关掉
+    __HAL_ADC_DISABLE(&s_dso_hadc3);
 
     // 反初始化ADC、GPIO、DMA
     HAL_ADC_DeInit(&hadc1);
     __HAL_RCC_ADC1_CLK_DISABLE();
+    __HAL_RCC_ADC2_CLK_DISABLE();
+    __HAL_RCC_ADC3_CLK_DISABLE();
     HAL_GPIO_DeInit(GPIOA, GPIO_PIN_3);
     HAL_GPIO_DeInit(GPIOB, GPIO_PIN_0 | GPIO_PIN_1);
     HAL_DMA_DeInit(&hdma_adc1);
@@ -1162,7 +1219,7 @@ void Suspend_DsoCoreTask(void) {
     Is_Trig = false;                                    // 重置触发标志
     Is_conv_finish = false;                             // 重置ADC转换完成标志
     post_trigger_counting = false;                      // 重置后触发计数标志
-    HAL_ADC_Stop_DMA(&hadc1);                           // 关闭ADC & DMA
+    HAL_ADCEx_MultiModeStop_DMA(&hadc1);                // 关闭ADC & DMA
     DSO_ADC_DeInit();
 
     OSC_Couple_Ctrl(Couple_AC);                         // 耦合方式：AC
@@ -1171,7 +1228,123 @@ void Suspend_DsoCoreTask(void) {
     osThreadSuspend(DsoCoreTaskHandle);                 // 挂起DSO核心任务
 }
 
+/* ================================================================================
+ * 【临时】M1：三重交替采样的数据通路验证 —— 生成 0:/dump.bin 供上位机下载核对
+ * -------------------------------------------------------------------------------
+ * 先"单脉冲触发一次"数清一个序列里发生了多少次 DMA 传输（预期 3，即 ADC1/2/3 各一个），
+ * 再整段采满 2048 个样本存盘，用来核对数据排布与各 ADC 的偏置差异。
+ * 确认无误后把这一段（含 DSO_M1_ENABLE）整段删除即可。
+ * ==============================================================================*/
+#define DSO_M1_ENABLE  1
+#define DSO_M1_FILE    "0:/dump.bin"
+#define DSO_M1_LEN     2048U
+
+#if DSO_M1_ENABLE
+static uint8_t s_m1_done = 0;
+
+typedef struct {
+    uint32_t magic;      // 'M1D0'
+    uint32_t moved;      // 一次 TIM8 触发内发生的 DMA 传输次数（预期 3）
+    uint32_t ndtr;       // 整段采完后的剩余 DMA 计数
+    uint32_t ccr;        // ADC->CCR 实测值
+    uint32_t len;        // 后面跟的样本数
+    uint32_t rsrv[3];
+} m1_head_t;
+
+static void dso_m1_dump(void) {
+    m1_head_t head;
+    ADC_MultiModeTypeDef mm = {0};
+    FIL  fil;
+    UINT bw = 0;
+
+    memset(&head, 0, sizeof(head));
+
+    __HAL_RCC_ADC2_CLK_ENABLE();
+    __HAL_RCC_ADC3_CLK_ENABLE();
+    dso_adc_config(&hadc1, ADC1, true);
+    dso_adc_config(&s_dso_hadc2, ADC2, false);
+    dso_adc_config(&s_dso_hadc3, ADC3, false);
+
+    mm.Mode             = ADC_TRIPLEMODE_INTERL;
+    mm.DMAAccessMode    = ADC_DMAACCESSMODE_1;
+    mm.TwoSamplingDelay = ADC_TWOSAMPLINGDELAY_5CYCLES;
+    if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &mm) != HAL_OK) {
+        return;
+    }
+
+    // DMA 用普通模式：传满就停，方便数"一次触发传了几次"
+    hdma_adc1.Instance                 = DMA2_Stream4;
+    hdma_adc1.Init.Channel             = DMA_CHANNEL_0;
+    hdma_adc1.Init.Direction           = DMA_PERIPH_TO_MEMORY;
+    hdma_adc1.Init.PeriphInc           = DMA_PINC_DISABLE;
+    hdma_adc1.Init.MemInc              = DMA_MINC_ENABLE;
+    hdma_adc1.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_adc1.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
+    hdma_adc1.Init.Mode                = DMA_NORMAL;
+    hdma_adc1.Init.Priority            = DMA_PRIORITY_HIGH;
+    hdma_adc1.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(&hdma_adc1) != HAL_OK) {
+        return;
+    }
+    __HAL_LINKDMA(&hadc1, DMA_Handle, hdma_adc1);
+
+    __HAL_TIM_SET_PRESCALER(&htim8, 0);
+    __HAL_TIM_SET_AUTORELOAD(&htim8, 59);          // 每 ADC 2.4 MSa/s → 合成 7.2 MSa/s
+    __HAL_TIM_SET_COUNTER(&htim8, 0);
+
+    /* ① 单脉冲：只发一次 TRGO */
+    memset(DSO_ADC_BUFFER, 0, sizeof(DSO_ADC_BUFFER));
+    if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_M1_LEN) == HAL_OK) {
+        htim8.Instance->CR1 |= TIM_CR1_OPM;        // 单脉冲模式
+        AdcTim_ON();
+        for (volatile uint32_t i = 0; i < 40000U; i++) {
+            __NOP();
+        }
+        head.moved = DSO_M1_LEN - __HAL_DMA_GET_COUNTER(&hdma_adc1);
+        htim8.Instance->CR1 &= ~TIM_CR1_OPM;
+        AdcTim_OFF();
+        HAL_ADCEx_MultiModeStop_DMA(&hadc1);
+    } else {
+        head.moved = 0xFFFFFFFFU;
+    }
+
+    /* ② 连续采一段，把样本填满 */
+    memset(DSO_ADC_BUFFER, 0, sizeof(DSO_ADC_BUFFER));
+    if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_M1_LEN) == HAL_OK) {
+        AdcTim_ON();
+        uint32_t t0 = HAL_GetTick();
+        while ((__HAL_DMA_GET_COUNTER(&hdma_adc1) > 0U) && ((HAL_GetTick() - t0) < 100U)) {
+        }
+        head.ndtr = __HAL_DMA_GET_COUNTER(&hdma_adc1);
+        AdcTim_OFF();
+        HAL_ADCEx_MultiModeStop_DMA(&hadc1);
+    } else {
+        head.ndtr = 0xFFFFFFFFU;
+    }
+
+    head.magic = 0x3044314DU;                      // "M1D0"
+    head.ccr   = ADC->CCR;
+    head.len   = DSO_M1_LEN;
+
+    if (f_open(&fil, DSO_M1_FILE, FA_CREATE_ALWAYS | FA_WRITE) == FR_OK) {
+        (void)f_write(&fil, &head, sizeof(head), &bw);
+        (void)f_write(&fil, DSO_ADC_BUFFER, DSO_M1_LEN, &bw);
+        (void)f_close(&fil);
+    }
+}
+#else
+static uint8_t s_m1_done = 1;
+#endif
+
 void Resume_DsoCoreTask(void) {
+#if DSO_M1_ENABLE
+    if (!s_m1_done) {
+        s_m1_done = 1;
+        dso_m1_dump();      // 【临时】生成 0:/dump.bin，用于核对三重交替的数据排布
+    }
+#endif
+    DSO_ADC_SetMulti(true);        // 正常使用时都用三重交替（校准流程会临时关掉）
+
     /* ==================== 新增：恢复所有变量默认值并清零缓冲区 ==================== */
     // 清零各缓冲区
     memset(DSO_ADC_BUFFER,         0, DSO_Buffer_Size);

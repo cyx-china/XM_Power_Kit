@@ -2,6 +2,7 @@
 #define XM_POWER_KIT_DSOCORETASK_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "SwitchManager.h"
 
 // 环形缓冲区大小
@@ -24,7 +25,9 @@ extern const uint8_t grid_data[201][38];
 extern const uint8_t y_lookup[256];
 
 typedef enum {
-    time_5us = 0,
+    time_1us = 0,
+    time_2us,
+    time_5us,
     time_10us,
     time_20us,
     time_50us,
@@ -54,10 +57,15 @@ typedef struct {
     uint16_t refresh_timer_psc;
     uint16_t refresh_timer_arr;
     uint16_t refresh_time;
+    float    stretch;          // 时基拉伸倍率：1.0 = 不插值，直接取原始采样点
     char TimeBase_msg[8];
 } TimeBase_t;
 
 extern const TimeBase_t time_base[timebase_num];
+
+/* 是否启用三重交替采样（ADC1+ADC2+ADC3）。
+ * 校准流程要求"一个触发一个样本"，进入校准前需要置 false。 */
+void DSO_ADC_SetMulti(bool on);
 
 typedef enum {
     div_10mv = 0,
