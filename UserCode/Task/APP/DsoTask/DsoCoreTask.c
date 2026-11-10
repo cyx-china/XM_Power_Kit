@@ -253,6 +253,24 @@ static bool Dso_RestartAcquisition(bool wait_half_period) {
     return true;
 }
 
+/**
+ * @brief  从"暂停"回到"运行"时重新武装采集
+ * @note   暂停期间 ADC、定时触发、边沿捕获都已停下（最后一帧的回调里 AdcTim_OFF 且触发中断被关），
+ *         如果只把 Is_Pause 清零，界面会一直定格在最后一帧。
+ *         这里丢掉暂停期间残留的那一帧，重新启动采集；
+ *         单次触发模式下再补一次定时触发，相当于"按一次恢复键采一帧"。
+ */
+static void Dso_ResumeRunning(void) {
+    Is_conv_finish = false;                                     // 丢掉暂停期间残留的帧
+    if (!Dso_RestartAcquisition(false)) {
+        capture_fault = true;                                   // 交给主循环看门狗重试
+        return;
+    }
+    if (TriggerMode == TrigMode_Single) {
+        HAL_TIM_Base_Start_IT(&htim11);                         // 单次模式：补一次触发
+    }
+}
+
 /* ============================ 核心任务入口函数 ============================ */
 /**
  * @brief  DSO核心任务主循环
@@ -271,7 +289,7 @@ void Start_DsoCoreTask(void *argument) {
         if (Is_conv_finish && !Is_Pause) { // 波形转换完成且未暂停
 
             if (TriggerMode == TrigMode_Single) {   // 如果是单次触发模式，那么直接暂停函数
-                Is_Pause = !Is_Pause;
+                Is_Pause = true;                    // 这里必然处于运行态，直接置暂停（原来写成取反，容易误读）
                 lcd_draw_rect(130,0,190,17,0x1082,1);
                 lcd_draw_string(135,0,"STOP",&JetBrainsMono14x18,0xf000,0x1082,-2);
             }
@@ -701,7 +719,12 @@ void TimeBase_Set(TimeBase_e base) {
 
     // 启动定时器和中断
     AdcTim_ON();                          // 启动TIM8
-    HAL_TIM_Base_Start_IT(&htim11);       // 启动TIM11定时中断
+    // 自动模式：定时触发一直开着；单次模式：只有处于运行态才补一次触发。
+    // 否则在单次模式下暂停着改时基，会自己触发一帧、帧处理又把 Is_Pause 置位，
+    // 看起来就像"按一下下键就把波形暂停了"。
+    if (TriggerMode != TrigMode_Single || !Is_Pause) {
+        HAL_TIM_Base_Start_IT(&htim11);
+    }
     HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_3); // 启动TIM3捕获中断
 }
 
@@ -1254,6 +1277,7 @@ static void dso_main_page_handler(KeyEventMsg_t msg) {
         lcd_draw_rect(130,0,190,17,0x1082,1);
         if (!Is_Pause) {
             lcd_draw_string(141, 0, "RUN", &JetBrainsMono14x18, 0x07c4, 0x1082, -2);
+            Dso_ResumeRunning();    // 暂停期间采集与触发都停了，恢复时必须重新武装
         }
         else {
             lcd_draw_string(135,0,"STOP",&JetBrainsMono14x18,0xf000,0x1082,-2);
@@ -1416,6 +1440,7 @@ static void dso_setting_page_handler(KeyEventMsg_t msg) {
         lcd_draw_rect(130,0,190,17,0x1082,1);
         if (!Is_Pause) {
             lcd_draw_string(141, 0, "RUN", &JetBrainsMono14x18, 0x07c4, 0x1082, -2);
+            Dso_ResumeRunning();    // 暂停期间采集与触发都停了，恢复时必须重新武装
         }
         else {
             lcd_draw_string(135,0,"STOP",&JetBrainsMono14x18,0xf000,0x1082,-2);

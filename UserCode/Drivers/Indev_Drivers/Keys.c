@@ -20,6 +20,18 @@ static uint8_t Key_ReadLevel(IndevTypeDef key){
 
 void Key_Init(void)
 {
+    // 按键引脚统一配成"带上拉的输入"。
+    // CubeMX 里这 5 个脚是 GPIO_NOPULL，完全靠板上外部上拉；一旦外部上拉偏弱、走线又长，
+    // 相邻的两个按键（PB14 下键 / PB15 SET）就可能互相串扰，表现为"按下键却触发了一次 SET"。
+    // bootloader 里按键一直用的是内部上拉，这里与它保持一致。
+    GPIO_InitTypeDef gpio = {0};
+    gpio.Mode = GPIO_MODE_INPUT;
+    gpio.Pull = GPIO_PULLUP;
+    gpio.Pin  = GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;   // MODE / UP / DOWN / SET
+    HAL_GPIO_Init(GPIOB, &gpio);
+    gpio.Pin  = GPIO_PIN_4;                                             // KEY_PWR
+    HAL_GPIO_Init(GPIOE, &gpio);
+
     for (int i = 0; i < KEY_NUM; i++) {
         keys[i].state         = KEY_STATE_IDLE;
         keys[i].level         = 0;
