@@ -1285,6 +1285,58 @@ typedef struct {
     uint32_t rsrv[3];
 } m1_head_t;
 
+// 按指定宽度/模式配好 DMA（A 组：半字；B 组：字）
+static bool m1_dma_setup(uint32_t align) {
+    hdma_adc1.Instance                 = DMA2_Stream4;
+    hdma_adc1.Init.Channel             = DMA_CHANNEL_0;
+    hdma_adc1.Init.Direction           = DMA_PERIPH_TO_MEMORY;
+    hdma_adc1.Init.PeriphInc           = DMA_PINC_DISABLE;
+    hdma_adc1.Init.MemInc              = DMA_MINC_ENABLE;
+    hdma_adc1.Init.PeriphDataAlignment = align;
+    hdma_adc1.Init.MemDataAlignment    = align;
+    hdma_adc1.Init.Mode                = DMA_NORMAL;      // 传满就停，方便数"一次触发搬了几次"
+    hdma_adc1.Init.Priority            = DMA_PRIORITY_HIGH;
+    hdma_adc1.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(&hdma_adc1) != HAL_OK) {
+        return false;
+    }
+    __HAL_LINKDMA(&hadc1, DMA_Handle, hdma_adc1);
+    return true;
+}
+
+// 单脉冲：只发一次 TRGO，返回这一下搬了多少次传输
+static uint32_t m1_single_pulse(uint32_t len) {
+    memset(DSO_ADC_BUFFER, 0, DSO_M1_LEN);
+    if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, len) != HAL_OK) {
+        return 0xFFFFFFFFU;
+    }
+    htim8.Instance->CR1 |= TIM_CR1_OPM;
+    AdcTim_ON();
+    for (volatile uint32_t i = 0; i < 40000U; i++) {
+        __NOP();
+    }
+    uint32_t moved = len - __HAL_DMA_GET_COUNTER(&hdma_adc1);
+    htim8.Instance->CR1 &= ~TIM_CR1_OPM;
+    AdcTim_OFF();
+    HAL_ADCEx_MultiModeStop_DMA(&hadc1);
+    return moved;
+}
+
+// 连续采满 len 次传输，返回剩余计数（0 = 采满）
+static uint32_t m1_fill(uint32_t len) {
+    if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, len) != HAL_OK) {
+        return 0xFFFFFFFFU;
+    }
+    AdcTim_ON();
+    uint32_t t0 = HAL_GetTick();
+    while ((__HAL_DMA_GET_COUNTER(&hdma_adc1) > 0U) && ((HAL_GetTick() - t0) < 100U)) {
+    }
+    uint32_t ndtr = __HAL_DMA_GET_COUNTER(&hdma_adc1);
+    AdcTim_OFF();
+    HAL_ADCEx_MultiModeStop_DMA(&hadc1);
+    return ndtr;
+}
+
 static void dso_m1_dump(void) {
     m1_head_t head;
     ADC_MultiModeTypeDef mm = {0};
@@ -1306,21 +1358,9 @@ static void dso_m1_dump(void) {
         return;
     }
 
-    // DMA 用普通模式：传满就停，方便数"一次触发传了几次"
-    hdma_adc1.Instance                 = DMA2_Stream4;
-    hdma_adc1.Init.Channel             = DMA_CHANNEL_0;
-    hdma_adc1.Init.Direction           = DMA_PERIPH_TO_MEMORY;
-    hdma_adc1.Init.PeriphInc           = DMA_PINC_DISABLE;
-    hdma_adc1.Init.MemInc              = DMA_MINC_ENABLE;
-    hdma_adc1.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
-    hdma_adc1.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
-    hdma_adc1.Init.Mode                = DMA_NORMAL;
-    hdma_adc1.Init.Priority            = DMA_PRIORITY_HIGH;
-    hdma_adc1.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
-    if (HAL_DMA_Init(&hdma_adc1) != HAL_OK) {
+    if (!m1_dma_setup(DMA_PDATAALIGN_HALFWORD)) {   // A 组：半字传输 + 模式1
         return;
     }
-    __HAL_LINKDMA(&hadc1, DMA_Handle, hdma_adc1);
 
     __HAL_TIM_SET_PRESCALER(&htim8, 0);
     // 触发 80 kSa/s → 合成 240 kSa/s：1 kHz 正弦在这套速率下是 240 字节一个周期，
@@ -1330,43 +1370,28 @@ static void dso_m1_dump(void) {
     head.rsrv[0] = 1799U;                          // 记下这次用的 ARR，方便事后对照
     osDelay(50);                                   // 等前端模拟通路稳定（衰减/耦合刚切过）
 
-    /* ① 单脉冲：只发一次 TRGO */
-    memset(DSO_ADC_BUFFER, 0, sizeof(DSO_ADC_BUFFER));
-    if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_M1_LEN) == HAL_OK) {
-        htim8.Instance->CR1 |= TIM_CR1_OPM;        // 单脉冲模式
-        AdcTim_ON();
-        for (volatile uint32_t i = 0; i < 40000U; i++) {
-            __NOP();
-        }
-        head.moved = DSO_M1_LEN - __HAL_DMA_GET_COUNTER(&hdma_adc1);
-        htim8.Instance->CR1 &= ~TIM_CR1_OPM;
-        AdcTim_OFF();
-        HAL_ADCEx_MultiModeStop_DMA(&hadc1);
-    } else {
-        head.moved = 0xFFFFFFFFU;
-    }
+    /* A 组：半字传输 + 模式1 —— 若每触发 3 次传输，则一次触发正好给出 ADC1/2/3 三个半字 */
+    head.moved = m1_single_pulse(DSO_M1_LEN / 2U);        // 1024 次半字传输 = 2048 字节
+    head.ndtr  = m1_fill(DSO_M1_LEN / 2U);
+    memcpy(&DSO_ADC_BUFFER[DSO_M1_LEN], DSO_ADC_BUFFER, DSO_M1_LEN);   // A 组挪到后半段
 
-    /* ② 连续采一段，把样本填满 */
-    memset(DSO_ADC_BUFFER, 0, sizeof(DSO_ADC_BUFFER));
-    if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_M1_LEN) == HAL_OK) {
-        AdcTim_ON();
-        uint32_t t0 = HAL_GetTick();
-        while ((__HAL_DMA_GET_COUNTER(&hdma_adc1) > 0U) && ((HAL_GetTick() - t0) < 100U)) {
-        }
-        head.ndtr = __HAL_DMA_GET_COUNTER(&hdma_adc1);
-        AdcTim_OFF();
-        HAL_ADCEx_MultiModeStop_DMA(&hadc1);
-    } else {
-        head.ndtr = 0xFFFFFFFFU;
+    /* B 组：字传输 + DMA 模式2（"成对"） */
+    mm.DMAAccessMode = ADC_DMAACCESSMODE_2;
+    (void)HAL_ADCEx_MultiModeConfigChannel(&hadc1, &mm);
+    if (m1_dma_setup(DMA_PDATAALIGN_WORD)) {
+        head.rsrv[1] = m1_single_pulse(DSO_M1_LEN / 4U);  // 512 次字传输 = 2048 字节
+        head.rsrv[2] = m1_fill(DSO_M1_LEN / 4U);
     }
 
     head.magic = 0x3044314DU;                      // "M1D0"
     head.ccr   = ADC->CCR;
-    head.len   = DSO_M1_LEN;
+    head.len   = DSO_M1_LEN;                       // 每块字节数
 
+    // 布局：头(32 字节) + A 组(2048，半字流) + B 组(2048，字流)
     if (f_open(&fil, DSO_M1_FILE, FA_CREATE_ALWAYS | FA_WRITE) == FR_OK) {
         (void)f_write(&fil, &head, sizeof(head), &bw);
-        (void)f_write(&fil, DSO_ADC_BUFFER, DSO_M1_LEN, &bw);
+        (void)f_write(&fil, &DSO_ADC_BUFFER[DSO_M1_LEN], DSO_M1_LEN, &bw);   // A 组
+        (void)f_write(&fil, DSO_ADC_BUFFER, DSO_M1_LEN, &bw);                // B 组
         (void)f_close(&fil);
     }
 }
