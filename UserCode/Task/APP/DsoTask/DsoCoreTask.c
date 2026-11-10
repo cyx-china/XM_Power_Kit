@@ -216,6 +216,35 @@ void CB_DSO_ADC_ConvCplt(ADC_HandleTypeDef *hadc) {
 }
 
 /* ============================ 采集启动/重启 ============================ */
+/*
+ * 三重交替必须走 HAL_ADCEx_MultiModeStart_DMA，而它会把 DMA 的三个回调换成 HAL
+ * 内部的 ADC_MultiModeDMAConvCplt / ADC_MultiModeDMAHalfConvCplt，这两个函数只直接
+ * 调用**弱符号** HAL_ADC_ConvCpltCallback()，不会分派到 hadc->ConvCpltCallback
+ * （应用用 HAL_ADC_RegisterCallback 注册的那个）。于是 CB_DSO_ADC_ConvCplt 永远收不到，
+ * Is_conv_finish 一直为假，一帧都不会画（连网格都没有）。
+ * 这里在每次启动之后把回调改回自己的，绕开 HAL 的这套分派。
+ */
+static void dso_dma_cplt_cb(DMA_HandleTypeDef *hdma) {
+    (void) hdma;
+    CB_DSO_ADC_ConvCplt(&hadc1);
+}
+
+static void dso_dma_half_cb(DMA_HandleTypeDef *hdma) {
+    (void) hdma;
+    CB_ADC_HalfConvCplt(&hadc1);
+}
+
+static void dso_dma_error_cb(DMA_HandleTypeDef *hdma) {
+    (void) hdma;
+    capture_fault = true;                                       // 交给主循环看门狗重启采集
+}
+
+static void dso_dma_bind_callbacks(void) {
+    hdma_adc1.XferCpltCallback     = dso_dma_cplt_cb;
+    hdma_adc1.XferHalfCpltCallback = dso_dma_half_cb;
+    hdma_adc1.XferErrorCallback    = dso_dma_error_cb;
+}
+
 /**
  * @brief  启动 ADC + DMA 采集（先停再启，保证状态机与 NDTR 都确定）
  * @retval true: 启动成功；false: 两次尝试都失败
@@ -226,10 +255,15 @@ static bool Dso_StartCapture(void) {
     (void)HAL_ADCEx_MultiModeStop_DMA(&hadc1);                 // 本来没在采也允许，返回值忽略
     __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_EOC | ADC_FLAG_OVR); // 清掉上一次可能残留的标志
     if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK) {
+        dso_dma_bind_callbacks();
         return true;
     }
     (void)HAL_ADCEx_MultiModeStop_DMA(&hadc1);                 // 再兜一次：先停干净再重试
-    return HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK;
+    if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK) {
+        dso_dma_bind_callbacks();
+        return true;
+    }
+    return false;
 }
 
 /**
@@ -1289,7 +1323,9 @@ static void dso_m1_dump(void) {
     __HAL_LINKDMA(&hadc1, DMA_Handle, hdma_adc1);
 
     __HAL_TIM_SET_PRESCALER(&htim8, 0);
-    __HAL_TIM_SET_AUTORELOAD(&htim8, 59);          // 每 ADC 2.4 MSa/s → 合成 7.2 MSa/s
+    // 触发 80 kSa/s → 合成 240 kSa/s：1 kHz 方波正好 240 个样本一个周期，
+    // 若一次触发实际搬了 4 个字节，周期会变成 320，一眼就能分辨。
+    __HAL_TIM_SET_AUTORELOAD(&htim8, 1799);
     __HAL_TIM_SET_COUNTER(&htim8, 0);
 
     /* ① 单脉冲：只发一次 TRGO */
