@@ -12,12 +12,19 @@
 /* ---------------------------- 指令集 ---------------------------- */
 #define CMD_READ_STATUS1    0x05U
 #define CMD_WRITE_ENABLE    0x06U
+/* 3 字节地址（W25Q32/64/128 等 ≤16MB 的片子） */
+#define CMD_READ_DATA_3B    0x03U
+#define CMD_PAGE_PROGRAM_3B 0x02U
+#define CMD_SECTOR_ERASE_3B 0x20U
+/* 4 字节地址（W25Q256/512 等 ≥32MB 的片子，必须先发 0xB7 进入该模式） */
 #define CMD_READ_DATA_4B    0x13U
 #define CMD_PAGE_PROGRAM_4B 0x12U
 #define CMD_SECTOR_ERASE_4B 0x21U
 #define CMD_JEDEC_ID        0x9FU
 #define CMD_ENABLE_4BYTE    0xB7U
 #define CMD_WAKE_UP         0xABU
+#define CMD_RESET_ENABLE    0x66U
+#define CMD_RESET_DEVICE    0x99U
 
 #define STATUS_BUSY         0x01U
 #define STATUS_WEL          0x02U
@@ -32,6 +39,7 @@
 #define FLASH_CS_PIN        GPIO_PIN_6
 
 static uint32_t s_flash_size = 0U;
+static bool     s_addr4byte  = false;   /* 当前是否使用 4 字节地址命令（≥32MB 的片子才为真） */
 
 /* ---------------------------- SPI1 轮询收发 ---------------------------- */
 static void spi_init(void)
@@ -99,12 +107,30 @@ static bool write_enable(void)
     return (read_status() & STATUS_WEL) != 0U;
 }
 
-static void send_addr4(uint32_t addr)
+/* 按当前地址模式发送地址：4 字节模式 4 个字节，3 字节模式 3 个字节 */
+static void send_addr(uint32_t addr)
 {
-    (void)spi_xfer((uint8_t)(addr >> 24));
+    if (s_addr4byte)
+    {
+        (void)spi_xfer((uint8_t)(addr >> 24));
+    }
     (void)spi_xfer((uint8_t)(addr >> 16));
     (void)spi_xfer((uint8_t)(addr >> 8));
     (void)spi_xfer((uint8_t)addr);
+}
+
+/* 软复位：把芯片恢复到上电默认状态（3 字节地址模式），清掉上一次运行残留的模式设置 */
+static void reset_chip(void)
+{
+    FLASH_CS_LOW();
+    (void)spi_xfer(CMD_RESET_ENABLE);
+    FLASH_CS_HIGH();
+
+    FLASH_CS_LOW();
+    (void)spi_xfer(CMD_RESET_DEVICE);
+    FLASH_CS_HIGH();
+
+    HAL_Delay(1);                       /* tRST 约 3µs，留足余量 */
 }
 
 /* ---------------------------- 对外接口 ---------------------------- */
@@ -138,16 +164,22 @@ bool Boot_Flash_Init(void)
         return false;
     }
 
-    if (id[2] >= 0x19U)                 /* 32MB 及以上需要 4 字节地址 */
+    /* 先软复位：芯片回到上电默认的 3 字节地址模式。
+       否则上一次运行（应用侧）留下的 4 字节模式会影响后续命令的解析。 */
+    reset_chip();
+
+    if (id[2] >= 0x19U)                 /* 32MB 及以上：改用 4 字节地址命令 */
     {
+        s_addr4byte = true;
         FLASH_CS_LOW();
         (void)spi_xfer(CMD_ENABLE_4BYTE);
         FLASH_CS_HIGH();
         HAL_Delay(1);
         s_flash_size = (id[2] >= 0x20U) ? (64U * 1024U * 1024U) : (32U * 1024U * 1024U);
     }
-    else
+    else                                /* 4MB~16MB（W25Q32/64/128）：保持 3 字节地址 */
     {
+        s_addr4byte = false;
         s_flash_size = 1UL << id[2];
     }
 
@@ -164,8 +196,8 @@ void Boot_Flash_Read(uint32_t addr, void *dst, uint32_t len)
     uint8_t *out = (uint8_t *)dst;
 
     FLASH_CS_LOW();
-    (void)spi_xfer(CMD_READ_DATA_4B);
-    send_addr4(addr);
+    (void)spi_xfer(s_addr4byte ? CMD_READ_DATA_4B : CMD_READ_DATA_3B);
+    send_addr(addr);
     while (len-- > 0U)
     {
         *out++ = spi_xfer(0xFFU);
@@ -181,8 +213,8 @@ bool Boot_Flash_EraseSector(uint32_t addr)
     }
 
     FLASH_CS_LOW();
-    (void)spi_xfer(CMD_SECTOR_ERASE_4B);
-    send_addr4(addr);
+    (void)spi_xfer(s_addr4byte ? CMD_SECTOR_ERASE_4B : CMD_SECTOR_ERASE_3B);
+    send_addr(addr);
     FLASH_CS_HIGH();
 
     return wait_ready(500U);
@@ -203,8 +235,8 @@ bool Boot_Flash_Write(uint32_t addr, const void *src, uint32_t len)
         }
 
         FLASH_CS_LOW();
-        (void)spi_xfer(CMD_PAGE_PROGRAM_4B);
-        send_addr4(addr);
+        (void)spi_xfer(s_addr4byte ? CMD_PAGE_PROGRAM_4B : CMD_PAGE_PROGRAM_3B);
+        send_addr(addr);
         for (uint32_t i = 0U; i < chunk; i++)
         {
             (void)spi_xfer(in[i]);
