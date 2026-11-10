@@ -17,6 +17,61 @@ static float    Target_Current_Prev = 0.0f;    // 记录上一次CC模式下的�
 #define CC_EXIT_DELAY_THRESHOLD 100        // 连续 100ms（100次PID调用）才确认退出
 bool cc_extend_mode = false;               // CC下电流调整模式，0表减小，1表增大
 
+/* ========================== 内部辅助函数 ========================== */
+
+/**
+ * @brief  目标电压 → DAC 设定值（含硬件限幅）
+ * @note   DAC 与输出电压呈负相关（标定系数为负）：DAC 越小，输出电压越高。
+ *         凡是由电压反推 DAC 的地方都走这里，避免各处限幅写法不一致。
+ * @param  voltage: 目标电压（V，内部会钳到允许范围）
+ * @retval 0~4095 的 DAC 值
+ */
+static uint16_t voltage_to_dac(float voltage) {
+    if (voltage > MAX_OUTPUT_VOLTAGE) voltage = MAX_OUTPUT_VOLTAGE;
+    if (voltage < MIN_OUTPUT_VOLTAGE) voltage = MIN_OUTPUT_VOLTAGE;
+
+    int32_t dac = (int32_t) lroundf(UserParam.DPS_Voltage_DAC_Coefficient * voltage +
+                                    UserParam.DPS_Voltage_DAC_Constant);
+    if (dac < 0)    dac = 0;
+    if (dac > 4095) dac = 4095;
+    return (uint16_t) dac;
+}
+
+/**
+ * @brief  恒流模式下 DAC 的下限：目标电压所对应的 DAC
+ * @note  DAC 再往下走就等于把输出电压设定到目标值之上。负载突然断开时，
+ *        电流环会一路把 DAC 往小推（等于把输出电压往大推），必须以这个下限兜住。
+ */
+static uint16_t cc_dac_floor(void) {
+    return voltage_to_dac(Target_Voltage);
+}
+
+/**
+ * @brief  过压回退阈值（相对目标电压的余量）
+ * @note  取「目标电压的 5%」与「0.5V」中较大者：低压档位不会被标定误差误触发，高压档位也不会放得过宽。
+ */
+static float ovp_margin(void) {
+    float margin = Target_Voltage * 0.05f;
+    return (margin < 0.5f) ? 0.5f : margin;
+}
+
+/**
+ * @brief  复位控制环状态：回到恒压模式，DAC 直接置于目标电压位置
+ * @note  电源开启前调用，避免沿用上一次（可能是恒流模式压得很低）的 DAC 值。
+ */
+void PID_ResetOutput(void) {
+    pid_controller.mode            = 0;
+    pid_controller.current_dac     = voltage_to_dac(Target_Voltage);
+    pid_controller.prev_error      = 0.0f;
+    pid_controller.prev_prev_error = 0.0f;
+    pid_controller.result          = 0.0f;
+    cv_adjust_cnt                  = 0;
+    cv_adjust_timer                = 0;
+    cc_exit_delay_cnt              = 0;
+    PowerMode                      = false;
+    PID_InvalidateDacCache();      // 允许 PID 任务立刻把新值写进 MCP4725
+}
+
 void SetTargetVoltage(float Voltage) {
     // 目标电压限幅
     Voltage = fmaxf(fminf(Voltage, MAX_OUTPUT_VOLTAGE), MIN_OUTPUT_VOLTAGE);
@@ -24,11 +79,7 @@ void SetTargetVoltage(float Voltage) {
 
     // CV模式下立即重置基准DAC
     if (pid_controller.mode == 0) {
-        float base_dac = UserParam.DPS_Voltage_DAC_Coefficient * Voltage + UserParam.DPS_Voltage_DAC_Constant;      // 根据校准数据计算基础DAC值
-        pid_controller.current_dac = (uint16_t)roundf(base_dac);
-        // 硬件限幅
-        pid_controller.current_dac = (pid_controller.current_dac > 4095) ? 4095 : pid_controller.current_dac;
-        pid_controller.current_dac = (pid_controller.current_dac < 0)    ? 0    : pid_controller.current_dac;
+        pid_controller.current_dac = voltage_to_dac(Voltage);   // 根据校准数据计算基础DAC值
         cv_adjust_cnt = 0;        // 重置防抖计数
         cv_adjust_timer = 0;      // 重置限速计数
     }
@@ -64,8 +115,7 @@ void PID_Init(void) {
     pid_controller.integral_min  = -200.0f;     // 积分项最小值
     pid_controller.result        = 0.0f;        // CC模式PID增量
     // 初始化基准DAC（5V）
-    pid_controller.current_dac   = (uint16_t)(UserParam.DPS_Voltage_DAC_Coefficient * 5.0f +
-                                              UserParam.DPS_Voltage_DAC_Constant);
+    pid_controller.current_dac   = voltage_to_dac(5.0f);
     pid_controller.prev_error     = 0.0f;
     pid_controller.prev_prev_error = 0.0f;
     // 初始化计数器
@@ -75,6 +125,29 @@ void PID_Init(void) {
 }
 
 uint16_t PID_Calculate(float measured_current, float measured_voltage) {
+    const uint16_t dac_floor = cc_dac_floor();      // 目标电压对应的 DAC：输出电压不允许超过它
+
+    // ========================================
+    // 过压快速回退（保护环）
+    // ========================================
+    // 正常控制下 DAC 一直被钳在 dac_floor 之上，输出电压不可能超过目标值。
+    // 一旦真的超了，说明环路异常（负载突卸后又灌入、DAC 掉电复位、外部串入等），
+    // 立刻把 DAC 拉回目标电压位置并退出恒流模式，不等模式判定的 100ms 防抖。
+    if (measured_voltage > (Target_Voltage + ovp_margin())) {
+        pid_controller.current_dac     = dac_floor;
+        pid_controller.prev_error      = 0.0f;
+        pid_controller.prev_prev_error = 0.0f;
+        pid_controller.result          = 0.0f;
+        cv_adjust_cnt                  = 0;
+        cv_adjust_timer                = 0;
+        cc_exit_delay_cnt              = 0;
+        if (pid_controller.mode != 0) {
+            pid_controller.mode = 0;
+            PowerMode = false;
+        }
+        return pid_controller.current_dac;
+    }
+
     // 模式切换逻辑
     float cc_enter_threshold = Target_Current + pid_controller.hysteresis_A;  // 进入CC模式的电流 ： 目标电流 + 死区电流
     float cc_exit_threshold  = Target_Current - pid_controller.hysteresis_A;  // 退出CC模式的电流 ： 目标电流 - 死区电流
@@ -104,9 +177,7 @@ uint16_t PID_Calculate(float measured_current, float measured_voltage) {
                 PowerMode = false;
                 cv_adjust_cnt = 0;
                 cv_adjust_timer = 0;
-                float compensated_voltage = fmaxf(fminf(Target_Voltage, MAX_OUTPUT_VOLTAGE), MIN_OUTPUT_VOLTAGE);
-                pid_controller.current_dac = (uint16_t)roundf(
-                    UserParam.DPS_Voltage_DAC_Coefficient * compensated_voltage + UserParam.DPS_Voltage_DAC_Constant);
+                pid_controller.current_dac = voltage_to_dac(Target_Voltage);
                 cc_exit_delay_cnt = 0;  // 重置计数器
             }
         } else {
@@ -119,8 +190,8 @@ uint16_t PID_Calculate(float measured_current, float measured_voltage) {
     uint16_t target_dac;
 
     if (pid_controller.mode == 0) {   // CV模式 —— 直接微调DAC
-        // 直接基于上一次存储的current_dac微调
-        target_dac = pid_controller.current_dac;
+        // 用有符号中间量微调：current_dac 是 uint16_t，在它上面直接 -= 1 会在 0 处回绕成 65535
+        int32_t dac_temp = (int32_t) pid_controller.current_dac;
 
         // 计算电压误差（实测 - 目标）
         float voltage_error = measured_voltage - Target_Voltage;
@@ -128,10 +199,7 @@ uint16_t PID_Calculate(float measured_current, float measured_voltage) {
         // 误差分层判断
         if (fabs(voltage_error) > CV_MAX_ADJUST_ERROR) {
             // 情况1：误差超过±0.15V → 直接重置为基准值
-            float base_dac = UserParam.DPS_Voltage_DAC_Coefficient * Target_Voltage + UserParam.DPS_Voltage_DAC_Constant;
-            target_dac = (uint16_t)roundf(base_dac);
-            target_dac = (target_dac > 4095) ? 4095 : target_dac;
-            target_dac = (target_dac < 0)    ? 0    : target_dac;
+            dac_temp = (int32_t) voltage_to_dac(Target_Voltage);
             cv_adjust_cnt = 0;        // 重置防抖计数
             cv_adjust_timer = 0;      // 重置限速计数
         } else if (fabs(voltage_error) > CV_VOLTAGE_TOLERANCE) {
@@ -143,9 +211,9 @@ uint16_t PID_Calculate(float measured_current, float measured_voltage) {
                 if (cv_adjust_timer >= CV_ADJUST_INTERVAL) {    // 这里暂定为0，如果你有过冲/震荡，可以将CV_ADJUST_INTERVAL调大
                     // 执行±1微调
                     if (voltage_error < -CV_VOLTAGE_TOLERANCE) {    //(DAC与输出电压呈现负相关)
-                        target_dac -= 1; // 电压偏低，DAC - 1
+                        dac_temp -= 1; // 电压偏低，DAC - 1
                     } else if (voltage_error > CV_VOLTAGE_TOLERANCE) {
-                        target_dac += 1; // 电压偏高，DAC + 1
+                        dac_temp += 1; // 电压偏高，DAC + 1
                     }
                     cv_adjust_cnt = 0;        // 重置防抖计数
                     cv_adjust_timer = 0;      // 重置限速计数
@@ -158,8 +226,9 @@ uint16_t PID_Calculate(float measured_current, float measured_voltage) {
         }
 
         // DAC硬件限幅
-        target_dac = (target_dac > 4095) ? 4095 : target_dac;
-        target_dac = (target_dac < 0)    ? 0    : target_dac;
+        if (dac_temp > 4095) dac_temp = 4095;
+        if (dac_temp < 0)    dac_temp = 0;
+        target_dac = (uint16_t) dac_temp;
 
     } else { // CC模式 ——  增量式PID计算
         float temp = cc_extend_mode ? 0.01f : -0.01f;
@@ -170,10 +239,17 @@ uint16_t PID_Calculate(float measured_current, float measured_voltage) {
         increment = fmaxf(fminf(increment, pid_controller.integral_max), pid_controller.integral_min);
         pid_controller.result = increment;
 
-        int32_t dac_temp = (int32_t)pid_controller.current_dac + (int32_t)roundf(increment);
-        dac_temp = (dac_temp > 4095) ? 4095 : dac_temp;
-        dac_temp = (dac_temp < 0)    ? 0    : dac_temp;
-        target_dac = (uint16_t)dac_temp;
+        int32_t dac_temp = (int32_t) pid_controller.current_dac + (int32_t) lroundf(increment);
+        if (dac_temp > 4095) dac_temp = 4095;
+        if (dac_temp < 0)    dac_temp = 0;
+
+        // ★ 恒流模式的安全下限：只允许把 DAC 往上推（= 把输出电压往下压），
+        //   绝不允许低于「目标电压对应的 DAC」——否则等于主动把输出电压设定到设定值之上。
+        //   负载突然断开时电流瞬间归零，电流环会在几十毫秒内把 DAC 一路推到 0，
+        //   对应输出电压接近 40V（标定曲线外推），这就是限流下卸负载电压飙到 30 多伏的根因。
+        if (dac_temp < (int32_t) dac_floor) dac_temp = (int32_t) dac_floor;
+
+        target_dac = (uint16_t) dac_temp;
 
         pid_controller.prev_prev_error = pid_controller.prev_error;
         pid_controller.prev_error = error;

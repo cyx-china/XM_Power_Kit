@@ -38,6 +38,7 @@ void PID_InvalidateDacCache(void);
 
 
 void PID_Init(void);                                                        // 初始化PID参数
+void PID_ResetOutput(void);                                                 // 复位控制环（电源开启前调用）
 uint16_t PID_Calculate(float measured_current, float measured_voltage);     // PID计算
 
 void SetTargetVoltage(float Voltage);                                       // 更新目标电压

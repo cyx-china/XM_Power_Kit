@@ -525,11 +525,17 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         int32_t temp1 = (int32_t)(sum_ch1 >> 6) + UserParam.DPS_Voltage_Original;
         int32_t temp2 = (int32_t)(sum_ch2 >> 6) + UserParam.DPS_Current_Original;
 
+        // 超出 ADC 量程一律按满量程处理（原实现回 0，过压时反而会被当成 0V，控制环因此失去保护）
+        if (temp1 < 0)    temp1 = 0;
+        if (temp1 > 4095) temp1 = 4095;
+        if (temp2 < 0)    temp2 = 0;
+        if (temp2 > 4095) temp2 = 4095;
+
         // 转换为实际电压值（3.3V参考，12位ADC，乘以校准系数）
-        float raw_voltage = (float) (temp1 > 4096 ? 0 : temp1) * 3.3f / 4096.0f * UserParam.DPS_Voltage_Factor;
+        float raw_voltage = (float) temp1 * 3.3f / 4096.0f * UserParam.DPS_Voltage_Factor;
 
         // 转换为实际电流值（扣除电压耦合偏移和固定偏移）
-        float raw_current = (float) (temp2 > 4096 ? 0 : temp2) * 3.3f / 4096.0f * UserParam.DPS_Current_Factor;
+        float raw_current = (float) temp2 * 3.3f / 4096.0f * UserParam.DPS_Current_Factor;
 
         // ==========================================
         //              软件 IIR 低通滤波
@@ -565,6 +571,16 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
     if (IsPowerOn) energy += (double)Power * energy_dt_hour;
 
     AdcTim_ON();                                                             // 开启定时器（ADC触发源）
+}
+
+/**
+ * @brief  复位控制环并把 DAC 立即写到位
+ * @note  必须在打开输出级（DpsPower_ON）之前调用：
+ *        控制环状态（尤其恒流模式下的 DAC）是上一次运行遗留的，直接沿用会在开机瞬间输出异常电压。
+ */
+static void Dps_ResetOutputAndWriteDac(void) {
+    PID_ResetOutput();
+    MCP4725_WriteFast(&hmcp4725_DC, pid_controller.current_dac, MCP4725_MODE_NORMAL);
 }
 
 /* ========================== 数位编辑通用处理函数实现 ========================== */
@@ -1054,6 +1070,7 @@ void dps_main_page_handler(KeyEventMsg_t msg) {
             // 电源开启：更新UI + 硬件控制
             lcd_draw_round_rect(175, 177, 239, 200, 8, 0x9fec, 1);
             lcd_draw_string(193, 180, "ON", &JetBrainsMono14x18, 0x632c, 0x9fec, 2);
+            Dps_ResetOutputAndWriteDac();   // 先把 DAC 写回目标电压位置，再打开输出级
             DpsPower_ON();
             osDelay(10);
             DpsRelease_OFF();
@@ -1577,6 +1594,7 @@ void dps_graph_handler(KeyEventMsg_t msg) {
     else if (msg.key == KEY_SET && msg.event == KEY_EVENT_LONG_PRESS) {
         IsPowerOn = !IsPowerOn;
         if (IsPowerOn) {
+            Dps_ResetOutputAndWriteDac();   // 先把 DAC 写回目标电压位置，再打开输出级
             DpsPower_ON();
             osDelay(10);
             DpsRelease_OFF();
