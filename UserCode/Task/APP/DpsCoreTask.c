@@ -580,7 +580,11 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
  */
 static void Dps_ResetOutputAndWriteDac(void) {
     PID_ResetOutput();
-    MCP4725_WriteFast(&hmcp4725_DC, pid_controller.current_dac, MCP4725_MODE_NORMAL);
+    // I2C3 上只有 DC 这颗 DAC，但 PID 任务会并发写同一条总线，必须用互斥锁串行化
+    if (osMutexAcquire(IIC3_MutexHandle, osWaitForever) == osOK) {
+        MCP4725_WriteFast(&hmcp4725_DC, pid_controller.current_dac, MCP4725_MODE_NORMAL);
+        osMutexRelease(IIC3_MutexHandle);
+    }
 }
 
 /* ========================== 数位编辑通用处理函数实现 ========================== */
@@ -1446,7 +1450,13 @@ void Start_PIDTask(void *argument) {
             uint16_t DAC_Value = PID_Calculate(Current_PID,Voltage_PID);
             // 仅在 DAC 值变化（或缓存被外部失效）时才真正写 I2C
             if ((last_dac_valid == false) || (DAC_Value != last_dac_value) || (pid_dac_force_write != 0)) {
-                if (MCP4725_WriteFast(&hmcp4725_DC, DAC_Value, MCP4725_MODE_NORMAL) == HAL_OK) {
+                // 与校准/复位路径共用 I2C3 总线，加锁避免两个任务的事务互相打断
+                HAL_StatusTypeDef st = HAL_BUSY;
+                if (osMutexAcquire(IIC3_MutexHandle, osWaitForever) == osOK) {
+                    st = MCP4725_WriteFast(&hmcp4725_DC, DAC_Value, MCP4725_MODE_NORMAL);
+                    osMutexRelease(IIC3_MutexHandle);
+                }
+                if (st == HAL_OK) {
                     last_dac_value = DAC_Value;
                     last_dac_valid = true;
                     pid_dac_force_write = 0;

@@ -265,8 +265,11 @@ static void DpsCal_Origin_Current_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_round_rect(115,47,205,73,8,0x048A,1);
             lcd_draw_string(125, 52, "显示校准", &yahei16x16, 0xDEFB, 0x048A, 2);
             
-            // 电源参数配置
-            MCP4725_WriteFast(&hmcp4725_DC, 2800, MCP4725_MODE_NORMAL);
+            // 电源参数配置（PID 任务同时在跑，I2C3 总线必须加锁）
+            if (osMutexAcquire(IIC3_MutexHandle, osWaitForever) == osOK) {
+                MCP4725_WriteFast(&hmcp4725_DC, 2800, MCP4725_MODE_NORMAL);
+                osMutexRelease(IIC3_MutexHandle);
+            }
             IsPowerOn = true;               // 开启PID运算
             DpsPower_ON();                  // 开启PID输出
             osDelay(100);              // 等待100ms稳定  
@@ -461,8 +464,11 @@ static void DpsCal_Output_Main_handler(KeyEventMsg_t msg) {
                 lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
                 lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
                 lcd_draw_string(25, 165, DpsCal_Voltage_Param[cal_idx].message, &yahei16x16, 0xdf3c, 0x29a7, 1);
-                // 设置 DAC 输出值
-                MCP4725_WriteFast(&hmcp4725_DC, DpsCal_Voltage_Param[cal_idx].dac_value, MCP4725_MODE_NORMAL);
+                // 设置 DAC 输出值（PID 任务同时在跑，I2C3 总线必须加锁）
+                if (osMutexAcquire(IIC3_MutexHandle, osWaitForever) == osOK) {
+                    MCP4725_WriteFast(&hmcp4725_DC, DpsCal_Voltage_Param[cal_idx].dac_value, MCP4725_MODE_NORMAL);
+                    osMutexRelease(IIC3_MutexHandle);
+                }
                 // 仅在第一个校准点开启电源
                 if (cal_idx == 0) {
                     DpsPower_ON();

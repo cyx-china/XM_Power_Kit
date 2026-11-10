@@ -18,12 +18,15 @@ static void CB_DSO_CAL_ADC_ConvCplt(ADC_HandleTypeDef *hadc);
 
 float DSO_CAL_VOLTAGE = 0.0f;
 
-volatile uint8_t DSO_AVG_ADC_VAL = 0;
+// ADC 128 点均值（已做偏置校正并钳到 0~255）。
+// 原来是 uint8_t：sum>>7 最大约 265，存进 8 位会回绕成个位数，
+// 校准判据（>128 / <128）就会朝反方向调，永远校不到 128。
+static volatile int16_t DSO_AVG_ADC_VAL = 0;
 
 static uint8_t DSO_CAL_ADC_BUFFER[128] = {0};
 static char Current_Voltage_str[10] = {0};         // 当前电压值
 
-bool Is_Busy = false;
+static bool Is_Busy = false;      // 校准过程忙标志（原来是非 static 的通用名全局变量）
 
 
 typedef enum {
@@ -432,12 +435,19 @@ static void CB_DSO_CAL_ADC_ConvCplt(ADC_HandleTypeDef *hadc) {
         default: bias = 0;
     }
 
-    uint32_t sum = 0;
+    // 逐点做偏置校正后再累加：
+    // 原写法 sum += (DSO_CAL_ADC_BUFFER[i] + bias) 中 sum 是 uint32，
+    // 负偏置（如 -7）会被当成 42 亿这样的大数加进去，均值直接失效。
+    int32_t sum = 0;
     for (int i = 0; i < 128; i++) {
-        sum += (DSO_CAL_ADC_BUFFER[i] + bias);
+        int32_t code = (int32_t)DSO_CAL_ADC_BUFFER[i] + (int32_t)bias;
+        if (code < 0)   code = 0;          // 与显示通路的钳位保持一致（0~255）
+        if (code > 255) code = 255;
+        sum += code;
     }
-    DSO_AVG_ADC_VAL = (sum >> 7);
-    DSO_CAL_VOLTAGE = (float)(sum >> 7 ) * 3.3f / 255.0f;
+    int16_t avg = (int16_t)((sum + 64) / 128);      // 四舍五入取均值
+    DSO_AVG_ADC_VAL = avg;
+    DSO_CAL_VOLTAGE = (float)avg * 3.3f / 255.0f;
 
     AdcTim_ON();
 }

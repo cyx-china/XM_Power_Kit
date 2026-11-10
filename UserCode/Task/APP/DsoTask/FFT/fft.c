@@ -3,6 +3,12 @@
 #include <math.h>
 
 #include "UserDefineManage.h"
+#include "fft_twiddle.h"     // 旋转因子查表（1024 点，由 gen_twiddle.py 生成）
+
+// 旋转因子表按 FFT_N 点生成（表长 N/2+1），点数不一致会导致取表越界
+#if (FFT_N) != ((FFT_TW_N - 1U) * 2U)
+#error "fft_twiddle.h 的表格点数和 FFT_N 不匹配，请重新运行 FFT/gen_twiddle.py"
+#endif
 
 // ==================== 内部静态参数 ====================
 // 中部1024点截取起始索引：(2881-1024)/2 = 928.5 → 向下取整928
@@ -23,7 +29,7 @@ static float fft_amp_sq[FFT_N/2];// 幅度平方缓冲区（0~FFT_N/2-1，512点
  */
 static void FFT_Base2(float *x, float *y, int n)
 {
-    int i, j, k, step;
+    int i, j, k, step, stride;
     float cos_w, sin_w;
     float temp_real, temp_imag, mul_real, mul_imag;
 
@@ -50,14 +56,15 @@ static void FFT_Base2(float *x, float *y, int n)
     for (k = 2; k <= n; k <<= 1)  // k为每级蝶形宽度
     {
         step = k / 2;
+        stride = n / k;         // 表步进：j = k/2 时恰好取到 e^(-j*pi)
         for (i = 0; i < n; i += k)  // i为蝶形组起始索引
         {
             for (j = 0; j < step; j++)  // j为蝶形对偏移
             {
-                // 计算旋转因子
-                float angle = -2.0f * (float)M_PI * (float)j / (float)k;
-                cos_w = cosf(angle);
-                sin_w = sinf(angle);
+                // 旋转因子 W_k^j = e^(-j*2π*j/k)：按 m = j*n/k 查表，免掉 cosf/sinf
+                // （一次 1024 点 FFT 原本要算 10240 次三角，约十几毫秒）
+                cos_w = FFT_TW_COS[j * stride];
+                sin_w = FFT_TW_SIN[j * stride];
 
                 // 取出蝶形第二个节点并乘以旋转因子
                 temp_real = x[i + j + step];
@@ -82,10 +89,23 @@ static void FFT_Base2(float *x, float *y, int n)
  */
 static void Apply_Hanning_Window(float *x, int n)
 {
+    if (n != (int)FFT_N)
+    {
+        // 通用情况（当前工程不会走到）：仍按原式现算
+        for (int i = 0; i < n; i++)
+        {
+            float window = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * (float)i / (float)(n - 1));
+            x[i] *= window;
+        }
+        return;
+    }
+
+    // 周期汉宁窗 w[i] = 0.5 - 0.5*cos(2πi/n)：分母取 n 而非 n-1（相差不到 0.1%），
+    // 这样可以直接复用旋转因子表的余弦项，省掉 1024 次 cosf（约 1~2 ms）。
     for (int i = 0; i < n; i++)
     {
-        float window = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * (float)i / (float)(n - 1));
-        x[i] *= window;
+        int m = (i <= (int)FFT_TW_N) ? i : (n - i);   // 余弦关于半周期对称
+        x[i] *= (0.5f - 0.5f * FFT_TW_COS[m]);
     }
 }
 
