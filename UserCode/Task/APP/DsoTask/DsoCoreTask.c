@@ -71,6 +71,7 @@ volatile bool Is_Pause = false;                         // 暂停标志：是否
 
 // 采集启动失败标记：HAL_ADC_Start_DMA 失败时置位，由主循环定期重试（避免静默定格）
 static bool     capture_fault = false;
+static bool     capture_force_reinit = false;   // 下一次启动采集前强制完整重配 ADC/DMA
 static uint32_t capture_retry_tick = 0;
 
 // ---------------- 触发相关参数 ----------------
@@ -133,6 +134,10 @@ static int16_t Current_Original_Offset(void);
 static uint8_t CatmullRomInterp(uint8_t p0, uint8_t p1, uint8_t p2, uint8_t p3, float t);
 void DSO_BuildShowBuffer(void);
 static void Calculat_ZoomFactors(void);
+
+// ADC / DMA 配置（定义在文件末尾，Dso_StartCapture 的失败恢复要用）
+void DSO_ADC_Init(void);
+void DSO_ADC_DeInit(void);
 void Div_Set(Vdiv_e div_mode);
 void TimeBase_Set(TimeBase_e base);
 
@@ -253,6 +258,11 @@ static void dso_dma_bind_callbacks(void) {
  *         原来不判返回值，一旦流/状态机出错就会静默定格在最后一帧，看起来像死机。
  */
 static bool Dso_StartCapture(void) {
+    if (capture_force_reinit) {                                // 上电/出错后从干净状态重来
+        capture_force_reinit = false;
+        DSO_ADC_DeInit();
+        DSO_ADC_Init();
+    }
     (void)HAL_ADCEx_MultiModeStop_DMA(&hadc1);                 // 本来没在采也允许，返回值忽略
     __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_EOC | ADC_FLAG_OVR); // 清掉上一次可能残留的标志
     if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK) {
@@ -260,6 +270,15 @@ static bool Dso_StartCapture(void) {
         return true;
     }
     (void)HAL_ADCEx_MultiModeStop_DMA(&hadc1);                 // 再兜一次：先停干净再重试
+    if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK) {
+        dso_dma_bind_callbacks();
+        return true;
+    }
+
+    // 两次都失败：多半是 ADC 进入了 OVR/错误状态，只重试 DMA 永远起不来。
+    // 这里把 ADC + DMA 完整重配一遍再试最后一次。
+    DSO_ADC_DeInit();
+    DSO_ADC_Init();
     if (HAL_ADCEx_MultiModeStart_DMA(&hadc1, (uint32_t *)DSO_ADC_BUFFER, DSO_Buffer_Size) == HAL_OK) {
         dso_dma_bind_callbacks();
         return true;
@@ -357,6 +376,27 @@ void Start_DsoCoreTask(void *argument) {
             // 重启ADC采样与触发中断
             if (!Dso_RestartAcquisition(true)) {
                 capture_fault = true;                           // 交给主循环看门狗重试
+            }
+        }
+        // 静默停采看门狗：运行中如果 DMA 计数器长时间不动，说明 ADC 已经不转换了
+        // （OVR/错误态不会报错，只会让缓冲停在原地，画出来就是一条直线）。
+        // 这里主动置 capture_fault，让下面的重启逻辑（含完整重配）把它救回来。
+        {
+            static uint32_t last_ndtr = 0;
+            static uint16_t still_count = 0;
+            if (!Is_Pause && !capture_fault) {
+                uint32_t ndtr_now = __HAL_DMA_GET_COUNTER(&hdma_adc1);
+                if (ndtr_now == last_ndtr) {
+                    still_count++;
+                    if (still_count >= 50U) {                   // 约 500ms 没搬过数据
+                        still_count = 0;
+                        capture_fault = true;                   // 快速重启一次
+                        capture_force_reinit = true;            // 还不行就完整重配（从机可能卡住）
+                    }
+                } else {
+                    still_count = 0;
+                    last_ndtr = ndtr_now;
+                }
             }
         }
         // 采集看门狗：启动失败（或运行中出错）时每 200ms 重新武装一次，不再静默定格
@@ -1509,7 +1549,7 @@ static void dso_setting_page_handler(KeyEventMsg_t msg) {
     else if (msg.key == KEY_DOWN) {
         switch (dso_current_setting) {
             case Setting_TimeBase:
-                TimeBase = (TimeBase > time_5us) ? (TimeBase - 1) : TimeBase;     // 递减时基
+                TimeBase = (TimeBase > time_1us) ? (TimeBase - 1) : TimeBase;     // 递减时基（最小到 1us）
                 TimeBase_Set(TimeBase);
                 break;
             case Setting_VoltageDiv:
