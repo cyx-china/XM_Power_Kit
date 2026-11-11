@@ -72,6 +72,7 @@ volatile bool Is_Pause = false;                         // 暂停标志：是否
 // 采集启动失败标记：HAL_ADC_Start_DMA 失败时置位，由主循环定期重试（避免静默定格）
 static bool     capture_fault = false;
 static bool     capture_force_reinit = false;   // 下一次启动采集前强制完整重配 ADC/DMA
+static uint32_t ovr_seen_count = 0;              // 累计清掉的 ADC 溢出次数（调试用，不显示）
 static uint32_t capture_retry_tick = 0;
 
 // ---------------- 触发相关参数 ----------------
@@ -398,6 +399,13 @@ void Start_DsoCoreTask(void *argument) {
                     last_ndtr = ndtr_now;
                 }
             }
+        }
+        // 溢出（OVR）巡检：F4 的 ADC 一旦置位 OVR 就会卡住后续转换直至软件清零，
+        // 而本工程没有开 ADC 中断，没人清它 —— 表现出来就是"采着采着不动了"。
+        // 快档（1MHz 触发）最容易踩到，这里每轮主动清一次，清完 ADC 自己继续。
+        if (__HAL_ADC_GET_FLAG(&hadc1, ADC_FLAG_OVR)) {
+            __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_OVR);
+            ovr_seen_count++;
         }
         // 采集看门狗：启动失败（或运行中出错）时每 200ms 重新武装一次，不再静默定格
         if (capture_fault && !Is_Pause && (osKernelGetTickCount() - capture_retry_tick >= 200U)) {
