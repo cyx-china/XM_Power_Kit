@@ -889,8 +889,8 @@ static int16_t Current_Original_Offset(void) {
  */
 static void ApplyStretchToBuffer(void) {
 
-    // 拉伸因子直接取自时基表：三重交替把真实采样率提高了 3 倍，
-    // 同样显示窗口内的真实点也多了 3 倍，所以原来靠插值撑出来的几档倍率降到了 1/3
+    // 拉伸因子直接取自时基表：三重交替把真实采样率抬到 3.2 MSa/s，
+    // 同样显示窗口内的真实点变多了，原来靠插值撑出来的几档倍率相应下降
     const float stretch_factor = time_base[TimeBase].stretch;
 
     // 时基拉伸处理
@@ -1136,8 +1136,10 @@ static void format_voltage(float voltage_v, char *buffer, size_t buffer_size) {
 /* ============================ 三重交替采样（ADC1+ADC2+ADC3） ============================ */
 /*
  * 三个 ADC 采同一个引脚 PA3（ADC123_IN3），由主机 ADC1 的外部触发（TIM8 TRGO）统一发起；
- * 采样时刻由 ADC_CCR.DELAY 错开，DMA（模式1）每个序列按 ADC1→ADC2→ADC3 传 3 个字节，
- * 所以合成采样率是单 ADC 的 3 倍：2.4 MSa/s → 7.2 MSa/s。
+ * 采样时刻由 ADC_CCR.DELAY 错开（5 个 ADCCLK ≈ 139 ns），DMA（模式1）从公共数据寄存器 CDR
+ * 逐个字节搬运。实测每来一次触发，DMA 搬回 4 个字节、且相邻样本间隔相等，所以
+ * 合成采样率 = 4 × 触发率（用 1kHz 正弦反推过：一个周期 320 个样本，误差 0.03%）。
+ * 单 ADC 上限约 2.4 MSa/s，快档靠三重交替做到 3.2 MSa/s（触发 800kHz）。
  */
 static ADC_HandleTypeDef s_dso_hadc2;                  // 从机 ADC2
 static ADC_HandleTypeDef s_dso_hadc3;                  // 从机 ADC3
