@@ -481,13 +481,14 @@ static void dmm_draw_range_label(void) {
             fmt_fixed_unit(buf, sizeof(buf), DMM_VOLTAGE_RANGE, 0, 0, 0, "V");
             break;
         case DMM_PAGE_Current:
-            fmt_fixed_unit(buf, sizeof(buf), DMM_CURRENT_RANGE, 1, 0, 0, "A");
+            // 不带小数点：JetBrainsMono14x18 的字符表里没有 '.'，带上会画成 "2 0A"
+            fmt_fixed_unit(buf, sizeof(buf), DMM_CURRENT_RANGE, 0, 0, 0, "A");
             break;
         case DMM_PAGE_Resistance:
             strcpy(buf, "AUTO");
             break;
         case DMM_PAGE_Diode:
-            strcpy(buf, "  ▶|");
+            strcpy(buf, "AUTO");
             break;
         default:
             buf[0] = '\0';
