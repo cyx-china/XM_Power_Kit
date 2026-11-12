@@ -13,15 +13,9 @@ void CB_DMM_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc);
 int FormatFloatWithTenThousandth(float num, char *formatted_buf, char *tenthousandth_buf);
 static float DMM_Calc_R0_SinglePoint(float Vref, float Rx_std, float Vc_std);
 
-// 枚举定义 - 电阻测量档位
-typedef enum {
-    DMM_RES_MODE_200 = 0,   // 200Ω档位
-    DMM_RES_MODE_2K,        // 2KΩ档位
-} DMM_Res_Mode_t;
-
 extern volatile uint16_t dmm_adc_raw_buf[600];
 extern volatile float DMM_Resistance_Voltage;       // 电阻测量原始电压值
-extern volatile DMM_Res_Mode_t dmm_res_mode;
+extern volatile DMM_Res_RangeTypeDef dmm_res_mode;  // 档位枚举见 SwitchManager.h（按满量程命名）
 
 static char Dmm_R_R200_Original_Msg[10] = {0};       // 电压原点提示信息
 static char Dmm_R_R2k_Original_Msg[10] = {0};       // 电压原点提示信息
@@ -156,10 +150,8 @@ static void DmmRCal_R200_Origin_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_round_rect(220,200,305,231,8,0x632C,0);
 
             // 硬件档位切换：关闭200Ω，打开2KΩ
-            HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_RESET);
-
-            dmm_res_mode = DMM_RES_MODE_2K;
+            dmm_res_mode = DMM_RES_RANGE_30K;
+            DMM_Res_Range_Ctrl(DMM_RES_RANGE_30K);
 
             StartBeezer(0);
             return;
@@ -244,10 +236,8 @@ static void DmmRCal_R2k_Origin_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_round_rect(15,200,212,231,8,0x18c6,1);
 
             // 硬件档位切换：关闭2KΩ，打开200Ω
-            HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_SET);
-
-            dmm_res_mode = DMM_RES_MODE_200;
+            dmm_res_mode = DMM_RES_RANGE_2K;
+            DMM_Res_Range_Ctrl(DMM_RES_RANGE_2K);
 
         }
     }
@@ -300,10 +290,8 @@ static void DmmRCal_R200_Voltage_Main_handler(KeyEventMsg_t msg) {
         DmmRCal_Page_Current = DmmRCal_R2K_Voltage_Main;
 
         // 硬件档位切换：关闭200Ω，打开2KΩ
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_RESET);
-
-        dmm_res_mode = DMM_RES_MODE_2K;
+        dmm_res_mode = DMM_RES_RANGE_30K;
+        DMM_Res_Range_Ctrl(DMM_RES_RANGE_30K);
 
     }
     else return;
@@ -327,10 +315,8 @@ static void DmmRCal_R2K_Voltage_Main_handler(KeyEventMsg_t msg){
         lcd_draw_string(25,165,"接200Ω 0.1%，稳定后下一步。", &yahei16x16,0xdf3c,0x29a7,0);
 
         // 硬件档位切换：关闭2KΩ，打开200Ω
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_SET);
-
-        dmm_res_mode = DMM_RES_MODE_200;
+        dmm_res_mode = DMM_RES_RANGE_2K;
+        DMM_Res_Range_Ctrl(DMM_RES_RANGE_2K);
     }
 }
 
@@ -351,10 +337,8 @@ static void DmmRCal_R200_Fitting_Main_handler(KeyEventMsg_t msg) {
         lcd_draw_string(25,165,"接2KΩ 0.1%，稳定后下一步。", &yahei16x16,0xdf3c,0x29a7,0);
 
         // 硬件档位切换：关闭200Ω，打开2KΩ
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_RESET);
-
-        dmm_res_mode = DMM_RES_MODE_2K;
+        dmm_res_mode = DMM_RES_RANGE_30K;
+        DMM_Res_Range_Ctrl(DMM_RES_RANGE_30K);
     }
 }
 
@@ -377,7 +361,7 @@ static void DmmRCal_R2K_Fitting_Main_handler(KeyEventMsg_t msg) {
         DMM_ADC_DeInit(); // 反初始化ADC
         osDelay(100);
         Calibrate_ReturnToMain();   // 返回主界面
-        dmm_res_mode = DMM_RES_MODE_200;
+        dmm_res_mode = DMM_RES_RANGE_2K;
     }
 }
 

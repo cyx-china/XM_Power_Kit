@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include "format.h"
-#include <stdlib.h>
+#include <string.h>
 #include <math.h>
 
 #include "adc.h"
@@ -18,6 +18,12 @@ static void Refresh_Voltage(float Voltage);
 static void Refresh_Curerrent(float Current);
 static void Refresh_Resistance(float Res_Vol);
 static void Refresh_Diode(float Diode_Vol);
+static void dmm_clear_data_area(void);
+static void dmm_redraw_units(void);
+static void dmm_draw_range_label(void);
+static void dmm_draw_rel_indicator(void);
+static float dmm_res_compute(float res_vol);
+static bool dmm_start_capture(void);
 
 // 全局变量 - ADC原始数据缓存
 // 三个通道，每个通道200个采样点，总计600个数据
@@ -60,27 +66,53 @@ typedef enum {
 
 DMM_AppPage_t dmm_current_page = DMM_PAGE_Voltage; // 当前激活的功能页面
 
-// 函数指针声明 - 页面按键处理函数
-static void dmm_voltage_page_handler(KeyEventMsg_t msg);
-static void dmm_current_page_handler(KeyEventMsg_t msg);
-static void dmm_Resistance_page_handler(KeyEventMsg_t msg);
-static void dmm_diode_page_handler(KeyEventMsg_t msg);
+// 页面按键处理：所有页面共用一套（编码器转页 + SET 保持 + MODE 相对值）
+static void dmm_common_page_handler(KeyEventMsg_t msg);
 
 // 页面处理函数表（与DMM_AppPage_t枚举索引对应）
 static void (*page_handlers[DMM_PAGE_NUM])(KeyEventMsg_t) = {
-    [DMM_PAGE_Voltage]    = dmm_voltage_page_handler,
-    [DMM_PAGE_Current]    = dmm_current_page_handler,
-    [DMM_PAGE_Resistance] = dmm_Resistance_page_handler,
-    [DMM_PAGE_Diode]      = dmm_diode_page_handler,
+    [DMM_PAGE_Voltage]    = dmm_common_page_handler,
+    [DMM_PAGE_Current]    = dmm_common_page_handler,
+    [DMM_PAGE_Resistance] = dmm_common_page_handler,
+    [DMM_PAGE_Diode]      = dmm_common_page_handler,
 };
 
-// 枚举定义 - 电阻测量档位
-typedef enum {
-    DMM_RES_MODE_200 = 0,   // 200Ω档位
-    DMM_RES_MODE_2K,        // 2KΩ档位
-} DMM_Res_Mode_t;
+/* 电阻档位枚举定义在 SwitchManager.h（按满量程命名：2KΩ / 30KΩ） */
+volatile DMM_Res_RangeTypeDef dmm_res_mode = DMM_RES_RANGE_2K;  // 当前电阻档位（自动量程决定）
 
-volatile DMM_Res_Mode_t dmm_res_mode = DMM_RES_MODE_200; // 当前电阻测量档位
+// 超量程标志（中断里置位，任务里画 OL）
+volatile bool DMM_Voltage_OL = false;
+volatile bool DMM_Current_OL = false;
+
+// IIR 预热标志：换档/换页后第一个样本直接作为初值，避免读数从旧值爬到新值
+volatile bool dmm_iir_prime = true;
+
+// 采集完成计数（任务里做静默停采看门狗）
+volatile uint32_t dmm_block_count = 0;
+
+// 相对值（REL）：按 MODE 键把当前读数清零，显示相对变化量
+static bool dmm_rel_on = false;
+static uint8_t dmm_rel_page = 0xFF;
+static float dmm_rel_ref = 0.0f;
+
+// 上一次已绘制的字符串：数值没变就不重画
+// （DIN_Medium32x48 每个字模 1536 字节，字形缓存只有 6144 字节，整串重画要重新读 SPI Flash）
+static char last_vol_main[10] = {0};
+static char last_vol_digit[4] = {0};
+static char last_cur_main[10] = {0};
+static char last_cur_digit[5] = {0};
+static char last_res_main[10] = {0};
+static char last_res_digit[5] = {0};
+static char last_dio_main[10] = {0};
+static char last_dio_digit[5] = {0};
+
+// OL / 二极管单位状态，避免重复绘制
+static bool vol_ol_shown = false;
+static bool cur_ol_shown = false;
+static bool res_ol_shown = false;
+static bool dio_ol_shown = false;
+static uint8_t dio_unit_shown = 0;      // 'V' 或 'O'(Ω)，0 表示未知
+static bool dio_short = false;          // 通断状态（带迟滞，防止边界抖动断续响）
 
 /**
  * @brief  万用表核心任务主函数
@@ -93,8 +125,11 @@ void Start_DmmCoreTask(void *argument) {
     // 任务启动后先自挂起，等待外部唤醒
     osThreadSuspend(DmmCoreTaskHandle);
 
+    uint32_t last_block_count = dmm_block_count;
+    uint32_t silent_since = osKernelGetTickCount();
+
     for (;;) {
-        // 刷新率计时累加
+        // 刷新率计时累加（10 ms 一次循环）
         dps_time_count++;
 
         // 读取按键消息队列，分发到当前页面的按键处理函数
@@ -102,22 +137,35 @@ void Start_DmmCoreTask(void *argument) {
             page_handlers[dmm_current_page](DMM_Keymsg);
         }
 
-        // 每100ms刷新一次显示（dps_time_count>10 且 刷新使能）
-        if (dps_time_count > 10) {
+        // 静默停采看门狗：中断里每 10ms 完成一块并加计数，200ms 不动就重启采集
+        // （ADC 溢出/DMA 出错后 HAL 不会自己恢复，没有这个就只能定格在最后一帧）
+        if (dmm_block_count != last_block_count) {
+            last_block_count = dmm_block_count;
+            silent_since = osKernelGetTickCount();
+        } else if ((osKernelGetTickCount() - silent_since) >= 200U) {
+            silent_since = osKernelGetTickCount();
+            dmm_iir_prime = true;
+            if (dmm_start_capture()) {
+                AdcTim_ON();
+            }
+        }
+
+        // 每 50ms 刷新一次显示（读数本身被 IIR 拖慢，更快的刷新只是重复画同样的字）
+        if (dps_time_count > 5) {
             if (Is_Refresh_On) {
                 // 根据当前页面刷新对应数据
                 switch (dmm_current_page) {
                     case DMM_PAGE_Voltage:
-                        Refresh_Voltage(DMM_Voltage);
+                        Refresh_Voltage((float)DMM_Voltage);
                         break;
                     case DMM_PAGE_Current:
-                        Refresh_Curerrent(DMM_Current);
+                        Refresh_Curerrent((float)DMM_Current);
                         break;
                     case DMM_PAGE_Resistance:
-                        Refresh_Resistance(DMM_Resistance_Voltage);
+                        Refresh_Resistance((float)DMM_Resistance_Voltage);
                         break;
                     case DMM_PAGE_Diode:
-                        Refresh_Diode(DMM_Resistance_Voltage);
+                        Refresh_Diode((float)DMM_Resistance_Voltage);
                         break;
                     default: break;
                 }
@@ -247,17 +295,14 @@ static void DrawDmmMainBasicElement(void) {
     // 绘制模式选择框（默认选中电压模式）
     DMM_Draw_Mode_Boxes(0, 0);
 
-    // 绘制挡位区背景（边框+填充）
-    lcd_draw_round_rect(60, 44, 130, 68, 3, 0x1908, 1);  // 挡位背景填充
-    lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);  // 挡位背景边框
-
     // 绘制顶栏
     lcd_draw_string(127, 6, "万用表", &yahei20x20, 0x24be, 0x1908, 3); // 标题
     lcd_draw_line(0, 31, 319, 31, 0x11ac);                             // 顶栏下划线
 
     // 绘制参数区
     lcd_draw_image(20, 42, &img_DMM_DC_30x30);                         // 直流图标
-    lcd_draw_string(69, 47, "AUTO", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0); // 自动挡位
+    dmm_draw_range_label();                                            // 挡位/量程（V/A 显示满量程，Ω 显示 AUTO）
+    dmm_draw_rel_indicator();                                          // REL 指示（默认熄灭）
     // HOLD区域背景（边框+填充）
     lcd_draw_round_rect(242, 44, 306, 68, 3, 0x1908, 1);  // HOLD背景填充
     lcd_draw_round_rect(242, 44, 306, 68, 3, 0x21aa, 0);  // HOLD背景边框
@@ -341,6 +386,187 @@ int FormatFloatWithTwoDigits(float num, char *formatted_buf, char *digits_buf) {
     return 0;
 }
 
+/* ==================== 显示/量程辅助 ==================== */
+
+/**
+ * @brief  清空数据区，并让所有"上一次显示的字符串"失效
+ * @note   影子串失效保证下一帧一定会重画；单位文字也在数据区内，被一起清掉，调用后需补画
+ */
+static void dmm_clear_data_area(void) {
+    lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
+
+    last_vol_main[0] = '\0';
+    last_vol_digit[0] = '\0';
+    last_cur_main[0] = '\0';
+    last_cur_digit[0] = '\0';
+    last_res_main[0] = '\0';
+    last_res_digit[0] = '\0';
+    last_dio_main[0] = '\0';
+    last_dio_digit[0] = '\0';
+}
+
+/**
+ * @brief  按当前页面与电阻档位重画右侧单位
+ */
+static void dmm_redraw_units(void) {
+    switch (dmm_current_page) {
+        case DMM_PAGE_Voltage:
+            lcd_draw_string(288, 136, "V", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
+            break;
+        case DMM_PAGE_Current:
+            lcd_draw_string(288, 136, "A", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
+            break;
+        case DMM_PAGE_Resistance:
+            lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
+            if (dmm_res_mode == DMM_RES_RANGE_30K) {
+                lcd_draw_string(288, 110, "K", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
+            }
+            break;
+        case DMM_PAGE_Diode:
+            lcd_draw_string(288, 136, "V", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
+            dio_unit_shown = 'V';
+            break;
+        default:
+            break;
+    }
+}
+
+/**
+ * @brief  比较并更新影子字符串
+ * @return true 表示内容和上次不同（调用者需要重画）
+ */
+static bool dmm_take_text(char *shadow, uint8_t size, const char *text) {
+    if (strcmp(shadow, text) == 0) {
+        return false;
+    }
+    strncpy(shadow, text, (size_t)size - 1U);
+    shadow[size - 1U] = '\0';
+    return true;
+}
+
+/**
+ * @brief  按当前档位计算电阻值（Ω）
+ * @note   (Vref - Vx) 为 0 时结果是 inf，悬空且 Vref 也是 0 时是 NaN，
+ *         两种都交给调用方按超量程处理
+ */
+static float dmm_res_compute(float res_vol) {
+    float r_ref = (dmm_res_mode == DMM_RES_RANGE_2K) ? UserParam.DMM_Res_R200 : UserParam.DMM_Res_R2K;
+    float v_ref = (dmm_res_mode == DMM_RES_RANGE_2K) ? UserParam.DMM_Res_R200_Voltage : UserParam.DMM_Res_R2K_Voltage;
+    return r_ref * res_vol / (v_ref - res_vol);
+}
+
+/**
+ * @brief  绘制左上角的挡位/量程标签
+ * @note   电压/电流没有硬件量程，显示由校准系数算出的满量程（如 "74V" / "4.4A"），
+ *         电阻档做自动量程，显示 "AUTO"（原来这里是写死的 "AUTO"，电压电流其实并不自动）
+ */
+static void dmm_draw_range_label(void) {
+    char buf[10];
+    uint8_t len;
+
+    switch (dmm_current_page) {
+        case DMM_PAGE_Voltage:
+            fmt_fixed_unit(buf, sizeof(buf), 3.3f * UserParam.DMM_Voltage_Factor_R, 0, 0, 0, "V");
+            break;
+        case DMM_PAGE_Current:
+            fmt_fixed_unit(buf, sizeof(buf), 3.3f * UserParam.DMM_Current_Factor, 1, 0, 0, "A");
+            break;
+        case DMM_PAGE_Resistance:
+            strcpy(buf, "AUTO");
+            break;
+        case DMM_PAGE_Diode:
+            strcpy(buf, "▶|");
+            break;
+        default:
+            buf[0] = '\0';
+            break;
+    }
+
+    lcd_draw_round_rect(60, 44, 130, 68, 3, 0x1908, 1);   // 背景填充
+    lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);   // 边框
+
+    len = (uint8_t)strlen(buf);
+    if (len > 0 && len <= 5) {
+        // 框宽 70，字符步进 14，居中：x = 60 + (70 - 14n)/2
+        lcd_draw_string((uint16_t)(95 - 7 * len), 47, buf, &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
+    }
+}
+
+/**
+ * @brief  绘制 REL 指示（熄灭时只清空那块区域）
+ */
+static void dmm_draw_rel_indicator(void) {
+    lcd_draw_rect(132, 44, 240, 68, 0x1908, 1);
+    if (dmm_rel_on) {
+        lcd_draw_string(150, 47, "REL", &JetBrainsMono14x18, 0xe22c, 0x1908, 0);
+    }
+}
+
+/**
+ * @brief  切换相对值（REL）状态：按 MODE 键把当前读数归零
+ * @note   二极管档不做相对值；换页面时自动清除
+ */
+static void dmm_rel_toggle(void) {
+    if (dmm_rel_on) {
+        dmm_rel_on = false;
+    } else {
+        switch (dmm_current_page) {
+            case DMM_PAGE_Voltage:  dmm_rel_ref = (float)DMM_Voltage; break;
+            case DMM_PAGE_Current:  dmm_rel_ref = (float)DMM_Current; break;
+            case DMM_PAGE_Resistance: dmm_rel_ref = dmm_res_compute((float)DMM_Resistance_Voltage); break;
+            default: StartBeezer(0); return;      // 二极管档不支持
+        }
+        // NaN / inf 保护：悬空时算出来的电阻可能是 inf，不能当基准
+        if (!(dmm_rel_ref == dmm_rel_ref) || dmm_rel_ref > 1.0e9f || dmm_rel_ref < -1.0e9f) {
+            StartBeezer(0);
+            return;
+        }
+        dmm_rel_on = true;
+        dmm_rel_page = (uint8_t)dmm_current_page;
+    }
+
+    dmm_draw_rel_indicator();
+    dmm_clear_data_area();
+    dmm_redraw_units();
+    StartBeezer(0);
+}
+
+/**
+ * @brief  切换电阻档（自动量程调用）
+ */
+static void dmm_switch_res_range(DMM_Res_RangeTypeDef range) {
+    if (dmm_res_mode == range) {
+        return;
+    }
+    dmm_res_mode = range;
+    DMM_Res_Range_Ctrl(range);      // 硬件切档，内部含 20ms 稳定延时
+    dmm_iir_prime = true;           // 换档后的第一个样本直接当滤波初值
+    dmm_clear_data_area();
+    dmm_redraw_units();
+}
+
+/**
+ * @brief  自动量程：贴近满量程就升档，读数很小就降档
+ * @param  res: 当前档位算出的电阻值（可能是 inf / NaN）
+ * @return true 表示刚刚切了档（本帧不画，等新档位的读数）
+ * @note   2KΩ 档在 1800Ω 升到 30KΩ；30KΩ 档在 180Ω 降回 2KΩ。
+ *         升降门限差 10 倍，正好是两档基准电阻之比，不会来回跳。
+ */
+static bool dmm_res_autorange(float res) {
+    if (!(res >= 0.0f)) {           // NaN：不切档，交给 OL 分支
+        return false;
+    }
+    if (dmm_res_mode == DMM_RES_RANGE_2K && res > 1800.0f) {
+        dmm_switch_res_range(DMM_RES_RANGE_30K);
+        return true;
+    }
+    if (dmm_res_mode == DMM_RES_RANGE_30K && res < 180.0f) {
+        dmm_switch_res_range(DMM_RES_RANGE_2K);
+        return true;
+    }
+    return false;
+}
+
 /**
  * @brief  刷新电压数据显示
  * @param  Voltage: 电压实际值
@@ -348,7 +574,29 @@ int FormatFloatWithTwoDigits(float num, char *formatted_buf, char *digits_buf) {
  *         2. 绘制到LCD对应位置
  */
 static void Refresh_Voltage(float Voltage) {
+    // 超量程（ADC 削顶）：数值已经饱和，直接显示 OL
+    if (DMM_Voltage_OL) {
+        if (vol_ol_shown) { return; }
+        dmm_clear_data_area();
+        dmm_redraw_units();
+        lcd_draw_string(126, 98, "OL", &DIN_Medium32x48, 0xe22c, 0x1908, 10);
+        vol_ol_shown = true;
+        return;
+    }
+    vol_ol_shown = false;
+
+    // 相对值
+    if (dmm_rel_on && dmm_rel_page == (uint8_t)DMM_PAGE_Voltage) {
+        Voltage -= dmm_rel_ref;
+    }
+
     FormatFloatWithThousandth(Voltage, Vol_formatted_buf, Vol_thousandth_buf);
+
+    // 数值没变就不重画（整串重画要从 SPI Flash 重新读字模，很贵）
+    bool changed_main = dmm_take_text(last_vol_main, sizeof(last_vol_main), Vol_formatted_buf);
+    bool changed_digit = dmm_take_text(last_vol_digit, sizeof(last_vol_digit), Vol_thousandth_buf);
+    if (!changed_main && !changed_digit) { return; }
+
     lcd_draw_string(30, 98, Vol_formatted_buf, &DIN_Medium32x48, 0xeb0c, 0x1908, 5);
     lcd_draw_string(240, 98, Vol_thousandth_buf, &DIN_Medium32x48, 0x632c, 0x1908, 0);
 }
@@ -360,406 +608,239 @@ static void Refresh_Voltage(float Voltage) {
  *         2. 绘制到LCD对应位置
  */
 static void Refresh_Curerrent(float Current) {
+    if (DMM_Current_OL) {
+        if (cur_ol_shown) { return; }
+        dmm_clear_data_area();
+        dmm_redraw_units();
+        lcd_draw_string(126, 98, "OL", &DIN_Medium32x48, 0xe22c, 0x1908, 10);
+        cur_ol_shown = true;
+        return;
+    }
+    cur_ol_shown = false;
+
+    if (dmm_rel_on && dmm_rel_page == (uint8_t)DMM_PAGE_Current) {
+        Current -= dmm_rel_ref;
+    }
+
     FormatFloatWithTenThousandth(Current, Cur_formatted_buf, Cur_tenthousandth_buf);
+
+    bool changed_main = dmm_take_text(last_cur_main, sizeof(last_cur_main), Cur_formatted_buf);
+    bool changed_digit = dmm_take_text(last_cur_digit, sizeof(last_cur_digit), Cur_tenthousandth_buf);
+    if (!changed_main && !changed_digit) { return; }
+
     lcd_draw_string(30, 98, Cur_formatted_buf, &DIN_Medium32x48, 0x5cbd, 0x1908, 5);
     lcd_draw_string(240, 98, Cur_tenthousandth_buf, &DIN_Medium32x48, 0x632c, 0x1908, 0);
 }
 
 // 全局变量 - 电阻OL状态标记（避免重复绘制OL）
-bool Res_Is_Last_OL = false;
 
 /**
  * @brief  刷新电阻数据显示
  * @param  Res_Vol: 电阻测量原始电压值
- * @note   1. 根据当前档位计算电阻值
- *         2. 超量程显示OL，否则显示对应档位的电阻值
- *         3. 200Ω档：显示0000.0 + 百分位；2K档：显示00.00 + 千/万分位
+ * @note   1. 按当前档位算电阻值，先做自动量程判断
+ *         2. 超量程/悬空显示 OL
+ *         3. 2KΩ 档显示 Ω 整数 + 百分位；30KΩ 档显示 KΩ + 千/万分位
  */
 static void Refresh_Resistance(float Res_Vol) {
-    // 根据当前档位计算电阻值
-    float Res = (dmm_res_mode == DMM_RES_MODE_200 ? UserParam.DMM_Res_R200 : UserParam.DMM_Res_R2K) * Res_Vol / (
-        (dmm_res_mode == DMM_RES_MODE_200
-         ? UserParam.DMM_Res_R200_Voltage
-         : UserParam.DMM_Res_R2K_Voltage) - Res_Vol);
+    float Res = dmm_res_compute(Res_Vol);
 
-    // 超量程判断（200Ω档>2000，2K档>30000）
-    if (Res > (dmm_res_mode == DMM_RES_MODE_200 ? 2000.0f : 30000.0f) || Res < 0.0f) {
-        // 避免重复绘制OL
-        if (Res_Is_Last_OL) {
-            return;
-        }
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 绘制电阻单位
-        lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-        // 2K档额外绘制K单位
-        if (dmm_res_mode == DMM_RES_MODE_2K) {
-            lcd_draw_string(288, 110, "K", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-        }
-        // 绘制OL（超量程）
-        lcd_draw_string(126, 98, "OL", &DIN_Medium32x48, 0xe22c, 0x1908, 10);
-        Res_Is_Last_OL = true;
+    // 自动量程：贴近满量程升档、读数很小降档（切了档本帧不画，等新档位的读数）
+    if (dmm_res_autorange(Res)) {
         return;
     }
 
-    // 退出OL状态
-    Res_Is_Last_OL = false;
+    // 超量程判断（2KΩ 档 >2000，30KΩ 档 >30000；NaN 也算不上有效读数）
+    float full_scale = (dmm_res_mode == DMM_RES_RANGE_2K) ? 2000.0f : 30000.0f;
+    if (!(Res >= 0.0f) || Res > full_scale) {
+        if (res_ol_shown) {
+            return;
+        }
+        dmm_clear_data_area();
+        dmm_redraw_units();
+        lcd_draw_string(126, 98, "OL", &DIN_Medium32x48, 0xe22c, 0x1908, 10);
+        res_ol_shown = true;
+        return;
+    }
+    res_ol_shown = false;
 
-    // 根据档位刷新显示
-    if (dmm_res_mode == DMM_RES_MODE_200) {
-        // 200Ω档：0000.0 + 百分位
+    if (dmm_rel_on && dmm_rel_page == (uint8_t)DMM_PAGE_Resistance) {
+        Res -= dmm_rel_ref;
+    }
+
+    if (dmm_res_mode == DMM_RES_RANGE_2K) {
+        // 2KΩ 档：0000.0 + 百分位
         FormatFloatWithHundredth(Res, Res_formatted_R200_buf, Res_digits_R200_buf);
+        bool changed_main = dmm_take_text(last_res_main, sizeof(last_res_main), Res_formatted_R200_buf);
+        bool changed_digit = dmm_take_text(last_res_digit, sizeof(last_res_digit), Res_digits_R200_buf);
+        if (!changed_main && !changed_digit) { return; }
         lcd_draw_string(30, 98, Res_formatted_R200_buf, &DIN_Medium32x48, 0xdb3f, 0x1908, 5);
         lcd_draw_string(240, 98, Res_digits_R200_buf, &DIN_Medium32x48, 0x632c, 0x1908, 0);
     } else {
-        // 2K档：00.00（除以1000） + 千/万分位
-        FormatFloatWithTwoDigits(Res / 1000, Res_formatted_R2K_buf, Res_digits_R2K_buf);
+        // 30KΩ 档：00.00（单位 KΩ）+ 千/万分位
+        FormatFloatWithTwoDigits(Res / 1000.0f, Res_formatted_R2K_buf, Res_digits_R2K_buf);
+        bool changed_main = dmm_take_text(last_res_main, sizeof(last_res_main), Res_formatted_R2K_buf);
+        bool changed_digit = dmm_take_text(last_res_digit, sizeof(last_res_digit), Res_digits_R2K_buf);
+        if (!changed_main && !changed_digit) { return; }
         lcd_draw_string(30, 98, Res_formatted_R2K_buf, &DIN_Medium32x48, 0xdb3f, 0x1908, 5);
         lcd_draw_string(203, 98, Res_digits_R2K_buf, &DIN_Medium32x48, 0x632c, 0x1908, 5);
     }
 }
 
-// 全局变量 - 二极管OL状态标记（避免重复绘制OL）
-bool Dio_Is_Last_OL = false;
-
 /**
  * @brief  刷新二极管/蜂鸣数据显示
  * @param  Diode_Vol: 二极管测量原始电压值
- * @note   1. 电压>1V显示OL（悬空/大电阻）
- *         2. 电阻>30Ω：显示二极管电压（±0.000 + 千分位）
- *         3. 电阻≤30Ω：显示电阻值（0000.0 + 百分位），触发蜂鸣
+ * @note   1. 电压 >1V 视为开路，显示 OL
+ *         2. 等效电阻 ≤30Ω（退出门限 33Ω）判定为短路：显示电阻并持续蜂鸣
+ *         3. 否则显示二极管正向压降
  */
 static void Refresh_Diode(float Diode_Vol) {
-    // 超量程判断（电压>1V）
     if (Diode_Vol > 1.0f) {
-        // 避免重复绘制OL
-        if (Dio_Is_Last_OL) {
+        if (dio_ol_shown) {
             return;
         }
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 绘制电压单位
-        lcd_draw_string(288, 136, "V", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-        // 绘制OL（超量程）
+        dmm_clear_data_area();
+        dmm_redraw_units();
         lcd_draw_string(126, 98, "OL", &DIN_Medium32x48, 0xe22c, 0x1908, 10);
-        Dio_Is_Last_OL = true;
+        dio_ol_shown = true;
         return;
     }
+    dio_ol_shown = false;
 
-    // 退出OL状态
-    Dio_Is_Last_OL = false;
-
-    // 计算等效电阻
+    // 等效电阻（用 2KΩ 基准档的校准参数，与原来一致）
     float Res = UserParam.DMM_Res_R2K * Diode_Vol / (UserParam.DMM_Res_R2K_Voltage - Diode_Vol);
 
-    // 判断显示模式：二极管电压 / 蜂鸣电阻
-    if (Res > 30.0f) {
-        // 二极管模式：显示电压（±0.000 + 千分位）
-        FormatFloatWithTenThousandth(Diode_Vol, Dio_formatted_dio_buf, Dio_thousandth_dio_buf);
-        lcd_draw_string(30, 98, Dio_formatted_dio_buf, &DIN_Medium32x48, 0x5cbd, 0x1908, 5);
-        lcd_draw_string(240, 98, Dio_thousandth_dio_buf, &DIN_Medium32x48, 0x632c, 0x1908, 0);
-        lcd_draw_string(288, 136, "V", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0); // 电压单位
-    } else {
-        // 蜂鸣模式：显示电阻（0000.0 + 百分位）
+    // 通断判断带迟滞：进入 30Ω、退出 33Ω，避免在门限附近抖动导致蜂鸣断断续续
+    if (!dio_short && Res <= 30.0f) {
+        dio_short = true;
+    } else if (dio_short && Res > 33.0f) {
+        dio_short = false;
+    }
+
+    if (dio_short) {
         FormatFloatWithHundredth(Res, Dio_formatted_res_buf, Dio_thousandth_res_buf);
-        lcd_draw_string(30, 98, Dio_formatted_res_buf, &DIN_Medium32x48, 0xdb3f, 0x1908, 5);
-        lcd_draw_string(240, 98, Dio_thousandth_res_buf, &DIN_Medium32x48, 0x632c, 0x1908, 0);
-        lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0); // 电阻单位
-
-        // 触发蜂鸣
-        StartBeezer(110);
+        bool changed_main = dmm_take_text(last_dio_main, sizeof(last_dio_main), Dio_formatted_res_buf);
+        bool changed_digit = dmm_take_text(last_dio_digit, sizeof(last_dio_digit), Dio_thousandth_res_buf);
+        if (changed_main || changed_digit) {
+            lcd_draw_string(30, 98, Dio_formatted_res_buf, &DIN_Medium32x48, 0xdb3f, 0x1908, 5);
+            lcd_draw_string(240, 98, Dio_thousandth_res_buf, &DIN_Medium32x48, 0x632c, 0x1908, 0);
+        }
+        if (dio_unit_shown != 'O') {
+            lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
+            dio_unit_shown = 'O';
+        }
+        StartBeezer(110);       // 短路：每帧续一次，形成连续蜂鸣
+    } else {
+        FormatFloatWithTenThousandth(Diode_Vol, Dio_formatted_dio_buf, Dio_thousandth_dio_buf);
+        bool changed_main = dmm_take_text(last_dio_main, sizeof(last_dio_main), Dio_formatted_dio_buf);
+        bool changed_digit = dmm_take_text(last_dio_digit, sizeof(last_dio_digit), Dio_thousandth_dio_buf);
+        if (changed_main || changed_digit) {
+            lcd_draw_string(30, 98, Dio_formatted_dio_buf, &DIN_Medium32x48, 0x5cbd, 0x1908, 5);
+            lcd_draw_string(240, 98, Dio_thousandth_dio_buf, &DIN_Medium32x48, 0x632c, 0x1908, 0);
+        }
+        if (dio_unit_shown != 'V') {
+            lcd_draw_string(288, 136, "V", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
+            dio_unit_shown = 'V';
+        }
     }
 }
 
 /**
- * @brief  电压页面按键处理函数
- * @param  msg: 按键事件消息
- * @note   1. 编码器右键：切换到电流页面
- *         2. SET键单击：切换HOLD状态
- *         3. 编码器长按：退出到LVGL页面
+ * @brief  启动/重启 ADC DMA 采集（600 个半字 = 200 点 × 3 通道）
+ * @return true 表示启动成功
+ * @note   HAL_ADC_Start_DMA 在流仍处于 BUSY 时直接返回 HAL_BUSY 且不做任何事，
+ *         所以先 Stop 再 Start；仍失败就交给调用方的看门狗稍后重试
  */
-static void dmm_voltage_page_handler(KeyEventMsg_t msg) {
-    // 编码器按下右转：切换到电流页面
+static bool dmm_start_capture(void) {
+    (void)HAL_ADC_Stop_DMA(&hadc1);
+    __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_EOC | ADC_FLAG_OVR);
+
+    HAL_StatusTypeDef st = HAL_ADC_Start_DMA(&hadc1, (uint32_t *)dmm_adc_raw_buf, 600);
+    if (st != HAL_OK) {
+        (void)HAL_ADC_Stop_DMA(&hadc1);
+        st = HAL_ADC_Start_DMA(&hadc1, (uint32_t *)dmm_adc_raw_buf, 600);
+    }
+    return (st == HAL_OK);
+}
+
+/**
+ * @brief  切换页面（编码器转一次换一页，首尾循环）
+ * @note   原来每个页面处理函数各抄一遍，漏一处就会「换页后读数从旧值慢慢爬」；
+ *         这里统一处理：硬件模式、电阻档位、HOLD、IIR 预热、显示重画
+ */
+static void dmm_goto_page(DMM_AppPage_t page) {
+    DMM_AppPage_t old_page = dmm_current_page;
+    if (page == old_page) {
+        return;
+    }
+    dmm_current_page = page;
+
+    // 换页清除相对值，避免在别的档位上显示上一个档位的差值
+    dmm_rel_on = false;
+
+    // 关闭 HOLD，恢复刷新
+    Hold_ctrl(false);
+
+    switch (page) {
+        case DMM_PAGE_Voltage:
+            DMM_Switch_Mode(Dmm_Mode_Voltage);
+            break;
+        case DMM_PAGE_Current:
+            DMM_Switch_Mode(Dmm_Mode_Current);
+            break;
+        case DMM_PAGE_Resistance:
+            DMM_Switch_Mode(Dmm_Mode_Resistance);
+            DMM_Res_Range_Ctrl(dmm_res_mode);        // 按当前档位重新配置基准电阻
+            break;
+        case DMM_PAGE_Diode:
+            DMM_Switch_Mode(Dmm_Mode_Diode);
+            DMM_Res_Range_Ctrl(DMM_RES_RANGE_30K);   // 二极管/通断用 2KΩ 基准测微小电阻
+            break;
+        default:
+            break;
+    }
+
+    // 换页后第一个样本直接作为 IIR 初值，读数不会从上个页面的值爬过来
+    dmm_iir_prime = true;
+
+    DMM_Draw_Mode_Boxes((uint8_t)page, (uint8_t)old_page);
+    dmm_draw_range_label();
+    dmm_draw_rel_indicator();
+    dmm_clear_data_area();
+    dmm_redraw_units();
+
+    StartBeezer(0);
+}
+
+/**
+ * @brief  通用页面按键处理
+ * @note   1. 编码器右转：下一页；左转：上一页（首尾循环）
+ *         2. SET 单击：HOLD 开关
+ *         3. MODE 单击：相对值（REL）开关
+ *         4. 编码器长按：退出到 LVGL
+ *         原来「上/下键手动切电阻档」的分支删掉了——电阻档现在由自动量程决定
+ */
+static void dmm_common_page_handler(KeyEventMsg_t msg) {
     if (msg.event == ENCODER_EVENT_PRESS_RIGHT) {
-        dmm_current_page = DMM_PAGE_Current;
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 更新单位为A
-        lcd_draw_string(288, 136, "A", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-        // 刷新模式选择框
-        DMM_Draw_Mode_Boxes(DMM_PAGE_Current, DMM_PAGE_Voltage);
-        // 切换硬件模式
-        DMM_Switch_Mode(Dmm_Mode_Current);
-        // 关闭HOLD
-        Hold_ctrl(false);
-        // 停止蜂鸣
-        StartBeezer(0);
+        dmm_goto_page((DMM_AppPage_t)((dmm_current_page + 1) % DMM_PAGE_NUM));
         return;
     }
 
-    // SET键单击：切换HOLD状态
-    if (msg.key == KEY_SET && msg.event == KEY_EVENT_CLICK) {
-        Is_Refresh_On == true ? Hold_ctrl(true) : Hold_ctrl(false);
-        StartBeezer(0);
-        return;
-    }
-
-    // 编码器长按：退出到LVGL页面
-    if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
-        AppListType APP = APP_LVGL;
-        StartBeezer(0);
-        osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
-        return;
-    }
-}
-
-/**
- * @brief  电流页面按键处理函数
- * @param  msg: 按键事件消息
- * @note   1. 编码器左键：切换到电压页面
- *         2. SET键单击：切换HOLD状态
- *         3. 编码器长按：退出到LVGL页面
- *         4. 编码器右键：切换到电阻页面
- */
-static void dmm_current_page_handler(KeyEventMsg_t msg) {
-    // 编码器按下左转：切换到电压页面
     if (msg.event == ENCODER_EVENT_PRESS_LEFT) {
-        dmm_current_page = DMM_PAGE_Voltage;
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 更新单位为V
-        lcd_draw_string(288, 136, "V", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-        // 刷新模式选择框
-        DMM_Draw_Mode_Boxes(DMM_PAGE_Voltage, DMM_PAGE_Current);
-        // 切换硬件模式
-        DMM_Switch_Mode(Dmm_Mode_Voltage);
-        // 关闭HOLD
-        Hold_ctrl(false);
-        // 停止蜂鸣
-        StartBeezer(0);
+        dmm_goto_page((DMM_AppPage_t)((dmm_current_page + DMM_PAGE_NUM - 1) % DMM_PAGE_NUM));
         return;
     }
 
-    // SET键单击：切换HOLD状态
     if (msg.key == KEY_SET && msg.event == KEY_EVENT_CLICK) {
-        Is_Refresh_On == true ? Hold_ctrl(true) : Hold_ctrl(false);
+        Hold_ctrl(!Is_Refresh_On);
         StartBeezer(0);
         return;
     }
 
-    // 编码器长按：退出到LVGL页面
-    if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
-        AppListType APP = APP_LVGL;
-        StartBeezer(0);
-        osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
+    if (msg.key == KEY_MODE && msg.event == KEY_EVENT_CLICK) {
+        dmm_rel_toggle();
         return;
     }
 
-    // 编码器按下右转：切换到电阻页面
-    if (msg.event == ENCODER_EVENT_PRESS_RIGHT) {
-        dmm_current_page = DMM_PAGE_Resistance;
-        // 默认选中200Ω档位
-        dmm_res_mode = DMM_RES_MODE_200;
-        // 刷新挡位区背景
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x1908, 1);
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
-        // 显示2KΩ挡位文字（默认）
-        lcd_draw_string(74, 47, "2KΩ", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 更新单位为Ω
-        lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-        // 刷新模式选择框
-        DMM_Draw_Mode_Boxes(DMM_PAGE_Resistance, DMM_PAGE_Current);
-        // 切换硬件模式
-        DMM_Switch_Mode(Dmm_Mode_Resistance);
-        // 关闭HOLD
-        Hold_ctrl(false);
-        // 重置电阻OL状态
-        Res_Is_Last_OL = false;
-        // 停止蜂鸣
-        StartBeezer(0);
-        return;
-    }
-}
-
-/**
- * @brief  电阻页面按键处理函数
- * @param  msg: 按键事件消息
- * @note   1. 编码器左键：切换到电流页面
- *         2. SET键单击：切换HOLD状态
- *         3. 编码器长按：退出到LVGL页面
- *         4. 上键单击：200Ω→2KΩ档位切换
- *         5. 下键单击：2KΩ→200Ω档位切换
- *         6. 编码器右键：切换到二极管页面
- */
-static void dmm_Resistance_page_handler(KeyEventMsg_t msg) {
-    // 编码器按下左转：切换到电流页面
-    if (msg.event == ENCODER_EVENT_PRESS_LEFT) {
-        dmm_current_page = DMM_PAGE_Current;
-        // 刷新挡位区背景
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x1908, 1);
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
-        // 显示AUTO挡位文字
-        lcd_draw_string(69, 47, "AUTO", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 更新单位为A
-        lcd_draw_string(288, 136, "A", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-        // 刷新模式选择框
-        DMM_Draw_Mode_Boxes(DMM_PAGE_Current, DMM_PAGE_Resistance);
-        // 切换硬件模式
-        DMM_Switch_Mode(Dmm_Mode_Current);
-        // 关闭HOLD
-        Hold_ctrl(false);
-        // 停止蜂鸣
-        StartBeezer(0);
-        return;
-    }
-
-    // SET键单击：切换HOLD状态
-    if (msg.key == KEY_SET && msg.event == KEY_EVENT_CLICK) {
-        Is_Refresh_On == true ? Hold_ctrl(true) : Hold_ctrl(false);
-        StartBeezer(0);
-        return;
-    }
-
-    // 编码器长按：退出到LVGL页面
-    if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
-        AppListType APP = APP_LVGL;
-        StartBeezer(0);
-        osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
-    }
-
-    // 上键单击：200Ω→2KΩ档位切换
-    if (msg.key == KEY_UP && msg.event == KEY_EVENT_CLICK && dmm_res_mode == DMM_RES_MODE_200) {
-        dmm_res_mode = DMM_RES_MODE_2K;
-        // 刷新挡位区边框
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
-        // 显示30KΩ挡位文字
-        lcd_draw_string(67, 47, "30KΩ", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
-
-        // 硬件档位切换：关闭200Ω，打开2KΩ
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_RESET);
-        // 关闭HOLD
-        Hold_ctrl(false);
-        osDelay(50);
-
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 更新单位（Ω + K）
-        lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-        lcd_draw_string(288, 110, "K", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-
-        Res_Is_Last_OL = false;
-
-        // 停止蜂鸣
-        StartBeezer(0);
-        return;
-    }
-
-    // 下键单击：2KΩ→200Ω档位切换
-    if (msg.key == KEY_DOWN && msg.event == KEY_EVENT_CLICK && dmm_res_mode == DMM_RES_MODE_2K) {
-        dmm_res_mode = DMM_RES_MODE_200;
-        // 刷新挡位区边框
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
-        // 刷新挡位区背景
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x1908, 1);
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
-        // 显示2KΩ挡位文字（默认）
-        lcd_draw_string(74, 47, "2KΩ", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
-
-        // 硬件档位切换：打开200Ω，关闭2KΩ
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_SET);
-        // 关闭HOLD
-        Hold_ctrl(false);
-        osDelay(50);
-
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 更新单位（仅Ω）
-        lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-
-        Res_Is_Last_OL = false;
-
-        // 停止蜂鸣
-        StartBeezer(0);
-        return;
-    }
-
-    // 编码器按下右转：切换到二极管页面
-    if (msg.event == ENCODER_EVENT_PRESS_RIGHT) {
-        dmm_current_page = DMM_PAGE_Diode;
-        // 刷新挡位区背景
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x1908, 1);
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
-        // 显示二极管挡位文字
-        lcd_draw_string(84, 47, "▶|", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 更新单位为V
-        lcd_draw_string(288, 136, "V", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-
-        // 刷新模式选择框
-        DMM_Draw_Mode_Boxes(DMM_PAGE_Diode, DMM_PAGE_Resistance);
-        // 切换硬件模式
-        DMM_Switch_Mode(Dmm_Mode_Diode);
-        // 关闭HOLD
-        Hold_ctrl(false);
-        // 重置二极管OL状态
-        Dio_Is_Last_OL = false;
-        dmm_res_mode = DMM_RES_MODE_2K;
-        // 停止蜂鸣
-        StartBeezer(0);
-        return;
-    }
-}
-
-/**
- * @brief  二极管页面按键处理函数
- * @param  msg: 按键事件消息
- * @note   1. 编码器左键：切换到电阻页面
- *         2. SET键单击：切换HOLD状态
- *         3. 编码器长按：退出到LVGL页面
- */
-static void dmm_diode_page_handler(KeyEventMsg_t msg) {
-    // 编码器按下左转：切换到电阻页面
-    if (msg.event == ENCODER_EVENT_PRESS_LEFT) {
-        dmm_current_page = DMM_PAGE_Resistance;
-        dmm_res_mode = DMM_RES_MODE_200;
-        // 刷新挡位区背景
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x1908, 1);
-        lcd_draw_round_rect(60, 44, 130, 68, 3, 0x21aa, 0);
-        // 显示2KΩ挡位文字
-        lcd_draw_string(74, 47, "2KΩ", &JetBrainsMono14x18, 0xFFFF, 0x1908, 0);
-        // 清空数据区背景
-        lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
-        // 更新单位为Ω
-        lcd_draw_string(288, 136, "Ω", &JetBrainsMono16x22, 0xFFFF, 0x1908, 0);
-        // 刷新模式选择框
-        DMM_Draw_Mode_Boxes(DMM_PAGE_Resistance, DMM_PAGE_Diode);
-        // 切换硬件模式
-        DMM_Switch_Mode(Dmm_Mode_Resistance);
-        // 关闭HOLD
-        Hold_ctrl(false);
-        // 重置电阻OL状态
-        Res_Is_Last_OL = false;
-        dmm_res_mode = DMM_RES_MODE_200;
-        // 停止蜂鸣
-        StartBeezer(0);
-        return;
-    }
-
-    // SET键单击：切换HOLD状态
-    if (msg.key == KEY_SET && msg.event == KEY_EVENT_CLICK) {
-        Is_Refresh_On == true ? Hold_ctrl(true) : Hold_ctrl(false);
-        StartBeezer(0);
-        return;
-    }
-
-    // 编码器长按：退出到LVGL页面
     if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
         AppListType APP = APP_LVGL;
         StartBeezer(0);
@@ -887,86 +968,112 @@ static float iir_filter(float current_val, float prev_val, float alpha) {
 }
 
 /**
- * @brief  uint16_t类型比较函数（用于qsort）
- * @param  a: 比较值1
- * @param  b: 比较值2
- * @return -1(a<b) / 0(a==b) / 1(a>b)
+ * @brief  带极值剔除的求和：先求总和，再减掉最小 4 个和最大 4 个
+ * @param  base: 通道首地址（交错缓冲里的第一个样本）
+ * @param  stride: 相邻样本的间隔（交错比 = 3）
+ * @param  n: 样本个数
+ * @return 中间 n-8 个样本的和
+ * @note   原来三个通道各拷 200 个点到栈上再 qsort：1.2 KB 中断栈 + 约 1.3 ms 排序；
+ *         这里维护 8 个极值的插入表，只有整数比较，栈占用为 0，也不长时间屏蔽中断
  */
-int compare_uint16_ternary(const void *a, const void *b) {
-    const uint16_t num1 = *(const uint16_t *)a;
-    const uint16_t num2 = *(const uint16_t *)b;
+static uint32_t trimmed_sum_stride(const volatile uint16_t *base, uint16_t stride, uint16_t n) {
+    uint16_t lo[4] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};   // 最小的 4 个（升序）
+    uint16_t hi[4] = {0, 0, 0, 0};                        // 最大的 4 个（升序）
+    uint32_t sum = 0;
 
-    return (num1 < num2) ? -1 : (num1 > num2) ? 1 : 0;
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t v = base[i * stride];
+        sum += v;
+
+        if (v < lo[3]) {
+            if (v < lo[0]) {
+                lo[3] = lo[2]; lo[2] = lo[1]; lo[1] = lo[0]; lo[0] = v;
+            } else if (v < lo[1]) {
+                lo[3] = lo[2]; lo[2] = lo[1]; lo[1] = v;
+            } else if (v < lo[2]) {
+                lo[3] = lo[2]; lo[2] = v;
+            } else {
+                lo[3] = v;
+            }
+        }
+
+        if (v > hi[0]) {
+            if (v > hi[3]) {
+                hi[0] = hi[1]; hi[1] = hi[2]; hi[2] = hi[3]; hi[3] = v;
+            } else if (v > hi[2]) {
+                hi[0] = hi[1]; hi[1] = hi[2]; hi[2] = v;
+            } else if (v > hi[1]) {
+                hi[0] = hi[1]; hi[1] = v;
+            } else {
+                hi[0] = v;
+            }
+        }
+    }
+
+    for (uint8_t i = 0; i < 4; i++) {
+        sum -= lo[i];
+        sum -= hi[i];
+    }
+    return sum;
 }
 
 /**
  * @brief  ADC转换完成回调函数
  * @param  hadc: ADC句柄
  * @note   1. 仅处理ADC1的转换完成事件
- *         2. 数据处理流程：解交错→排序→去毛刺→均值→过采样→校准→IIR滤波
- *         3. 去毛刺：去掉前4和后4个极值，取中间192个数据求和
- *         4. 过采样：12位→14位，提升精度
+ *         2. 600 个交错样本按步长 3 分离三通道，各 200 点
+ *         3. 去毛刺（去掉 4 小 4 大）+ 过采样到 14bit + 校准 + IIR
+ *         4. 换档/换页后的第一个样本直接作为 IIR 初值
  */
 void CB_DMM_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
     if (hadc->Instance == ADC1) {
         AdcTim_OFF(); // 关闭ADC触发定时器
 
-        // 1. 解交错：将600个交错数据拆分为3个通道各200个点
-        uint16_t ch1_data[200]; // 电压通道
-        uint16_t ch2_data[200]; // 电流通道
-        uint16_t ch3_data[200]; // 电阻通道
-        int idx = 0;
-        for (int i = 0; i < 600; i += 3) {
-            ch1_data[idx] = dmm_adc_raw_buf[i];    // 通道2（电压）
-            ch2_data[idx] = dmm_adc_raw_buf[i+1];  // 通道1（电流）
-            ch3_data[idx] = dmm_adc_raw_buf[i+2];  // 通道0（电阻）
-            idx++;
-        }
+        // 三通道在交错缓冲里分别隔 0/1/2 个半字
+        uint32_t sum1 = trimmed_sum_stride(&dmm_adc_raw_buf[0], 3, 200);   // 电压
+        uint32_t sum2 = trimmed_sum_stride(&dmm_adc_raw_buf[1], 3, 200);   // 电流
+        uint32_t sum3 = trimmed_sum_stride(&dmm_adc_raw_buf[2], 3, 200);   // 电阻
 
-        // 2. 排序（用于后续去毛刺）
-        qsort(ch1_data, 200, sizeof(uint16_t), compare_uint16_ternary);
-        qsort(ch2_data, 200, sizeof(uint16_t), compare_uint16_ternary);
-        qsort(ch3_data, 200, sizeof(uint16_t), compare_uint16_ternary);
+        // 过采样到 14bit + 均值（192 点求和后 /12，中点 8192）
+        uint16_t ch1_14bit = (uint16_t)((sum1 >> 2) / 12U);
+        uint16_t ch2_14bit = (uint16_t)((sum2 >> 2) / 12U);
+        uint16_t ch3_14bit = (uint16_t)((sum3 >> 2) / 12U);
 
-        // 3. 求和（去毛刺：去掉前4和后4个极值）
-        uint32_t ch1_sum = 0, ch2_sum = 0, ch3_sum = 0;
-        for (uint8_t i = 4; i < 196; i++) {
-            ch1_sum += ch1_data[i];
-            ch2_sum += ch2_data[i];
-            ch3_sum += ch3_data[i];
-        }
+        // 超量程：贴到量程两端说明前端已经饱和，读数没有意义
+        DMM_Voltage_OL = (ch1_14bit >= 16300U) || (ch1_14bit <= 80U);
+        DMM_Current_OL = (ch2_14bit >= 16300U) || (ch2_14bit <= 80U);
 
-        // 4. 过采样到14bit + 均值滤波（192个数据求和后/12）
-        uint16_t ch1_14bit = 0, ch2_14bit = 0, ch3_14bit = 0;
-        ch1_14bit = (ch1_sum >> 2) / 12;
-        ch2_14bit = (ch2_sum >> 2) / 12;
-        ch3_14bit = (ch3_sum >> 2) / 12;
-
-        // 5. 校准计算（转换为实际物理值）
-        // 电压校准
+        // 电压校准（正负分别用 R/B 系数）
         int32_t temp1 = (int32_t)ch1_14bit - (8192 - UserParam.DMM_Voltage_Original);
-        float raw_voltage = (float) temp1 * (3.3f / 16383.0f) * (temp1 >= 0
-                                                               ? UserParam.DMM_Voltage_Factor_R
-                                                               : UserParam.DMM_Voltage_Factor_B);
+        float raw_voltage = (float)temp1 * (3.3f / 16383.0f) *
+                            (temp1 >= 0 ? UserParam.DMM_Voltage_Factor_R : UserParam.DMM_Voltage_Factor_B);
         // 电流校准
         int32_t temp2 = (int32_t)ch2_14bit - (8192 + UserParam.DMM_Current_Original);
-        float raw_current = (float) temp2 * (3.3f / 16383.0f) * UserParam.DMM_Current_Factor;
+        float raw_current = (float)temp2 * (3.3f / 16383.0f) * UserParam.DMM_Current_Factor;
+        // 电阻校准（零点按当前档位取）
+        // 二极管/通断档固定用 2KΩ 基准，零点要跟着基准电阻走
+        bool use_2k_ref = (dmm_current_page == DMM_PAGE_Diode) || (dmm_res_mode == DMM_RES_RANGE_30K);
+        int32_t res_original = use_2k_ref ? (int32_t)UserParam.DMM_Res_R2K_Original
+                                          : (int32_t)UserParam.DMM_Res_R200_Original;
+        float raw_resistance_voltage = (float)((int32_t)ch3_14bit + res_original) * (3.3f / 16383.0f);
 
-        // 电阻校准
-        int16_t Res_Original;
-        dmm_res_mode == DMM_RES_MODE_200 ? Res_Original = UserParam.DMM_Res_R200_Original : (Res_Original = UserParam.DMM_Res_R2K_Original);
-        float raw_resistance_voltage = (float)(ch3_14bit + Res_Original) * (3.3f / 16383.0f);
+        // IIR：换档/换页后第一个样本直接当初值，避免读数从旧值爬到新值
+        if (dmm_iir_prime) {
+            iir_prev_voltage = raw_voltage;
+            iir_prev_current = raw_current;
+            iir_prev_resistance = raw_resistance_voltage;
+            dmm_iir_prime = false;
+        }
 
-        // 6. IIR滤波
         DMM_Voltage = iir_filter(raw_voltage, iir_prev_voltage, IIR_ALPHA_VOLTAGE);
         DMM_Current = iir_filter(raw_current, iir_prev_current, IIR_ALPHA_CURRENT);
         DMM_Resistance_Voltage = iir_filter(raw_resistance_voltage, iir_prev_resistance, IIR_ALPHA_RESISTANCE);
 
-        // 7. 更新滤波历史值
         iir_prev_voltage = DMM_Voltage;
         iir_prev_current = DMM_Current;
         iir_prev_resistance = DMM_Resistance_Voltage;
 
+        dmm_block_count++;
         AdcTim_ON(); // 重新开启ADC触发定时器
     }
 }
@@ -988,11 +1095,19 @@ void Resume_DmmTask(void) {
     dps_time_count = 0;
     // 当前页面复位（默认电压页面）
     dmm_current_page = DMM_PAGE_Voltage;
-    // 电阻档位复位（默认200Ω档）
-    dmm_res_mode = DMM_RES_MODE_200;
-    // OL状态标记复位
-    Res_Is_Last_OL = false;
-    Dio_Is_Last_OL = false;
+    // 电阻档位复位（2KΩ 满量程档 = 200Ω 基准）
+    dmm_res_mode = DMM_RES_RANGE_2K;
+    // OL / 单位 / 通断状态复位
+    vol_ol_shown = false;
+    cur_ol_shown = false;
+    res_ol_shown = false;
+    dio_ol_shown = false;
+    dio_unit_shown = 0;
+    dio_short = false;
+    dmm_rel_on = false;
+    // IIR 预热：第一个样本直接当初值
+    dmm_iir_prime = true;
+    dmm_block_count = 0;
     // IIR滤波历史值复位
     iir_prev_voltage = 0.0f;
     iir_prev_current = 0.0f;
@@ -1009,12 +1124,14 @@ void Resume_DmmTask(void) {
     HAL_ADC_RegisterCallback(&hadc1, HAL_ADC_CONVERSION_COMPLETE_CB_ID, CB_DMM_ADC_ConvCpltCallback);
     AdcTim_OFF();                            // 先关闭ADC触发
 
-    // 启动ADC DMA采集（600个数据）
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t *) dmm_adc_raw_buf, 600);
     // 配置定时器8：20Khz触发（预分频0，自动重装7199）
     __HAL_TIM_SET_PRESCALER(&htim8, 0);
     __HAL_TIM_SET_AUTORELOAD(&htim8, 7200 - 1);
-    AdcTim_ON();                             // 开启ADC触发
+
+    // 启动ADC DMA采集（600 个半字 = 200 点 × 3 通道）；失败就交给看门狗重试
+    if (dmm_start_capture()) {
+        AdcTim_ON();                         // 开启ADC触发
+    }
 
     DMM_Switch_Mode(Dmm_Mode_Voltage);       // 默认电压模式
     Resume_IndevDetectTask();                // 恢复输入设备检测
@@ -1028,6 +1145,7 @@ void Resume_DmmTask(void) {
  *         3. 挂起DMM核心任务
  */
 void Suspend_DmmTask(void) {
+    StartBeezer(0);                                        // 停掉二极管档可能还在响的蜂鸣
     DMM_Switch_Mode(Dmm_Mode_Voltage);                   // 切换到电压模式
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_RESET); // 关闭电压档硬件
 

@@ -65,6 +65,16 @@ typedef enum {
 
 void DMM_Switch_Mode(DmmModeTypeDef mode);
 
+/* 万用表电阻档位：按"满量程"命名，与界面显示的 2KΩ / 30KΩ 一致
+ * （旧名 DMM_RES_MODE_200 / _2K 指的是基准电阻 200Ω / 2KΩ，容易和满量程搞混） */
+typedef enum {
+    DMM_RES_RANGE_2K = 0,   // 200Ω 基准电阻，满量程 2KΩ（E1 拉低）
+    DMM_RES_RANGE_30K,      // 2KΩ 基准电阻，满量程 30KΩ（E2 拉低）
+} DMM_Res_RangeTypeDef;
+
+/* 只切换电阻档的基准电阻（E1/E2），用于自动量程；内部含 20ms 稳定延时 */
+void DMM_Res_Range_Ctrl(DMM_Res_RangeTypeDef range);
+
 
 
 

@@ -135,3 +135,21 @@ void DMM_Switch_Mode(DmmModeTypeDef mode) {
     }
     osDelay(20);
 }
+
+/**
+ * @brief  切换电阻档的基准电阻（自动量程用）
+ * @param  range: DMM_RES_RANGE_2K（200Ω 基准）/ DMM_RES_RANGE_30K（2KΩ 基准）
+ * @note   两档都先关断再开目标档，避免切换瞬间两个基准电阻并联；
+ *         换档后需要一段稳定时间，否则 ADC 读到的是切换过程。
+ */
+void DMM_Res_Range_Ctrl(DMM_Res_RangeTypeDef range) {
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);     // 关 200Ω
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_SET);     // 关 2KΩ
+
+    if (range == DMM_RES_RANGE_2K) {
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
+    } else {
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_RESET);
+    }
+    osDelay(20);
+}
