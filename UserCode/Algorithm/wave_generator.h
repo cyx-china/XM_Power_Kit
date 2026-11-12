@@ -14,7 +14,9 @@
 #include <math.h>
 
 // ------------------- 公共配置参数 -------------------
-#define MAX_SAMPLE       256     // 最大采样点数 (2^7)，RAM占用 256 * 2 = 512 Bytes (12-bit aligned)
+#define MAX_SAMPLE       512     // 最大采样点数，RAM占用 512 * 2 = 1KB (12-bit aligned)
+#define WAVEGEN_N_MIN    16      // 单周期最少采样点数（再少波形就严重失真了）
+#define WAVEGEN_N_MAX    MAX_SAMPLE
 #define DAC_MAX          4095    // 12位DAC最大值 (2^12 - 1)
 #define VREF             3.3f    // DAC参考电压 (V)
 #define MAX_AMPLITUDE    4.95f   // 最大输出振幅 (V)，受后端运放轨到轨限制
@@ -52,7 +54,7 @@ HAL_StatusTypeDef WaveGen_Square(float freq, float amplitude, float bias, float 
  * @param  freq:       频率 (Hz, Range: 1 ~ 50000)
  * @param  amplitude:  振幅 (V, Range: 0 ~ MAX_AMPLITUDE)
  * @param  bias:       直流偏置 (V, Range: MIN_BIAS ~ MAX_BIAS)
- * @param  duty_cycle: 占空比 (Range: 0.0 ~ 1.0). 0.0=上升锯齿, 0.5=三角波, 1.0=下降锯齿
+ * @param  duty_cycle: 占空比 (Range: 0.0 ~ 1.0). 0.5=三角波, 其它值=上升/下降锯齿
  * @return HAL状态码
  */
 HAL_StatusTypeDef WaveGen_Sawtooth(float freq, float amplitude, float bias, float duty_cycle);
@@ -163,9 +165,10 @@ HAL_StatusTypeDef WaveGen_Lorenz(float freq, float amplitude, float bias, float 
 
 /**
  * @brief  生成高斯白噪声 (White Noise / Random Noise)
- * @note   使用伪随机数生成器 (PRNG)
+ * @note   噪声缓冲区在 DMA 半传输/传输完成中断里持续刷新，输出是连续的随机序列，
+ *         不会像固定缓冲区那样按 1kHz 周期性重复
  * @param  freq:       保留参数，未使用 (噪声带宽由采样率决定)
- * @param  amplitude:  噪声幅度 (V, Range: 0 ~ MAX_AMPLITUDE, 峰峰值)
+ * @param  amplitude:  噪声幅度 (V, Range: 0 ~ MAX_AMPLITUDE)
  * @param  bias:       直流偏置 (V, Range: MIN_BIAS ~ MAX_BIAS)
  * @param  duty_cycle: 保留参数，未使用
  * @return HAL状态码

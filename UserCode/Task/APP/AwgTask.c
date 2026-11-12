@@ -296,11 +296,11 @@ static void DrawAwgMainBasicElement(void) {
     lcd_draw_round_rect(WAVE_PREVIEW_X_START, WAVE_PREVIEW_Y_START,
                         WAVE_PREVIEW_X_END, WAVE_PREVIEW_Y_END, 8,
                         COLOR_WAVE_PREVIEW_BG, 1);
-    // 绘制初始波形预览图（正弦波）
-    DrawWavePreview(Wave_Sine);
+    // 绘制当前选中波形的预览图
+    DrawWavePreview(current_wave);
 
-    // 绘制输出状态提示框
-    DrawIndiccateBox(false);
+    // 绘制输出状态提示框（按当前真实输出状态，恢复时不能一律画成关闭）
+    DrawIndiccateBox(IsOutputOn);
 
     // 绘制参数区背景
     lcd_draw_round_rect(PARAM_AREA_X_START, PARAM_AREA_Y_START,
@@ -314,11 +314,13 @@ static void DrawAwgMainBasicElement(void) {
         const char *value;   // 参数初始值
         uint8_t x_val;       // 参数值X轴偏移
     } ParamItem_t;
+    // 值必须取当前的字符串缓冲，不能写死初值：
+    // 否则从别的 APP 回来时界面会显示 1000Hz/50%，和实际参数对不上
     const ParamItem_t param_items[] = {
-        {"频率", "Hz", "01000", 177},  // 频率参数
-        {"占空", "%", "050", 190},     // 占空比参数
-        {"幅值", "V", "1.00", 188},    // 振幅参数
-        {"偏置", "V", "+0.00", 175}    // 偏置参数
+        {"频率", "Hz", freq_str, 177},  // 频率参数
+        {"占空", "%", duty_str, 190},   // 占空比参数
+        {"幅值", "V", amp_str, 188},    // 振幅参数
+        {"偏置", "V", bias_str, 175}    // 偏置参数
     };
 
     // 遍历绘制每个参数项
@@ -664,7 +666,9 @@ static const AwgDigitCtx_t duty_ctx = {
 static const AwgDigitCtx_t amp_ctx = {
     .value = &AmpValue, .digit = &amp_digit_current,
     .digit_min = amp_hundredth, .digit_max = amp_unit,
-    .step = 0.01f, .value_min = 0.01f, .value_max = 5.00f,
+    // 上下限必须和 wave_generator.h 的 MAX_AMPLITUDE 一致，否则设到 4.96~5.00
+    // 时波形函数会直接返回错误，界面上显示新值但输出还是旧波形
+    .step = 0.01f, .value_min = MIN_AMPLITUDE, .value_max = MAX_AMPLITUDE,
     .text_x = 188, .text_y = PARAM_ROW_START_Y + 2 * PARAM_ROW_HEIGHT,
     .text = amp_str, .text_size = sizeof(amp_str), .text_width = 0,
     .decimals = 2, .text_flags = 0, .is_int = 0,
@@ -675,7 +679,7 @@ static const AwgDigitCtx_t amp_ctx = {
 static const AwgDigitCtx_t bias_ctx = {
     .value = &BiasValue, .digit = &bias_digit_current,
     .digit_min = bias_hundredth, .digit_max = bias_unit,
-    .step = 0.01f, .value_min = -5.00f, .value_max = 5.00f,
+    .step = 0.01f, .value_min = MIN_BIAS, .value_max = MAX_BIAS,
     .text_x = 175, .text_y = PARAM_ROW_START_Y + 3 * PARAM_ROW_HEIGHT,
     .text = bias_str, .text_size = sizeof(bias_str), .text_width = 0,
     .decimals = 2, .text_flags = FMT_SIGN, .is_int = 0,
@@ -789,8 +793,8 @@ void Start_AwgTask(void *argument) {
     osThreadSuspend(AwgTaskHandle);
 
     for (;;) {
-        // 读取按键事件消息
-        if (osMessageQueueGet(KeyEventQueueHandle, &AWG_Keymsg, NULL, 0) == osOK) {
+        // 读取按键事件消息（原来超时给 0，取不到就立刻返回，等于 100% 占着 CPU 空转）
+        if (osMessageQueueGet(KeyEventQueueHandle, &AWG_Keymsg, NULL, osWaitForever) == osOK) {
             // 分发到当前页面的处理函数
             page_handlers[awg_current_page](AWG_Keymsg);
         }
@@ -800,10 +804,10 @@ void Start_AwgTask(void *argument) {
 /************************ 任务控制函数 ************************/
 /**
  * @brief 挂起AWG任务
- * @note  停止波形输出，挂起输入设备检测任务和AWG任务
+ * @note  波形输出保持运行（切到示波器可以直接观察本机信号源），只挂起输入检测与AWG任务
  */
 void Suspend_AwgTask(void) {
-    //WaveGen_Stop(); // 停止波形输出
+    // 这里故意不停波形：切到示波器/万用表时可以继续观察本机信号源的输出
     Suspend_IndevDetectTask(); // 挂起输入设备检测任务
     osThreadSuspend(AwgTaskHandle); // 挂起AWG任务
 }
@@ -813,20 +817,28 @@ void Suspend_AwgTask(void) {
  * @note  重置页面状态，重新绘制界面，恢复输入设备检测任务和AWG任务
  */
 void Resume_AwgTask(void) {
-    WaveGen_Stop();     // 停止波形输出
-    osDelay(10);
-    WaveGen_DC(1000,0,0,0); // 输出0V
+    // 恢复离开时的输出状态。原来的实现不管之前开没开都强行停掉输出，
+    // 但 IsOutputOn 没跟着复位，于是指示灯显示关、变量还是 true，要按两次才能开
+    if (IsOutputOn) {
+        GenerateWave(current_wave);
+    } else {
+        WaveGen_Stop();
+        WaveGen_DC(1000, 0, 0, 0); // 输出0V
+    }
+
     // 重置页面状态
     awg_current_page = PAGE_MAIN;
     awg_previous_page = PAGE_MAIN;
 
-    // 重置左侧栏状态
-    ColumnPageIndex = 0;
-    ColumnPageSelectIndex = 0;
-
-    // 重置波形选择状态
-    current_wave = Wave_Sine;
-    previous_wave = Wave_Sine;
+    // 左侧栏按当前波形定位
+    last_top = 0;
+    uint8_t column_top = 0;
+    uint8_t column_rel = 0;
+    calc_render_params(current_wave, &column_top, &column_rel);
+    ColumnPageIndex = column_top;
+    ColumnPageSelectIndex = column_rel;
+    last_idx = column_rel;
+    previous_wave = current_wave;
 
     // 重新绘制基础界面
     DrawAwgMainBasicElement();
