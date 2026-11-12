@@ -12,6 +12,11 @@
 #include "tim.h"
 #include "UserDefineManage.h"
 
+// 硬件设计量程：电压 ±36V、电流 ±2A，前端各自缩放到 ±1.65V 再叠加 1.65V 直流偏置送进 ADC
+// （所以 ADC 中点 8192 对应 0V/0A，量程两端对应 ±36V / ±2A）
+#define DMM_VOLTAGE_RANGE 36.0f
+#define DMM_CURRENT_RANGE 2.0f
+
 // 函数前置声明
 static void DrawDmmMainBasicElement(void);
 static void Refresh_Voltage(float Voltage);
@@ -389,11 +394,18 @@ int FormatFloatWithTwoDigits(float num, char *formatted_buf, char *digits_buf) {
 /* ==================== 显示/量程辅助 ==================== */
 
 /**
- * @brief  清空数据区，并让所有"上一次显示的字符串"失效
+ * @brief  清空数据区，并让所有"上一次显示的字符串/OL 标记"失效
  * @note   影子串失效保证下一帧一定会重画；单位文字也在数据区内，被一起清掉，调用后需补画
  */
 static void dmm_clear_data_area(void) {
     lcd_draw_round_rect(12, 80, 308, 166, 8, 0x1908, 1);
+
+    // 数据区被擦掉了，OL 状态也必须失效，否则"上一个页面正显示 OL"会导致
+    // 新页面第一帧被去重逻辑跳过，屏幕上只剩底色（换表强制重画一帧）
+    vol_ol_shown = false;
+    cur_ol_shown = false;
+    res_ol_shown = false;
+    dio_ol_shown = false;
 
     last_vol_main[0] = '\0';
     last_vol_digit[0] = '\0';
@@ -457,8 +469,8 @@ static float dmm_res_compute(float res_vol) {
 
 /**
  * @brief  绘制左上角的挡位/量程标签
- * @note   电压/电流没有硬件量程，显示由校准系数算出的满量程（如 "74V" / "4.4A"），
- *         电阻档做自动量程，显示 "AUTO"（原来这里是写死的 "AUTO"，电压电流其实并不自动）
+ * @note   电压/电流没有硬件档位，显示硬件设计量程（±36V / ±2A：前端缩放到 ±1.65V 再叠加偏置）；
+ *         电阻档做自动量程，显示 "AUTO"（原来是写死的一串 "AUTO"，电压电流其实并不自动）
  */
 static void dmm_draw_range_label(void) {
     char buf[10];
@@ -466,16 +478,16 @@ static void dmm_draw_range_label(void) {
 
     switch (dmm_current_page) {
         case DMM_PAGE_Voltage:
-            fmt_fixed_unit(buf, sizeof(buf), 3.3f * UserParam.DMM_Voltage_Factor_R, 0, 0, 0, "V");
+            fmt_fixed_unit(buf, sizeof(buf), DMM_VOLTAGE_RANGE, 0, 0, 0, "V");
             break;
         case DMM_PAGE_Current:
-            fmt_fixed_unit(buf, sizeof(buf), 3.3f * UserParam.DMM_Current_Factor, 1, 0, 0, "A");
+            fmt_fixed_unit(buf, sizeof(buf), DMM_CURRENT_RANGE, 1, 0, 0, "A");
             break;
         case DMM_PAGE_Resistance:
             strcpy(buf, "AUTO");
             break;
         case DMM_PAGE_Diode:
-            strcpy(buf, "▶|");
+            strcpy(buf, "  ▶|");
             break;
         default:
             buf[0] = '\0';
@@ -1039,10 +1051,6 @@ void CB_DMM_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         uint16_t ch2_14bit = (uint16_t)((sum2 >> 2) / 12U);
         uint16_t ch3_14bit = (uint16_t)((sum3 >> 2) / 12U);
 
-        // 超量程：贴到量程两端说明前端已经饱和，读数没有意义
-        DMM_Voltage_OL = (ch1_14bit >= 16300U) || (ch1_14bit <= 80U);
-        DMM_Current_OL = (ch2_14bit >= 16300U) || (ch2_14bit <= 80U);
-
         // 电压校准（正负分别用 R/B 系数）
         int32_t temp1 = (int32_t)ch1_14bit - (8192 - UserParam.DMM_Voltage_Original);
         float raw_voltage = (float)temp1 * (3.3f / 16383.0f) *
@@ -1050,6 +1058,17 @@ void CB_DMM_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         // 电流校准
         int32_t temp2 = (int32_t)ch2_14bit - (8192 + UserParam.DMM_Current_Original);
         float raw_current = (float)temp2 * (3.3f / 16383.0f) * UserParam.DMM_Current_Factor;
+
+        // 超量程判定，两种情况都算：
+        //   1) 14bit 贴到量程两端——12bit 的 0/4095 过采样后是 0/16380，说明前端已经饱和，读数没意义；
+        //   2) 校准后的读数超过硬件设计量程（±36V / ±2A），留一点余量防抖。
+        DMM_Voltage_OL = (ch1_14bit <= 20U) || (ch1_14bit >= 16360U) ||
+                         (raw_voltage > (DMM_VOLTAGE_RANGE + 0.5f)) ||
+                         (raw_voltage < -(DMM_VOLTAGE_RANGE + 0.5f));
+        DMM_Current_OL = (ch2_14bit <= 20U) || (ch2_14bit >= 16360U) ||
+                         (raw_current > (DMM_CURRENT_RANGE + 0.05f)) ||
+                         (raw_current < -(DMM_CURRENT_RANGE + 0.05f));
+
         // 电阻校准（零点按当前档位取）
         // 二极管/通断档固定用 2KΩ 基准，零点要跟着基准电阻走
         bool use_2k_ref = (dmm_current_page == DMM_PAGE_Diode) || (dmm_res_mode == DMM_RES_RANGE_30K);
