@@ -1,5 +1,6 @@
 #include "DMM_V_Calibrate.h"
 #include "CalClamp.h"
+#include "CalCommon.h"
 #include "format.h"
 #include <inttypes.h>
 #include <stdio.h>
@@ -328,7 +329,7 @@ static void DmmVCal_Negative_Main_handler(KeyEventMsg_t msg)
         else if (DmmVCal_Negative_Page_current == 1)
         {
             // 完成校准，保存配置，清理并退出
-            UserParam_SaveAllValues();  // 保存配置
+            Cal_SaveParamsChecked();      // 保存并检查返回值
             Calibrate_ReturnToMain();   // 返回主界面
             StartBeezer(0);
 

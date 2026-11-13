@@ -1,5 +1,6 @@
 #include "AWG_Calibrate.h"
 #include "CalClamp.h"
+#include "CalCommon.h"
 #include "format.h"
 
 #include <inttypes.h>
@@ -169,7 +170,7 @@ static void AwgCal_Output_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_line(110,225,194,225,0x87d3);
         }
         else if (AwgCal_Output_Page_current == 1) {                                      // 如果选中的是 下一步 按钮
-            UserParam_SaveAllValues();  // 保存配置
+            Cal_SaveParamsChecked();      // 保存并检查返回值
             WaveGen_Stop();             // 校准结束必须停输出，否则退出后仍挂着 1V
             Calibrate_ReturnToMain();   // 返回主界面
             StartBeezer(0);

@@ -1,5 +1,6 @@
 #include <inttypes.h>
 #include "CalClamp.h"
+#include "CalCommon.h"
 #include "format.h"
 #include <stdio.h>
 #include <tgmath.h>
@@ -607,7 +608,7 @@ static void DpsCal_Output_Main_handler(KeyEventMsg_t msg) {
             Resume_IndevDetectTask();
         }
         else if (mode == 1) {
-            UserParam_SaveAllValues();
+            Cal_SaveParamsChecked();      // 保存并检查返回值
             Calibrate_ReturnToMain();   // 返回主界面
         }
     }

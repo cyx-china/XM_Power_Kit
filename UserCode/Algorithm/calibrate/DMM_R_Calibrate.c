@@ -1,5 +1,6 @@
 #include "DMM_R_Calibrate.h"
 #include "CalClamp.h"
+#include "CalCommon.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include "lcd_draw_api.h"
@@ -353,7 +354,7 @@ static void DmmRCal_R2K_Fitting_Main_handler(KeyEventMsg_t msg) {
         UserParam.DMM_Res_R2K = DMM_Calc_R0_SinglePoint(UserParam.DMM_Res_R2K_Voltage, 2000.0f, Vol_Temp2);
 
         // 将数据存入flash
-        UserParam_SaveAllValues();
+        Cal_SaveParamsChecked();      // 保存并检查返回值
 
         // 退出校准
 
