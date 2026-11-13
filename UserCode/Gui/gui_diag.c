@@ -81,10 +81,9 @@ static uint8_t diag_cal_count(void) {
 
 static void diag_build(void) {
     uint32_t total_kb = 0, free_kb = 0;
-    uint32_t flash_mb = 0;
-    uint32_t free_pct = 0;
+    uint32_t used_kb = 0;
+    uint32_t used_pct = 0;
     uint32_t heap = (uint32_t) xPortGetFreeHeapSize();
-    uint8_t cap_code = (uint8_t) ((FLASH_JEDEC_ID >> 16) & 0xFFU);
 
     s_items[0].label = "固件";
     (void) snprintf(s_items[0].value, sizeof(s_items[0].value), "%s", VERSION_STR);
@@ -96,15 +95,18 @@ static void diag_build(void) {
     (void) snprintf(s_items[2].value, sizeof(s_items[2].value), "%08lX%08lX",
                     (unsigned long) HAL_GetUIDw1(), (unsigned long) HAL_GetUIDw2());
 
-    if (cap_code >= 20U) {
-        flash_mb = (1UL << cap_code) >> 20;
-    }
     if (FileService_GetCapacity(&total_kb, &free_kb) && (total_kb != 0U)) {
-        free_pct = (free_kb * 100U) / total_kb;
+        used_kb = (free_kb <= total_kb) ? (total_kb - free_kb) : 0U;
+        used_pct = (used_kb * 100U) / total_kb;
     }
-    s_items[3].label = "存储";
-    (void) snprintf(s_items[3].value, sizeof(s_items[3].value), "%luMB %lu%%",
-                    (unsigned long) flash_mb, (unsigned long) free_pct);
+    /* 显示 已用/总量（MB，各保留 1 位小数）与已用百分比，避免"容量 + 剩余百分比"混在一起看不懂 */
+    s_items[3].label = "Flash";
+    (void) snprintf(s_items[3].value, sizeof(s_items[3].value), "%lu.%lu/%lu.%luMB %lu%%",
+                    (unsigned long) (used_kb / 1024U),
+                    (unsigned long) (((used_kb % 1024U) * 10U) / 1024U),
+                    (unsigned long) (total_kb / 1024U),
+                    (unsigned long) (((total_kb % 1024U) * 10U) / 1024U),
+                    (unsigned long) used_pct);
 
     s_items[4].label = "校准";
     (void) snprintf(s_items[4].value, sizeof(s_items[4].value), "%u/4 SET", (unsigned) diag_cal_count());

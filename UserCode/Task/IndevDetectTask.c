@@ -42,10 +42,16 @@ void Start_IndevDetectTask(void *argument) {
 
     for (;;) {
         if (osMessageQueueGet(BeezerQueueHandle, &BeezerTime, NULL, 0) == osOK) {
-            BeezerRemainTicks = UserParam.Beezer_Time + 1;  // 先赋值默认值
-            if (BeezerTime != 0){BeezerRemainTicks = BeezerTime / 10 + 1;}  // 如果入参不是0，那么就计算时间的时间
-            BeezerIsActive = 1;
-            HAL_TIM_PWM_Start(&htim9, TIM_CHANNEL_1);
+            if (UserParam.Beezer_Volume == 0U) {
+                // 音量为 0：直接丢弃本次蜂鸣请求（CCR 若按 (0-1)/2 计算会变成 32767，三极管常通发热）
+                BeezerIsActive = 0;
+                HAL_TIM_PWM_Stop(&htim9, TIM_CHANNEL_1);
+            } else {
+                BeezerRemainTicks = UserParam.Beezer_Time + 1;  // 先赋值默认值
+                if (BeezerTime != 0){BeezerRemainTicks = BeezerTime / 10 + 1;}  // 如果入参不是0，那么就计算时间的时间
+                BeezerIsActive = 1;
+                HAL_TIM_PWM_Start(&htim9, TIM_CHANNEL_1);
+            }
         }
 
         if (BeezerIsActive) {

@@ -44,7 +44,6 @@ static void about_on_key(GuiKey_t key) {
         case GUI_KEY_ENTER:
         case GUI_KEY_BACK:
         case GUI_KEY_UP:
-        case GUI_KEY_LEFT:
             Gui_Back();
             break;
         default:

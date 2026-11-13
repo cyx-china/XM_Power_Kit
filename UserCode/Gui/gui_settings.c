@@ -76,7 +76,7 @@ static const SetRow_t s_rows[] = {
     { ROW_SWITCH, SK_FLIP,      "颜色翻转",     0,   1 },
     { ROW_SWITCH, SK_ROTATE,    "屏幕旋转",     0,   1 },
     { ROW_TITLE,  SK_NONE,      "蜂鸣器设置",   0,   0 },
-    { ROW_SLIDER, SK_BEEP_VOL,  "蜂鸣音量",     10, 100 },
+    { ROW_SLIDER, SK_BEEP_VOL,  "蜂鸣音量",     0,  100 },
     { ROW_SLIDER, SK_BEEP_TIME, "蜂鸣时长",     1,   8 },
     { ROW_TITLE,  SK_NONE,      "风扇设置",     0,   0 },
     { ROW_SWITCH, SK_FAN_EN,    "风扇使能",     0,   1 },
@@ -223,8 +223,12 @@ static void set_apply(uint8_t index, int16_t value) {
             break;
         case SK_BEEP_VOL:
             UserParam.Beezer_Volume = (uint16_t) value;
-            __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, (uint32_t) ((value - 1) / 2));
-            StartBeezer(0);                 // 试听一下新音量
+            if (value > 0) {
+                __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, (uint32_t) ((value - 1) / 2));
+                StartBeezer(0);             // 试听一下新音量
+            } else {
+                HAL_TIM_PWM_Stop(&htim9, TIM_CHANNEL_1);   // 音量为 0：直接静音
+            }
             break;
         case SK_BEEP_TIME:
             UserParam.Beezer_Time = (uint16_t) value;
@@ -261,7 +265,11 @@ static void set_value_text(uint8_t index, char *buf, uint16_t size) {
             (void) snprintf(buf, size, "%d%%", (int) value);
             break;
         case SK_BEEP_VOL:
-            (void) snprintf(buf, size, "%d%%", (int) value);
+            if (value == 0) {
+                (void) snprintf(buf, size, "%s", "关闭");
+            } else {
+                (void) snprintf(buf, size, "%d%%", (int) value);
+            }
             break;
         case SK_BEEP_TIME:
             (void) snprintf(buf, size, "%dms", (int) value * 10);

@@ -209,13 +209,19 @@ static bool Sys_Init(void) {
   // 复位休眠计时（按系统节拍计时，见 SensorTask.c）
   Sensor_ResetIdleTimer();
 
-  // 设置蜂鸣器音量（音量 0 会让 CCR 变成 32767，三极管常通发热，这里兜底）
+  // 设置蜂鸣器音量（0 = 关闭蜂鸣；CCR 若按 (0-1)/2 计算会变成 32767，三极管常通发热）
   uint16_t volume = UserParam.Beezer_Volume;
 
-  if ((volume < 1U) || (volume > 100U)) {
+  if (volume > 100U) {
     volume = 100U;
   }
-  __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, ((volume - 1U) / 2U));
+
+  if (volume == 0U) {
+    HAL_TIM_PWM_Stop(&htim9, TIM_CHANNEL_1);
+    __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, 0U);
+  } else {
+    __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, ((volume - 1U) / 2U));
+  }
 
   DpsRelease_ON();
 
