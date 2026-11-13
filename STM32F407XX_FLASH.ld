@@ -151,16 +151,8 @@ SECTIONS
 
   /*================== 自定义区 =====================*/
 
-  /* LVGL 内存池 (32 KB) */
-  .ccmram_lvgl_reserved 0x10000000 :
-  {
-    . = ALIGN(8);
-    . = . + 0x8000;           /* 36844 */
-    . = ALIGN(8);
-  } >CCMRAM
-
-  /* rtos 内存池 (32 KB)*/
-  .ccmram_rtos 0x10008000 :
+  /* rtos 内存池 (32 KB)，去掉 LVGL 后从 CCMRAM 起始处开始 */
+  .ccmram_rtos 0x10000000 :
   {
     . = ALIGN(4);
     KEEP(*(.ccmram_rtos))

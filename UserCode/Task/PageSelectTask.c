@@ -1,7 +1,7 @@
 /**
 ******************************************************************************
   * @file           : PageSelectTask.c
-  * @brief          : 多应用系统的应用切换任务，包括挂起/恢复不同应用（LVGL、电源、示波器、任意波形发生器、数字万用表）的任务，
+  * @brief          : 多应用系统的应用切换任务，包括挂起/恢复不同应用（主界面 GUI、电源、示波器、任意波形发生器、数字万用表）的任务，
   *                   通过消息队列处理应用切换请求，并管理当前应用的运行状态。
   * @date           : 2026/2/21
   * @license        : CC-BY-NC-SA 4.0
@@ -35,10 +35,9 @@ void Start_PageSelectTask(void *argument) {
     // 自挂启，等待app切换
     osThreadSuspend(PageSelectTaskHandle);
 
-    //上电首先让LVGL的App选择界面运行
-    osThreadResume(LvglCoreTaskHandle);         // 恢复LVGL任务
-    IsLvglRunning = true;                       // 设置标志位，允许lv_tick_inc被调用
-    RunningApp = APP_LVGL;                      // 标记当前运行的APP为LVGL
+    // 上电先运行自研 GUI 的主界面（APP 选择）
+    osThreadResume(GuiTaskHandle);         // 恢复主界面 GUI 任务
+    RunningApp = APP_HOME;                      // 标记当前运行的 APP 为主界面
 
 
     for (;;) {
@@ -72,7 +71,7 @@ void Start_PageSelectTask(void *argument) {
 // 挂起指定App任务
 static void SuspendTask(AppListType APP) {
     switch (APP) {
-        case APP_LVGL:      Suspend_LvglCoreTask();     break;
+        case APP_HOME:      Suspend_GuiTask();     break;
         case APP_POWER:     Suspend_DpsCoreTask();      break;
         case APP_DSO:       Suspend_DsoCoreTask();      break;
         case APP_AWG:       Suspend_AwgTask();          break;
@@ -85,7 +84,7 @@ static void SuspendTask(AppListType APP) {
 // 恢复指定任务
 static void ResumeTask(AppListType APP) {
     switch (APP) {
-        case APP_LVGL:      Resume_LvglCoreTask();      break;
+        case APP_HOME:      Resume_GuiTask();      break;
         case APP_POWER:     Resume_DpsCoreTask();       break;
         case APP_DSO:       Resume_DsoCoreTask();       break;
         case APP_AWG:       Resume_AwgTask();           break;

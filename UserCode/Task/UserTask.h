@@ -17,12 +17,13 @@
 
 #ifndef XM_POWER_KIT_USERTASK_H
 #define XM_POWER_KIT_USERTASK_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "font.h"
 #include "images.h"
-#include "lv_area.h"
-#include "lv_color.h"
 #include "MCP4725.h"
-#include "lv_svg.h"
 #include "stm32f4xx_hal.h"
 #include "cmsis_os2.h"
 #include "Keys.h"
@@ -55,11 +56,6 @@ extern volatile int32_t SleepCounter;       // 睡眠计数器
 void WakeUp(void);
 /*================= LcdFlushTask ================*/
 typedef enum {
-    REFRESH_TYPE_LVGL = 0,    // LVGL刷新
-    REFRESH_TYPE_MANUAL       // 手动绘图刷新
-} RefreshType;
-
-typedef enum {
     CLEAR_SCREEN = 0,    // 清屏
     DRAW_PIXEL,          // 绘制单个像素
     DRAW_LINE,           // 绘制直线
@@ -90,17 +86,6 @@ typedef struct {
 
 // 用于刷新消息的结构体
 typedef struct {
-    RefreshType RefreshType;    // 刷新类型（LVGL/手动）
-    // LVGL所需参数
-    // 注意：LVGL 传入的 area 指向它自己的栈上变量，消息是异步消费的，
-    //       保存指针会在刷屏线程使用时早已失效，因此这里直接保存 4 个坐标值。
-    int16_t area_x1;
-    int16_t area_y1;
-    int16_t area_x2;
-    int16_t area_y2;
-    lv_color_t * color_p;       // 数据指针
-
-    // 手动调用刷新所需参数
     const GFX_DrawCommand_t* draw_command;  // 绘制命令指针
 
     // 消息的指针，方便消费端释放
@@ -122,7 +107,7 @@ extern osSemaphoreId_t DrawData_Done_SemHandle;
 // 定义app列表枚举
 typedef enum {
     APP_NONE = 0,   // 中间状态/错误状态
-    APP_LVGL,       // LVGL
+    APP_HOME,       // 主界面（自研 GUI）
     APP_POWER,      // 数控电源
     APP_DSO,        // 示波器
     APP_AWG,        // 任意波发生器
@@ -138,11 +123,10 @@ void StartBeezer(uint16_t time_ms);
 void Suspend_IndevDetectTask(void);
 void Resume_IndevDetectTask(void);
 
-/*================== LvglCoreTask =================*/
-extern volatile bool IsLvglRunning;
-
-void Suspend_LvglCoreTask(void);
-void Resume_LvglCoreTask(void);
+/*================== GuiTask =================*/
+void Start_GuiTask(void *argument);
+void Suspend_GuiTask(void);
+void Resume_GuiTask(void);
 
 /*================== DpsCoreTask ==================*/
 extern volatile bool PowerMode;

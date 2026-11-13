@@ -87,11 +87,11 @@ const osThreadAttr_t PageSelectTask_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityHigh,
 };
-/* Definitions for LvglCoreTask */
-osThreadId_t LvglCoreTaskHandle;
-const osThreadAttr_t LvglCoreTask_attributes = {
-  .name = "LvglCoreTask",
-  .stack_size = 768 * 4,
+/* Definitions for GuiTask */
+osThreadId_t GuiTaskHandle;
+const osThreadAttr_t GuiTask_attributes = {
+  .name = "GuiTask",
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for DpsCoreTask */
@@ -215,7 +215,7 @@ void Start_InitTask(void *argument);
 extern void Start_SensorTask(void *argument);
 extern void Start_LcdFlushTask(void *argument);
 extern void Start_PageSelectTask(void *argument);
-extern void Start_LvglCoreTask(void *argument);
+extern void Start_GuiTask(void *argument);
 extern void Start_DpsCoreTask(void *argument);
 extern void Start_IndevDetectTask(void *argument);
 extern void Start_PIDTask(void *argument);
@@ -337,8 +337,8 @@ void MX_FREERTOS_Init(void) {
   /* creation of PageSelectTask */
   PageSelectTaskHandle = osThreadNew(Start_PageSelectTask, NULL, &PageSelectTask_attributes);
 
-  /* creation of LvglCoreTask */
-  LvglCoreTaskHandle = osThreadNew(Start_LvglCoreTask, NULL, &LvglCoreTask_attributes);
+  /* creation of GuiTask */
+  GuiTaskHandle = osThreadNew(Start_GuiTask, NULL, &GuiTask_attributes);
 
   /* creation of DpsCoreTask */
   DpsCoreTaskHandle = osThreadNew(Start_DpsCoreTask, NULL, &DpsCoreTask_attributes);

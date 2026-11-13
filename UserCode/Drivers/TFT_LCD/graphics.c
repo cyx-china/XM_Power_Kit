@@ -15,16 +15,16 @@
 // -------------------------- 字体/图片文件句柄常驻缓存 -------------------------- //
 // 一次 f_open 需要多次通过 SPI 读取目录项与 FAT，而文字/图片绘制是最高频的路径，
 // 因此这里把用到的文件常驻打开，绘制时只做 seek/read，不再反复开关文件。
-#define GFX_FILE_CACHE_NUM      4           // 同时常驻打开的文件数（字体/图片）
+#define GFX_FILE_CACHE_NUM      10          // 同时常驻打开的文件数（字体/图片）：主界面 8 个图标 + 1 套字库不会被来回换出
 #define GFX_IMAGE_MAX_BYTES     1024        // 图片分块读取的缓冲上限（字节）
 #define GFX_FLUSH_PIXELS        1600        // 单次刷屏缓冲最大像素数（32x50 是最大字模）
 
 // 字模灰度缓存：字体文件在 SPI Flash 上，一次 4KB 扇区读取约 0.8ms，
 // 缓存最近用到的字模后，重复刷新同样的数字/文字基本不再访问 Flash。
 #ifndef GFX_GLYPH_CACHE_BYTES
-#define GFX_GLYPH_CACHE_BYTES   6144
+#define GFX_GLYPH_CACHE_BYTES   8192
 #endif
-#define GFX_GLYPH_CACHE_ENTRIES 24
+#define GFX_GLYPH_CACHE_ENTRIES 32
 
 // RGB565通道拆分/合并宏
 #define RGB565_GET_R(color)    (((color) >> 11) & 0x1F)

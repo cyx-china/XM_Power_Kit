@@ -40,6 +40,16 @@ const ImageInfo img_wave14_212x57 = { .width = 212, .height = 57, .path = "0:/im
 
 const ImageInfo img_DMM_DC_30x30 = { .width = 30, .height = 30, .path = "0:/images/DMM_DC_30x30.bin" };
 
+/* 主界面 APP 图标 */
+const ImageInfo img_dy_56x56 = { .width = 56, .height = 56, .path = "0:/images/dy.bin" };
+const ImageInfo img_sbq_56x56 = { .width = 56, .height = 56, .path = "0:/images/sbq.bin" };
+const ImageInfo img_bxfsq_56x56 = { .width = 56, .height = 56, .path = "0:/images/bxfsq.bin" };
+const ImageInfo img_wyb_56x56 = { .width = 56, .height = 56, .path = "0:/images/wyb.bin" };
+const ImageInfo img_cgq_56x56 = { .width = 56, .height = 56, .path = "0:/images/cgq.bin" };
+const ImageInfo img_jiaozhun_56x56 = { .width = 56, .height = 56, .path = "0:/images/jiaozhun.bin" };
+const ImageInfo img_sz_56x56 = { .width = 56, .height = 56, .path = "0:/images/sz.bin" };
+const ImageInfo img_xinxi_56x56 = { .width = 56, .height = 56, .path = "0:/images/xinxi.bin" };
+
 
 
 

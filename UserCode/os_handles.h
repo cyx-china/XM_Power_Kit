@@ -27,11 +27,11 @@ extern osThreadId_t SensorTaskHandle;             // 传感器采集任务句柄
 extern osThreadId_t PageSelectTaskHandle;         // 应用切换任务句柄
 extern osThreadId_t LcdFlushTaskHandle;           // LCD刷新任务句柄
 
-// 输入设备检测任务(仅在非lvgl任务生效)
+// 输入设备检测任务（主界面 GUI 与各 APP 运行期间生效）
 extern osThreadId_t IndevDetectTaskHandle;        // 输入设备监测任务句柄
 
 // APP任务（由PageSelectTask管理）
-extern osThreadId_t LvglCoreTaskHandle;           // LVGL核心任务句柄
+extern osThreadId_t GuiTaskHandle;           // LVGL核心任务句柄
 extern osThreadId_t DpsCoreTaskHandle;            // 数控电源APP任务句柄
     extern osThreadId_t PIDTaskHandle;            // PID计算任务句柄 （由DpsCoreTask管理）
 extern osThreadId_t AwgTaskHandle;                // 任意波形发生器APP任务句柄

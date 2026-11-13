@@ -1095,7 +1095,7 @@ void dps_main_page_handler(KeyEventMsg_t msg) {
     else if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
         IsPowerOn = false;
 
-        AppListType APP = APP_LVGL;
+        AppListType APP = APP_HOME;
         StartBeezer(0);
         osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
         return;
@@ -1625,7 +1625,7 @@ void dps_graph_handler(KeyEventMsg_t msg) {
     else if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
         IsPowerOn = false;
 
-        AppListType APP = APP_LVGL;
+        AppListType APP = APP_HOME;
         StartBeezer(0);
         osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
         return;

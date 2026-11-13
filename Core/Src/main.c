@@ -35,7 +35,6 @@
 #include <stdarg.h>
 #include "ff.h"
 #include "Flash.h"
-#include "lvgl.h"
 #include "UserTask.h"
 
 /* USER CODE END Includes */
@@ -209,9 +208,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-  if (IsLvglRunning == true) {      // 只有在LVGL核心任务运行时才调用lv_tick_inc
-    lv_tick_inc(1);
-  }
+
   /* USER CODE END Callback 1 */
 }
 

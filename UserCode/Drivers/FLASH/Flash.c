@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file           : Flash.c
   * @brief          : A W25Qxx FLASH Driver Using DMA (W25Q32~W25Q512 Compatible).
-  *                   Suit for Freertos,Lvgl,Fatfs,MSC.
+  *                   Suit for Freertos,Fatfs,MSC.
   * @date           : 2026/1/28
   * @license        : CC-BY-NC-SA 4.0
   ******************************************************************************

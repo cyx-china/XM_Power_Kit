@@ -56,7 +56,7 @@ void Start_IndevDetectTask(void *argument) {
             }
         }
 
-        if (IsIndevDetectTaskRunnin == true) {  // 仅启动了此任务，才会进行输入扫描 (由除了lvgl外的app开启)
+        if (IsIndevDetectTaskRunnin == true) {  // 仅启动了此任务，才会进行输入扫描（主界面 GUI 与各 APP 都会开启它）
             Encoder_Scan();
             Key_Scan();
         }

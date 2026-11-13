@@ -37,6 +37,16 @@ extern const ImageInfo img_wave13_212x57;
 extern const ImageInfo img_wave14_212x57;
 extern const ImageInfo img_DMM_DC_30x30;
 
+/*==================== 主界面 APP 图标（56x56，图片与字体/图标 转换而来） ====================*/
+extern const ImageInfo img_dy_56x56;        // 电源
+extern const ImageInfo img_sbq_56x56;       // 示波器
+extern const ImageInfo img_bxfsq_56x56;     // 信号源
+extern const ImageInfo img_wyb_56x56;       // 万用表
+extern const ImageInfo img_cgq_56x56;       // 传感器
+extern const ImageInfo img_jiaozhun_56x56;  // 校准
+extern const ImageInfo img_sz_56x56;        // 设置
+extern const ImageInfo img_xinxi_56x56;     // 关于
+
 
 
 

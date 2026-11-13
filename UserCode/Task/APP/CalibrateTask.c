@@ -147,7 +147,7 @@ void cal_main_page_handler(KeyEventMsg_t msg) {
         return;
     }
     else if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
-        AppListType APP = APP_LVGL;
+        AppListType APP = APP_HOME;
         StartBeezer(0);
         osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
         return;

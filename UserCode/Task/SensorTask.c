@@ -22,7 +22,6 @@
 #include "TMP102.h"
 #include "UserTask.h"
 #include "freertos_os2.h"
-#include "lv_label.h"
 #include "os_handles.h"
 #include "tim.h"
 #include "SwitchManager.h"

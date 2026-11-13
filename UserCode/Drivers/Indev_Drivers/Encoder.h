@@ -4,11 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "lv_hal_indev.h"
 #include "Keys.h"
 
-// LVGL 回调
-void encoder_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data);
 
 // 通用读取
 bool get_encoder_data(int32_t *diff, bool *pressed);

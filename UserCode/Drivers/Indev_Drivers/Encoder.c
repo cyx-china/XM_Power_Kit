@@ -4,7 +4,6 @@
 #include <stdlib.h>
 
 #include "Keys.h"           // 为了 KeyEventMsg_t 和 IndevEventTypeDef
-#include "lv_hal_indev.h"
 #include "os_handles.h"
 #include "stm32f4xx_hal.h"
 #include "tim.h"
@@ -200,30 +199,6 @@ void reset_encoder_state(void)
 void Encoder_Init(void) {
     HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL); // 启动定时器
     reset_encoder_state();  // 重置编码器状态
-}
-
-// LVGL 回调
-void encoder_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
-{
-    static bool last_btn_state = 1;
-    int32_t diff;
-    bool pressed; // <- 这是个占位变量
-    get_encoder_data(&diff, &pressed);
-
-    bool is_pressed = is_encoder_button_pressed();  // LVGL基本不需要按键消抖，或者你消抖的时间小于LVGL按键扫描间隔
-                                                         // 否则会吞事件，因此直接读电平传过去就行了
-    data->enc_diff = (int16_t)diff;
-    data->state = is_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-    if (diff != 0) {
-        StartBeezer(0);
-        WakeUp();                // 唤醒
-    }
-    if (is_pressed == 0 && last_btn_state == 1)
-    {
-        StartBeezer(0);  // 按键按下 → 只响一次
-        WakeUp();                // 唤醒
-    }
-    last_btn_state = is_pressed;
 }
 
 void Encoder_Scan(void)

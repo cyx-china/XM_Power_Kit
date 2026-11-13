@@ -7,7 +7,6 @@ cmake_minimum_required(VERSION 3.22)
 # User is free to modify the file as much as necessary
 
 # 得到所有子文件夹目录的函数：
-add_definitions(-DLV_LVGL_H_INCLUDE_SIMPLE)
 
 function(collect_subdirectories OUTPUT_VAR ROOT_DIR)
     set(SUBDIRS "${ROOT_DIR}")  # 优先把根目录放进去
@@ -40,15 +39,6 @@ set(USER_CODE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/UserCode)         # 设定根目�
 collect_subdirectories(USER_CODE_SUBDIRS ${USER_CODE_DIR})      # 得到所有子文件夹
 collect_all_c_files(USERCODE_SOURCE_FILES ${USER_CODE_DIR})     # 得到所有文件名
 
-# 整备lvgl文件夹
-set(LVGL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lvgl)         # 设定根目录地址
-collect_subdirectories(LVGL_SUBDIRS ${LVGL_DIR})      # 得到所有子文件夹
-collect_all_c_files(LVGL_SOURCE_FILES ${LVGL_DIR})     # 得到所有文件名
-
-# 整备lvgl_app文件夹
-set(LVGL_APP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lvgl_app)         # 设定根目录地址
-collect_subdirectories(LVGL_APP_SUBDIRS ${LVGL_APP_DIR})      # 得到所有子文件夹
-collect_all_c_files(LVGL_APP_SOURCE_FILES ${LVGL_APP_DIR})     # 得到所有文件名
 # 整备FATFS文件夹
 set(FATFS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/FATFS)         # 设定根目录地址
 collect_subdirectories(FATFS_SUBDIRS ${FATFS_DIR})      # 得到所有子文件夹
@@ -81,8 +71,6 @@ enable_language(C ASM)
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
         ${USERCODE_SOURCE_FILES}    # UserCode 源文件
-        ${LVGL_SOURCE_FILES}
-        ${LVGL_APP_SOURCE_FILES}
         ${FATFS_SOURCE_FILES}
 )
 
@@ -103,8 +91,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         # Add user defined include paths
         ${USER_CODE_SUBDIRS}        # Usercode 头文件
-        ${LVGL_SUBDIRS}
-        ${LVGL_APP_SUBDIRS}
         ${FATFS_SUBDIRS}
 )
 

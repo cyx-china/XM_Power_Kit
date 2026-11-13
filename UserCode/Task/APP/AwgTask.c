@@ -509,7 +509,7 @@ void awg_main_page_handler(KeyEventMsg_t msg) {
     }
     // 编码器按键（长按）：返回LVGL主页面
     else if (msg.key == KEY_ENCODER && msg.event == KEY_EVENT_LONG_PRESS) {
-        AppListType APP = APP_LVGL;
+        AppListType APP = APP_HOME;
         StartBeezer(0); // 蜂鸣器反馈
         osMessageQueuePut(AppSwitchQueueHandle, &APP, 0, 10);
         return;

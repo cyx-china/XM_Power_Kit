@@ -21,15 +21,13 @@
 #include "cmsis_os2.h"
 #include "graphics.h"
 #include "lcd_draw_api.h"
-#include "lv_hal_disp.h"
-#include "lv_port_disp.h"
 #include "os_handles.h"
 #include "ST7789.h"
 #include "freertos_os2.h"
 /*
- * 这个函数是处理LCD刷新请求的，它分为如下两个部分：
- * 1. 适配LVGL的刷新请求，直接将lvgl缓冲区的数据通过DMA传输到LCD显示器上
- * 2. 适配手动调用刷新屏幕的需求，根据消息，调用对应的绘制函数
+ * 这个任务负责处理 LCD 刷新请求：从消息队列取出绘图命令，按入队顺序调用 graphics.c
+ * 的图元函数（窗口 + DMA），并在 DRAW_DATA 传输完成后释放完成信号量。
+ * 所有界面（自研 GUI 与各个 APP）都通过同一套 lcd_draw_* 接口下发绘制命令。
  */
 
 // DRAW_DATA 完成信号量：由本任务在 DMA 传输结束后释放，lcd_draw_data() 阻塞等待它
@@ -52,30 +50,13 @@ void Start_LcdFlushTask(void *argument) {
             continue;
         }
 
-        switch (msg->RefreshType) {
-            case REFRESH_TYPE_LVGL:
-                if (msg->color_p == NULL ||
-                    msg->area_x2 < msg->area_x1 || msg->area_y2 < msg->area_y1) {
-                    lv_disp_flush_ready(&user_disp_drv);
-                    goto MEM_FREE;
-                }
+        {
+            if (msg->draw_command == NULL) {
+                goto MEM_FREE;
+            }
+            const GFX_DrawCommand_t* cmd = msg->draw_command;
 
-                uint32_t pixel_count = (uint32_t)(msg->area_x2 - msg->area_x1 + 1) * (uint32_t)(msg->area_y2 - msg->area_y1 + 1);
-                LCD_SET_WINDOWS((uint16_t)msg->area_x1, (uint16_t)msg->area_y1,
-                                (uint16_t)msg->area_x2, (uint16_t)msg->area_y2);
-
-                LCD_FLUSH_DMA((uint32_t)msg->color_p, pixel_count);
-
-                lv_disp_flush_ready(&user_disp_drv);
-                break;
-
-            case REFRESH_TYPE_MANUAL:
-                if (msg->draw_command == NULL) {
-                    goto MEM_FREE;
-                }
-                const GFX_DrawCommand_t* cmd = msg->draw_command;
-
-                switch (cmd->flush_type) {
+            switch (cmd->flush_type) {
                     case CLEAR_SCREEN:
                         GFX_ClearScreen(cmd->color);
                         break;
@@ -134,28 +115,14 @@ void Start_LcdFlushTask(void *argument) {
                         GFX_DrawIsoscelesTriangle(cmd->start_point >> 16, cmd->start_point & 0xFFFF,cmd->param2,
                             cmd->param1,cmd->color);
                         break;
-                    default:
-                        break;
-                }
-                break;
-            default:
-                break;
+                default:
+                    break;
+            }
         }
 
 MEM_FREE:
-        // 消息内存归还：
-        //   msg_mem 非空 = 动态分配的刷新消息（LVGL），需要 free；
-        //   msg_mem 为空 = 静态命令池块（手动绘图），只需还回池里，不能再 free。
-        if (msg->msg_mem != NULL) {
-            if (msg->cmd_mem != NULL) {
-                vPortFree((void*)msg->cmd_mem);
-                msg->cmd_mem = NULL;
-            }
-            vPortFree((void*)msg->msg_mem);
-            msg->msg_mem = NULL;
-        } else {
-            LcdDraw_ReleaseMsg(msg);
-        }
+        // 绘制命令块都是静态池块，画完还回池里即可
+        LcdDraw_ReleaseMsg(msg);
         // 清空msg指针
         msg = NULL;
     }

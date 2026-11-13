@@ -110,7 +110,6 @@ static osStatus_t lcd_draw_send_cmd(LcdFlushType flush_type,        // 绘制图
 
     // 初始化刷新消息（msg_mem / cmd_mem 留空表示这是静态池块）
     memset(msg, 0, sizeof(refresh_msg_t));
-    msg->RefreshType = REFRESH_TYPE_MANUAL;
     msg->draw_command = cmd;
     msg->msg_mem = NULL;
     msg->cmd_mem = NULL;
