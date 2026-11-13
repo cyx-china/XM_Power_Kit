@@ -59,7 +59,8 @@
 #define PD_VOLT_NUM      6U
 #define PD_REFRESH_LOOPS 10U        /* 20ms × 10 = 200ms 刷新一次 */
 #define PD_REPROBE_MS    1000U      /* 掉线后每秒重探一次 */
-#define PD_PENDING_MS    6000U      /* 请求后等协商的最长时间 */
+#define PD_PENDING_MS    1000U      /* 请求后等协商的最长时间（实测电压到位就提前结束） */
+#define PD_NOTICE_MS     1600U      /* 临时提示（如"不支持 EPR"）的停留时间，期间不许被状态行刷掉 */
 
 /* 界面统一使用 pd_text（16x16，ASCII + 本 APP 用到的汉字，字库 0:/font/pd_text.bin） */
 #define PD_FONT_W        16U        /* 汉字/数字的固定宽度 */
@@ -90,7 +91,13 @@ static uint8_t  s_status_raw = 0;       /* 上一次的 0x09 原始值（0 = 尚
 static uint16_t s_cur_limit_ma = 0;     /* 当前档位最大电流（mA，0 = 未知） */
 static uint8_t  s_pending = 0;          /* 正在等待协商 */
 static uint32_t s_pending_tick = 0;
+static uint16_t s_pending_mv = 0;       /* 本次请求的目标电压（mV），用实测电压判断是否已到位 */
 static uint32_t s_reprobe_tick = 0;
+
+/* 临时提示：显示期间不受 pd_update_status_text() 覆盖，避免一闪就被"握手成功"刷掉 */
+static uint8_t  s_notice_on = 0;
+static uint32_t s_notice_until = 0;
+static char     s_notice[40] = "";
 
 /* 影子字符串：值没变就不重画，减少刷屏命令与字模读取 */
 static char s_txt_volt[12] = "", s_txt_curr[12] = "", s_txt_power[12] = "";
@@ -194,6 +201,15 @@ static void pd_update_status_text(void) {
     char buf[48];
     uint32_t now = osKernelGetTickCount();
 
+    /* 临时提示优先：期间不改状态行，等它自己到期 */
+    if (s_notice_on) {
+        if ((int32_t) (now - s_notice_until) < 0) {
+            pd_draw_status(s_notice, PD_COL_WARN);
+            return;
+        }
+        s_notice_on = 0;
+    }
+
     if (!s_online) {
         pd_draw_status("未检测到 CH224A", PD_COL_WARN);
         return;
@@ -267,6 +283,24 @@ static void pd_refresh(void) {
         s_status_raw = 0;
     }
 
+    /* 协商是否已经完成：实测输入电压到位就立刻结束"协商中"，不必死等超时 */
+    if (s_pending) {
+        float target = (float) s_pending_mv / 1000.0f;
+        float tol = target * 0.05f;
+        float diff = Input_Voltage - target;
+
+        if (tol < 0.5f) {
+            tol = 0.5f;
+        }
+        if ((diff <= tol) && (diff >= -tol)) {
+            s_pending = 0;
+        } else if ((uint32_t) (now - s_pending_tick) >= PD_PENDING_MS) {
+            s_pending = 0;
+        } else {
+            /* 还在协商 */
+        }
+    }
+
     /* 实测值：直接取传感器任务算好的结果 */
     (void) fmt_fixed_unit(buf, sizeof(buf), Input_Voltage, 2, 0, 0, "V");
     pd_draw_value(120, 68, buf, s_txt_volt, sizeof(s_txt_volt), PD_COL_TEXT, PD_COL_CARD);
@@ -305,29 +339,42 @@ static void pd_select(int8_t dir) {
     StartBeezer(0);
 }
 
+/* 静态电压表（mV），用于判断实测电压是否已经到达请求值 */
+static const uint16_t s_volt_mv[PD_VOLT_NUM] = { 5000U, 9000U, 12000U, 15000U, 20000U, 28000U };
+
+/* 显示一条限时提示，期间状态行不会被刷新覆盖 */
+static void pd_show_notice(const char *text) {
+    (void) snprintf(s_notice, sizeof(s_notice), "%s", text);
+    s_notice_on = 1;
+    s_notice_until = osKernelGetTickCount() + PD_NOTICE_MS;
+    s_txt_status[0] = 0;
+    pd_update_status_text();
+}
+
 static void pd_apply(void) {
     CH224A_VoltTypeDef volt = s_volts[s_sel];
 
     if (!s_online) {
-        pd_draw_status("未检测到 CH224A", PD_COL_WARN);
+        pd_show_notice("未检测到 CH224A");
         StartBeezer(0);
         return;
     }
 
     if ((volt == CH224A_VOLT_28V) && ((s_status_raw & CH224A_ST_EPR_EXIST) == 0U)) {
-        pd_draw_status("适配器不支持 EPR 28V", PD_COL_WARN);
+        pd_show_notice("适配器不支持 EPR 28V");
         StartBeezer(0);
         return;
     }
 
     if (CH224A_RequestVoltage(volt) != HAL_OK) {
-        pd_draw_status("请求失败，检查连接", PD_COL_WARN);
+        pd_show_notice("请求失败，检查连接");
         StartBeezer(0);
         return;
     }
 
     s_pending = 1;
     s_pending_tick = osKernelGetTickCount();
+    s_pending_mv = s_volt_mv[s_sel];
     s_txt_status[0] = 0;            /* 强制重画状态行 */
     pd_update_status_text();
     StartBeezer(0);
@@ -358,6 +405,8 @@ void Start_PdTask(void *argument) {
 
     s_sel = 0;
     s_pending = 0;
+    s_pending_mv = 0;
+    s_notice_on = 0;
     s_cur_limit_ma = 0;
     s_status_raw = 0;
     s_online = CH224A_Probe();
@@ -388,6 +437,8 @@ void Suspend_PdTask(void) {
 void Resume_PdTask(void) {
     /* 重新进 APP：重探一次芯片（拔插过适配器也能刷到新状态），整页重画 */
     s_pending = 0;
+    s_pending_mv = 0;
+    s_notice_on = 0;
     s_cur_limit_ma = 0;
     s_online = CH224A_Probe();
     s_status_raw = 0;
