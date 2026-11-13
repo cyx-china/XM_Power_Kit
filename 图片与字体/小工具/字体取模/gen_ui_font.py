@@ -104,7 +104,7 @@ def c_map(name, chars):
         if len(b) > 4:
             continue
         b = b + b"\x00" * (4 - len(b))
-        row.append("0x%02X,0x%02X,0x%02X,0x%02X" % (b[0], b[1], b[2], b[3]))
+        row.append("{0x%02X,0x%02X,0x%02X,0x%02X}" % (b[0], b[1], b[2], b[3]))
         if len(row) == 4:
             lines.append("    " + ", ".join(row) + ",")
             row = []
