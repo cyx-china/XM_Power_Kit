@@ -83,7 +83,7 @@ static void DpsCal_Display_Voltage_Edit_handler(KeyEventMsg_t msg);
 static void DpsCal_Display_Current_Main_handler(KeyEventMsg_t msg);
 static void DpsCal_Display_Current_Edit_handler(KeyEventMsg_t msg);
 static void DpsCal_Output_Main_handler(KeyEventMsg_t msg);
-static int DpsCal_CalculateLinearCoeff(float data[10], float *A, float *B);
+static uint8_t DpsCal_CheckLinearCoeff(float data[10], float *A, float *B);
 
 // 各页面对应的按键处理函数映射表
 static void (*DpsCalPage_handlers[DpsCal_Page_Num])(KeyEventMsg_t) = {
@@ -149,27 +149,35 @@ void dps_cal_handler(KeyEventMsg_t msg) {       // 按键事件分发
 
 // 线性拟合函数：DAC = A * Voltage + B
 //
-// 只在"数据确实可信"时才写参数，任何一项不满足都返回错误码，
-// 调用处会显示"校准失败，请重试"并且不写入 UserParam
+// 只在"数据确实可信"时才写参数，任何一项不满足都返回失败标志位，
+// 调用处据此显示失败原因（如"失败，K,B,R"）并且不写入 UserParam
 // （原实现直接除 denom：9 个点电压几乎相同时 denom≈0，A/B 会变成 inf/NaN
 //   并被保存，之后电源就再也调不起来）。
-//   返回 -1 参数空指针
-//   返回 -2 某点电压超出合理范围（没接线 / 没开电源 / 读数贴边）
-//   返回 -3 电压几乎不变，无法拟合
-//   返回 -4 斜率 A 的符号或量级不合理（DAC 与电压负相关，约 -100）
-//   返回 -5 截距 B 超出合理范围
-//   返回 -6 线性度 R² < 0.999（采样抖动过大）
-static int DpsCal_CalculateLinearCoeff(float data[10], float *A, float *B) {
-    if (data == NULL || A == NULL || B == NULL) return -1;
+//   标志位可以多位同时成立：
+//     V = 有校准点的电压读数超出合理范围（没接线 / 没开电源 / 读数贴边）
+//     D = 电压几乎不变，无法拟合
+//     K = 斜率 A 的符号或量级不合理（DAC 与电压负相关，约 -100）
+//     B = 截距 B 超出合理范围
+//     R = 线性度 R² < 0.999（采样抖动过大）
+#define DPS_CAL_FAIL_V   0x01U
+#define DPS_CAL_FAIL_D   0x02U
+#define DPS_CAL_FAIL_K   0x04U
+#define DPS_CAL_FAIL_B   0x08U
+#define DPS_CAL_FAIL_R   0x10U
+#define DPS_CAL_FAIL_ARG 0x80U      // 入参非法（正常流程不会出现）
+
+static uint8_t DpsCal_CheckLinearCoeff(float data[10], float *A, float *B) {
+    if (data == NULL || A == NULL || B == NULL) return DPS_CAL_FAIL_ARG;
 
     const int n = 9;                                                        // 总共有9个数据点
     float sum_x = 0.0f, sum_y = 0.0f, sum_xy = 0.0f, sum_x2 = 0.0f;
+    uint8_t flags = 0;
 
     for (int i = 0; i < n; i++) {
         float dac  = data[2*i];
         float volt = data[2*i+1];
 
-        if (volt < 0.20f || volt > 38.0f) return -2;                        // 单点不可信
+        if (volt < 0.20f || volt > 38.0f) flags |= DPS_CAL_FAIL_V;          // 单点不可信
 
         sum_x  += volt;                                                     // 计算 电压 和
         sum_y  += dac;                                                      // 计算 DAC 和
@@ -178,13 +186,13 @@ static int DpsCal_CalculateLinearCoeff(float data[10], float *A, float *B) {
     }
 
     float denom = (float)n * sum_x2 - sum_x * sum_x;
-    if (fabsf(denom) < 1.0e-3f) return -3;                                  // 电压几乎不变
+    if (fabsf(denom) < 1.0e-3f) return flags | DPS_CAL_FAIL_D;              // 电压几乎不变，后面的量算不出来
 
     float a = ((float)n * sum_xy - sum_x * sum_y) / denom;
     float b = (sum_y * sum_x2 - sum_x * sum_xy) / denom;
 
-    if (a > -20.0f || a < -400.0f) return -4;                               // 斜率必须是负的
-    if (b < 1000.0f || b > 9000.0f) return -5;                              // 截距在 0~4095 附近
+    if (a > -20.0f || a < -400.0f) flags |= DPS_CAL_FAIL_K;                // 斜率必须是负的
+    if (b < 1000.0f || b > 9000.0f) flags |= DPS_CAL_FAIL_B;               // 截距在 0~4095 附近
 
     float mean = sum_x / (float)n;                                          // R² 线性度校验
     float ss_tot = 0.0f, ss_res = 0.0f;
@@ -195,12 +203,39 @@ static int DpsCal_CalculateLinearCoeff(float data[10], float *A, float *B) {
         ss_tot += (volt - mean) * (volt - mean);
         ss_res += (dac - pred) * (dac - pred);
     }
-    if (ss_tot <= 0.0f) return -3;
-    if ((1.0f - ss_res / ss_tot) < 0.999f) return -6;
+    if (ss_tot <= 0.0f) flags |= DPS_CAL_FAIL_D;
+    else if ((1.0f - ss_res / ss_tot) < 0.999f) flags |= DPS_CAL_FAIL_R;
+
+    if (flags != 0U) return flags;                                          // 不可信：不写 A/B
 
     *A = a;
     *B = b;
     return 0;
+}
+
+// 把失败标志位拼成提示串，例如 "失败，K,B,R"
+static void DpsCal_FormatFailMsg(uint8_t flags, char *buf, size_t size) {
+    static const struct { uint8_t bit; char letter; } items[] = {
+        {DPS_CAL_FAIL_V, 'V'},
+        {DPS_CAL_FAIL_D, 'D'},
+        {DPS_CAL_FAIL_K, 'K'},
+        {DPS_CAL_FAIL_B, 'B'},
+        {DPS_CAL_FAIL_R, 'R'},
+    };
+
+    int used = snprintf(buf, size, "失败，");
+    if (used < 0 || (size_t) used >= size) return;
+
+    bool first = true;
+    for (size_t i = 0; i < sizeof items / sizeof items[0]; i++) {
+        if ((flags & items[i].bit) == 0U) continue;
+        int w = snprintf(buf + used, size - (size_t) used, "%s%c", first ? "" : ",", items[i].letter);
+        if (w < 0 || (size_t) (used + w) >= size) return;
+        used += w;
+        first = false;
+    }
+
+    if (first) (void) snprintf(buf + used, size - (size_t) used, "未知");
 }
 
 // ============= 子页面 handler 实现 =============
@@ -530,21 +565,23 @@ static void DpsCal_Output_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
             lcd_draw_string(25,165,"拟合计算中，请等待", &yahei16x16,0xdf3c,0x29a7,1);
 
-            float DPS_Voltage_DAC_Coefficient, DPS_Voltage_DAC_Constant;
-            int result = DpsCal_CalculateLinearCoeff(DpsCal_OutputCal_Data, &DPS_Voltage_DAC_Coefficient,
-                                                     &DPS_Voltage_DAC_Constant);
+            float DPS_Voltage_DAC_Coefficient = 0.0f, DPS_Voltage_DAC_Constant = 0.0f;
+            uint8_t fit_flags = DpsCal_CheckLinearCoeff(DpsCal_OutputCal_Data, &DPS_Voltage_DAC_Coefficient,
+                                                        &DPS_Voltage_DAC_Constant);
             osDelay(2000);
 
-            if (result == 0) {
+            if (fit_flags == 0U) {
                 lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
                 lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
                 lcd_draw_string(25,165,"校准成功，参数已保存！", &yahei16x16,0xdf3c,0x29a7,1);
                 UserParam.DPS_Voltage_DAC_Coefficient = DPS_Voltage_DAC_Coefficient;
                 UserParam.DPS_Voltage_DAC_Constant = DPS_Voltage_DAC_Constant;
             } else {
+                char fail_msg[24];
+                DpsCal_FormatFailMsg(fit_flags, fail_msg, sizeof fail_msg);
                 lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
                 lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
-                lcd_draw_string(25,165,"校准失败，请重试！", &yahei16x16,0xF800,0x29a7,1);
+                lcd_draw_string(25,165, fail_msg, &yahei16x16,0xF800,0x29a7,1);
             }
             mode = 1;
             Resume_IndevDetectTask();
