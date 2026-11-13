@@ -177,4 +177,7 @@ HAL_StatusTypeDef WaveGen_Noise(float freq, float amplitude, float bias, float d
 
 void WaveGen_Stop(void);
 
+/* 立即应用「DAC 输出交换」的新状态（波形与静态偏置对调，兼容山寨 MCU） */
+void WaveGen_ApplyDacSwap(void);
+
 #endif

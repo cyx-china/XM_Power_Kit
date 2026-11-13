@@ -84,6 +84,7 @@ typedef enum {
     Fan_StartTemperature,                // 风扇启转温度        (uint16_t)  20~50
     Fan_FullTemperature,                // 风扇满速温度        (uint16_t)  45~80
     Screen_Rotate180,                   // 屏幕旋转 180°       (uint16_t)  0/1
+    DDS_SwapDac,                        // DAC 输出交换（波形/偏置对调） (uint16_t)  0/1
     Param_Number                        // 参数个数
 } UserParamType_e;
 
@@ -164,6 +165,7 @@ typedef struct {
     uint16_t Fan_StartTemperature;         // 风扇启转温度        (uint16_t)  20~50
     uint16_t Fan_FullTemperature;          // 风扇满速温度        (uint16_t)  45~80
     uint16_t Screen_Rotate180;             // 屏幕旋转 180°       (uint16_t)  0/1
+    uint16_t DDS_SwapDac;                  // DAC 输出交换（波形/偏置对调） (uint16_t)  0/1
 } UserParamType_t;
 
 extern UserParamType_t UserParam;

@@ -5,8 +5,9 @@
 #include "cmsis_os2.h"
 #include "UserDefineManage.h"
 
-/* DAC 通道1 的 DMA 句柄定义在 dac.c，噪声刷新要用 */
+/* DAC 通道1 / 通道2 的 DMA 句柄定义在 dac.c，噪声刷新要用 */
 extern DMA_HandleTypeDef hdma_dac1;
+extern DMA_HandleTypeDef hdma_dac2;
 
 // DMA缓冲区，所有波形共享
 static uint16_t dac1_buffer[MAX_SAMPLE];
@@ -16,6 +17,12 @@ static uint16_t s_active_n = 0;
 // 上一次选用的采样点数（用于频率微调时的迟滞，避免 N 频繁变化导致相位跳变）
 static uint16_t s_cur_n = 0;
 
+// 波形当前走哪条通道：0 = DAC1（DMA1_Stream5），1 = DAC2（DMA1_Stream6）
+// 「DAC 输出交换」打开后波形走 DAC2、静态偏置走 DAC1，用来兼容把两个 DAC 对调的山寨 MCU
+static uint8_t s_active_swap = 0;
+// 偏置对应的 DAC 码（由 WaveGen_CommonInit 算出，写到不输出波形的那条通道）
+static uint16_t s_bias_code = 2048;
+
 // 噪声连续刷新相关：标志 + 幅度上下限
 static volatile uint8_t s_noise_on = 0;
 static uint16_t s_noise_lo = 0;
@@ -24,6 +31,9 @@ static uint16_t s_noise_hi = DAC_MAX;
 // ------------------- 内部静态函数声明 -------------------
 static HAL_StatusTypeDef WaveGen_CommonInit(float freq, uint16_t* N, float amplitude, float bias, float* amp_code);
 static HAL_StatusTypeDef wavegen_commit(uint16_t N);
+static uint8_t dac_swap_on(void);
+static HAL_StatusTypeDef wavegen_apply_bias(void);
+static void wavegen_stop_dma(void);
 static void noise_fill(uint16_t start, uint16_t count);
 static void noise_dma_irq_enable(void);
 static void noise_dma_irq_disable(void);
@@ -101,10 +111,8 @@ static HAL_StatusTypeDef WaveGen_CommonInit(float freq, uint16_t* N, float ampli
 
     // 采样点数变了就必须重启 DMA；长度不变时保持运行，
     // 这样只改频率时波形相位是连续的，不会出现咔哒声
-    if (s_active_n != 0 && s_active_n != *N) {
-        HAL_TIM_Base_Stop(&TIM_TRGO_HANDLE);
-        HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
-        s_active_n = 0;
+    if (s_active_n != 0 && (s_active_n != *N || s_active_swap != dac_swap_on())) {
+        wavegen_stop_dma();
     }
 
     // 设定定时器参数
@@ -130,12 +138,41 @@ static HAL_StatusTypeDef WaveGen_CommonInit(float freq, uint16_t* N, float ampli
     // 计算DAC2的偏置对应的dac值,带偏移校准值
     float dac2_val = 2047.5f - (bias * DAC_MAX) / (UserParam.DDS_Factor * VREF) - (float)UserParam.DDS_Original;
     dac2_val = (dac2_val < 0) ? 0 : (dac2_val > DAC_MAX) ? DAC_MAX : dac2_val;
-    if (HAL_DAC_SetValue(&hdac, DAC_CHANNEL_2, DAC_ALIGN_12B_R, (uint16_t)roundf(dac2_val)) != HAL_OK)
-        return HAL_ERROR;
-    if (HAL_DAC_Start(&hdac, DAC_CHANNEL_2) != HAL_OK)
+    s_bias_code = (uint16_t) roundf(dac2_val);
+    if (wavegen_apply_bias() != HAL_OK)
         return HAL_ERROR;
 
     return HAL_OK;
+}
+
+/* 是否开启「DAC 输出交换」 */
+static uint8_t dac_swap_on(void) {
+    return (UserParam.DDS_SwapDac != 0U) ? 1U : 0U;
+}
+
+/**
+ * @brief 把静态偏置写到当前不输出波形的那条 DAC 通道
+ * @note  交换关闭时偏置在 DAC2（原设计），打开时偏置在 DAC1、波形改走 DAC2
+ */
+static HAL_StatusTypeDef wavegen_apply_bias(void) {
+    uint32_t channel = dac_swap_on() ? DAC_CHANNEL_1 : DAC_CHANNEL_2;
+
+    if (HAL_DAC_SetValue(&hdac, channel, DAC_ALIGN_12B_R, s_bias_code) != HAL_OK) {
+        return HAL_ERROR;
+    }
+    if (HAL_DAC_Start(&hdac, channel) != HAL_OK) {
+        return HAL_ERROR;
+    }
+    return HAL_OK;
+}
+
+/**
+ * @brief 停止波形 DMA 输出（停定时器 + 停当前承载波形的那条 DMA 通道）
+ */
+static void wavegen_stop_dma(void) {
+    HAL_TIM_Base_Stop(&TIM_TRGO_HANDLE);
+    HAL_DAC_Stop_DMA(&hdac, s_active_swap ? DAC_CHANNEL_2 : DAC_CHANNEL_1);
+    s_active_n = 0;
 }
 
 /**
@@ -151,21 +188,22 @@ static HAL_StatusTypeDef wavegen_commit(uint16_t N) {
     // 时 DMA 半传输/传输完成中断会以 200k 次/秒的频率空转，白占 20% CPU
     if (s_noise_on) { s_noise_on = 0; noise_dma_irq_disable(); }
 
-    if (s_active_n == N) { return HAL_OK; }
+    uint8_t sw = dac_swap_on();
 
-    if (s_active_n != 0) {
-        HAL_TIM_Base_Stop(&TIM_TRGO_HANDLE);
-        HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
-        s_active_n = 0;
-    }
+    // 长度不变且交换开关没动：缓冲区已原地更新，DMA 继续循环播放即可
+    if ((s_active_n == N) && (s_active_swap == sw)) { return HAL_OK; }
 
-    if (HAL_DAC_Start_DMA(&hdac, DAC_CHANNEL_1, (uint32_t*)dac1_buffer, N, DAC_ALIGN_12B_R) != HAL_OK) return HAL_ERROR;
+    if (s_active_n != 0) { wavegen_stop_dma(); }
+
+    uint32_t channel = sw ? DAC_CHANNEL_2 : DAC_CHANNEL_1;
+    if (HAL_DAC_Start_DMA(&hdac, channel, (uint32_t*)dac1_buffer, N, DAC_ALIGN_12B_R) != HAL_OK) return HAL_ERROR;
     if (HAL_TIM_Base_Start(&TIM_TRGO_HANDLE) != HAL_OK) {
-        HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
+        HAL_DAC_Stop_DMA(&hdac, channel);
         return HAL_ERROR;
     }
 
     s_active_n = N;
+    s_active_swap = sw;
     return HAL_OK;
 }
 
@@ -490,12 +528,14 @@ static void noise_fill(uint16_t start, uint16_t count) {
  * @brief 打开 DAC 的 DMA 中断（噪声刷新用，只需要打开一次）
  */
 static void noise_dma_irq_enable(void) {
-    HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 15, 0);   // 最低优先级，不打扰控制环
-    HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
+    IRQn_Type irq = s_active_swap ? DMA1_Stream6_IRQn : DMA1_Stream5_IRQn;
+    HAL_NVIC_SetPriority(irq, 15, 0);   // 最低优先级，不打扰控制环
+    HAL_NVIC_EnableIRQ(irq);
 }
 
 static void noise_dma_irq_disable(void) {
     HAL_NVIC_DisableIRQ(DMA1_Stream5_IRQn);
+    HAL_NVIC_DisableIRQ(DMA1_Stream6_IRQn);
 }
 
 HAL_StatusTypeDef WaveGen_Noise(float freq, float amplitude, float bias, float duty_cycle) {
@@ -531,18 +571,37 @@ HAL_StatusTypeDef WaveGen_Noise(float freq, float amplitude, float bias, float d
 }
 
 // ------------------- 噪声刷新中断 -------------------
-/* DAC 通道1 的 DMA 是循环模式：半传输时前半段已播完，可以重填；传输完成时重填后半段 */
-void HAL_DAC_ConvHalfCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle) {
-    (void)hdac_handle;
+/* DAC 的 DMA 是循环模式：半传输时前半段已播完，可以重填；传输完成时重填后半段。
+   波形可能在 DAC1 也可能在 DAC2（交换输出），两条通道的回调共用同一段逻辑 */
+static void noise_half_cplt(void) {
     if (!s_noise_on) { return; }
     noise_fill(0, (uint16_t)(s_active_n / 2));
 }
 
-void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle) {
-    (void)hdac_handle;
+static void noise_cplt(void) {
     if (!s_noise_on) { return; }
     uint16_t half = (uint16_t)(s_active_n / 2);
     noise_fill(half, (uint16_t)(s_active_n - half));
+}
+
+void HAL_DAC_ConvHalfCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle) {
+    (void)hdac_handle;
+    noise_half_cplt();
+}
+
+void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac_handle) {
+    (void)hdac_handle;
+    noise_cplt();
+}
+
+void HAL_DAC_ConvHalfCpltCallbackCh2(DAC_HandleTypeDef *hdac_handle) {
+    (void)hdac_handle;
+    noise_half_cplt();
+}
+
+void HAL_DAC_ConvCpltCallbackCh2(DAC_HandleTypeDef *hdac_handle) {
+    (void)hdac_handle;
+    noise_cplt();
 }
 
 /**
@@ -554,6 +613,11 @@ void DMA1_Stream5_IRQHandler(void) {
     HAL_DMA_IRQHandler(&hdma_dac1);
 }
 
+/* DAC 通道2 的 DMA 中断入口（只在「DAC 输出交换」下跑噪声时才用到） */
+void DMA1_Stream6_IRQHandler(void) {
+    HAL_DMA_IRQHandler(&hdma_dac2);
+}
+
 // ------------------- 停止波形生成函数实现 -------------------
 void WaveGen_Stop(void) {
     s_noise_on = 0;
@@ -562,6 +626,28 @@ void WaveGen_Stop(void) {
     s_cur_n = 0;
     HAL_TIM_Base_Stop(&TIM_TRGO_HANDLE);
     HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_1);
+    HAL_DAC_Stop_DMA(&hdac, DAC_CHANNEL_2);
     HAL_DAC_Stop(&hdac, DAC_CHANNEL_1);
     HAL_DAC_Stop(&hdac, DAC_CHANNEL_2);
+}
+
+/**
+ * @brief 立即应用「DAC 输出交换」的新状态（设置页切换开关时调用）
+ * @note  正在输出时按新通道重开 DMA，波形缓冲内容不动，只是换一条通道播出，
+ *        会有一次极短的停采；没在输出时什么都不做，下次生成波形自动生效。
+ */
+void WaveGen_ApplyDacSwap(void) {
+    if (s_active_n == 0) { return; }
+
+    uint16_t n = s_active_n;
+    uint8_t noise = s_noise_on;
+
+    wavegen_stop_dma();
+    if (wavegen_apply_bias() != HAL_OK) { return; }
+    if (wavegen_commit(n) != HAL_OK) { return; }
+
+    if (noise) {
+        noise_dma_irq_enable();
+        s_noise_on = 1;
+    }
 }

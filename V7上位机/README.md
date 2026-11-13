@@ -138,8 +138,8 @@ A5 5A | LEN_L LEN_H | CMD | SEQ | DATA[LEN] | CRC_L CRC_H
 | 0x01 | SYS_INFO | — | proto, 固件版本串, 参数个数, 参数字节数, 特性位（bit0 USB / bit1 蓝牙 / bit2 文件 / bit3 OTA / bit4 维护模式）, 蓝牙波特率, 总容量, 剩余容量 |
 | 0x02 | SYS_REBOOT | — | — |
 | 0x03 | SYS_BT_BAUD | u32 波特率 | — |
-| 0x10 | PARAM_GET | u8 kind（0 当前 / 1 默认） | 232 字节参数 |
-| 0x11 | PARAM_SET | 232 字节参数 | — |
+| 0x10 | PARAM_GET | u8 kind（0 当前 / 1 默认） | 236 字节参数 |
+| 0x11 | PARAM_SET | 236 字节参数 | — |
 | 0x20 | FS_LIST | len+path, u16 start, u8 max | count, u16 next（0xFFFF 结束）, 条目 |
 | 0x21 | FS_READ | len+path, u32 offset, u16 len | u16 长度 + 数据 |
 | 0x22 | FS_WRITE | len+path, u32 offset, u16 len + 数据 | u16 已写字节数 |

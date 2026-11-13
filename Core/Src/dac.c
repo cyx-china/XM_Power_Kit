@@ -26,6 +26,7 @@
 
 DAC_HandleTypeDef hdac;
 DMA_HandleTypeDef hdma_dac1;
+DMA_HandleTypeDef hdma_dac2;   /* DAC 通道2 的 DMA：只在「DAC 输出交换」时使用 */
 
 /* DAC init function */
 void MX_DAC_Init(void)
@@ -60,7 +61,9 @@ void MX_DAC_Init(void)
 
   /** DAC channel OUT2 config
   */
-  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+  /* 通道2 平时用 SetValue 输出静态偏置，但打开「DAC 输出交换」后要走 DMA 输出波形，
+     所以两个通道都用 T7_TRGO 触发（没有 DMA 时触发只是把同一个值再装载一次，输出不变） */
+  sConfig.DAC_Trigger = DAC_TRIGGER_T7_TRGO;
   if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
@@ -112,6 +115,24 @@ void HAL_DAC_MspInit(DAC_HandleTypeDef* dacHandle)
 
     __HAL_LINKDMA(dacHandle,DMA_Handle1,hdma_dac1);
 
+    /* DAC2 Init（DAC 通道2 -> DMA1 Stream6 Channel7，仅在交换输出时使用，不开中断） */
+    hdma_dac2.Instance = DMA1_Stream6;
+    hdma_dac2.Init.Channel = DMA_CHANNEL_7;
+    hdma_dac2.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_dac2.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_dac2.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_dac2.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    hdma_dac2.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+    hdma_dac2.Init.Mode = DMA_CIRCULAR;
+    hdma_dac2.Init.Priority = DMA_PRIORITY_MEDIUM;
+    hdma_dac2.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(&hdma_dac2) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(dacHandle,DMA_Handle2,hdma_dac2);
+
     /* DAC interrupt Init */
     HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 15, 0);
     HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
@@ -140,6 +161,7 @@ void HAL_DAC_MspDeInit(DAC_HandleTypeDef* dacHandle)
 
     /* DAC DMA DeInit */
     HAL_DMA_DeInit(dacHandle->DMA_Handle1);
+    HAL_DMA_DeInit(dacHandle->DMA_Handle2);
 
     /* DAC interrupt Deinit */
     HAL_NVIC_DisableIRQ(TIM6_DAC_IRQn);
@@ -152,3 +174,4 @@ void HAL_DAC_MspDeInit(DAC_HandleTypeDef* dacHandle)
 /* USER CODE BEGIN 1 */
 
 /* USER CODE END 1 */
+

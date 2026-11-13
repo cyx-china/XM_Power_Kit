@@ -70,6 +70,7 @@ PARAM_META = [
     (55, "Fan_StartTemperature", "uint16", "风扇启转温度", "20~50 ℃"),
     (56, "Fan_FullTemperature", "uint16", "风扇满速温度", "45~80 ℃"),
     (57, "Screen_Rotate180", "uint16", "屏幕旋转 180°", "0 或 1"),
+    (58, "DDS_SwapDac", "uint16", "DAC 输出交换", "0 或 1，山寨 MCU 波形反相时打开"),
 ]
 
 PARAM_TOTAL_COUNT = len(PARAM_META)
@@ -93,6 +94,7 @@ PAGES = [
     ]),
     ("信号发生器", [
         ("校准参数", [36, 37]),
+        ("输出", [58]),
     ]),
     ("万用表", [
         ("电压表", [38, 39, 40]),

@@ -82,6 +82,7 @@ const UserParamType_t UserParamDefault = {
     .Fan_StartTemperature  = 40,         // 风扇启转温度        (uint16_t)  20~50
     .Fan_FullTemperature  = 60,         // 风扇满速温度        (uint16_t)  45~80
     .Screen_Rotate180     = 0,          // 屏幕旋转 180°       (uint16_t)  0/1
+    .DDS_SwapDac          = 0,          // DAC 输出交换，山寨 MCU 下波形反相时打开  (uint16_t)  0/1
 };
 
 // 实际参数值结构体
@@ -164,6 +165,7 @@ static const ParamDesc_t param_desc_table[Param_Number] = {
     {2, &UserParamDefault.Fan_StartTemperature,         &UserParam.Fan_StartTemperature},
     {2, &UserParamDefault.Fan_FullTemperature,          &UserParam.Fan_FullTemperature},
     {2, &UserParamDefault.Screen_Rotate180,             &UserParam.Screen_Rotate180},
+    {2, &UserParamDefault.DDS_SwapDac,                  &UserParam.DDS_SwapDac},
 };
 
 // 最后一个校准类参数（含它在内的 0..该值 都算校准参数，恢复默认校准时只重置这一段）

@@ -20,6 +20,7 @@
 #include "SwitchManager.h"
 #include "ST7789.h"
 #include "tim.h"
+#include "wave_generator.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -52,6 +53,7 @@ typedef enum {
     SK_ROTATE,
     SK_BEEP_VOL,
     SK_BEEP_TIME,
+    SK_DAC_SWAP,
     SK_FAN_EN,
     SK_FAN_TEMP,
     SK_FAN_FULL,
@@ -78,6 +80,8 @@ static const SetRow_t s_rows[] = {
     { ROW_TITLE,  SK_NONE,      "蜂鸣器设置",   0,   0 },
     { ROW_SLIDER, SK_BEEP_VOL,  "蜂鸣音量",     0,  100 },
     { ROW_SLIDER, SK_BEEP_TIME, "蜂鸣时长",     1,   8 },
+    { ROW_TITLE,  SK_NONE,      "信号源设置",   0,   0 },
+    { ROW_SWITCH, SK_DAC_SWAP,  "DAC 输出交换", 0,   1 },
     { ROW_TITLE,  SK_NONE,      "风扇设置",     0,   0 },
     { ROW_SWITCH, SK_FAN_EN,    "风扇使能",     0,   1 },
     { ROW_SLIDER, SK_FAN_TEMP,  "启转温度",     20,  50 },
@@ -179,6 +183,7 @@ static int16_t set_get(uint8_t index) {
         case SK_FAN_TEMP:  value = (int16_t) UserParam.Fan_StartTemperature;  break;
         case SK_FAN_FULL:  value = (int16_t) UserParam.Fan_FullTemperature;   break;
         case SK_ROTATE:    value = (int16_t) (UserParam.Screen_Rotate180 & 0x01U); break;
+        case SK_DAC_SWAP:  value = (int16_t) (UserParam.DDS_SwapDac & 0x01U);  break;
         default:           value = 0;                                        break;
     }
 
@@ -232,6 +237,13 @@ static void set_apply(uint8_t index, int16_t value) {
             break;
         case SK_BEEP_TIME:
             UserParam.Beezer_Time = (uint16_t) value;
+            break;
+        case SK_DAC_SWAP:
+            // 山寨 MCU 会把两个 DAC 通道对调，打开后波形改走 DAC2、偏置走 DAC1
+            if ((uint16_t) value != UserParam.DDS_SwapDac) {
+                UserParam.DDS_SwapDac = (uint16_t) value;
+                WaveGen_ApplyDacSwap();     // 正在输出时立刻换通道
+            }
             break;
         case SK_FAN_EN:
             UserParam.Fan_Enable = (uint16_t) value;
