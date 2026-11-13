@@ -31,6 +31,8 @@
 #include "UserTask.h"
 #include "PID.h"
 #include "format.h"
+#include <string.h>
+
 #include "DpsGraph.h"
 
 /* ========================== 宏定义 ========================== */

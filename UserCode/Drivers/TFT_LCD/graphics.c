@@ -81,7 +81,19 @@ static FIL *gfx_file_get(const char *path) {
         f_close(&file_handles[slot].fil);
         file_handles[slot].used = 0;
     }
-    if (f_open(&file_handles[slot].fil, path, FA_READ) != FR_OK) { return NULL; }
+    if (f_open(&file_handles[slot].fil, path, FA_READ) != FR_OK) {
+        // 打不开通常是 FATFS 的“同时打开文件数”被别的模块占满（APP 的字体/图片、参数文件、OTA 文件都算），
+        // 这里把所有常驻句柄全部释放后重试一次，避免整屏文字/图片突然消失。
+        for (uint8_t i = 0; i < GFX_FILE_CACHE_NUM; i++) {
+            if (file_handles[i].used) {
+                (void) f_close(&file_handles[i].fil);
+                file_handles[i].used = 0;
+                file_handles[i].path = NULL;
+                file_handles[i].stamp = 0;
+            }
+        }
+        if (f_open(&file_handles[slot].fil, path, FA_READ) != FR_OK) { return NULL; }
+    }
 
     file_handles[slot].path  = path;
     file_handles[slot].stamp = ++file_stamp;

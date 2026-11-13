@@ -16,6 +16,17 @@
 #include "UserTask.h"
 #include "SwitchManager.h"
 
+/* 从 APP 返回到主界面后，一段时间内忽略按键：
+   长按编码器退出时，退出瞬间往往还没松手，松手产生的 CLICK / PRESS_LEFT 等事件
+   会立刻被主界面当成"进入"操作，表现为刚退出又自动进回原来的 APP。 */
+#define GUI_RESUME_IGNORE_MS    1000U
+
+static uint32_t s_ignore_until;         // 在此之前到达的按键事件一律丢弃
+
+static bool gui_key_ignored(void) {
+    return (int32_t) (osKernelGetTickCount() - s_ignore_until) < 0;
+}
+
 /* 把按键/编码器事件翻译成 GUI 事件 */
 static GuiKey_t gui_from_event(const KeyEventMsg_t *msg) {
     switch (msg->key) {
@@ -67,7 +78,7 @@ void Start_GuiTask(void *argument) {
 
         if (osMessageQueueGet(KeyEventQueueHandle, &msg, NULL, 10U) == osOK) {
             GuiKey_t key = gui_from_event(&msg);
-            if (key != GUI_KEY_NONE) {
+            if (key != GUI_KEY_NONE && !gui_key_ignored()) {
                 StartBeezer(0);             // 按键提示音
                 WakeUp();                   // 唤醒屏幕
                 Gui_Dispatch(key);
@@ -88,6 +99,7 @@ void Resume_GuiTask(void) {
     while (osMessageQueueGet(KeyEventQueueHandle, &stale, NULL, 0U) == osOK) {
     }
 
+    s_ignore_until = osKernelGetTickCount() + GUI_RESUME_IGNORE_MS;
     Resume_IndevDetectTask();
     osThreadResume(GuiTaskHandle);
     Gui_Redraw();                           // 恢复后整屏重绘（此时 GUI 任务已恢复，绘制按队列顺序执行）

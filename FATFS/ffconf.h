@@ -57,7 +57,7 @@
 
 #define FF_FS_CRTIME        0
 #define FF_FS_NOFSINFO      0
-#define FF_FS_LOCK          8       /* 图形层常驻打开4个字体/图片文件，留足余量 */
+#define FF_FS_LOCK          16      /* 同时打开的文件数上限：图形层常驻 10 个字体/图片句柄 + 参数/OTA/文件服务各若干 */
 #define FF_FS_REENTRANT     1
 #define FF_FS_TIMEOUT       1000
 
