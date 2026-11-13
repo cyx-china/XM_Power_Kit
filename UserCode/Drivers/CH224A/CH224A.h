@@ -1,62 +1,94 @@
 #ifndef __CH224A_H
 #define __CH224A_H
 
+/**
+  ******************************************************************************
+  * @file           : CH224A.h
+  * @brief          : CH224A（USB PD 受电端协议芯片）I2C 驱动
+  * @date           : 2026/11/14
+  ******************************************************************************
+  * @attention
+  *
+  * 依据《CH224 Datasheet》V2.0（南京沁恒 WCH）第 5.2.3 节与表 5-3 重写：
+  *
+  *  · 7 位 I2C 地址为 0x22 或 0x23（不含读写位），本驱动上电时自动探测；
+  *  · **CH224A 只支持单字节读/写**，不能连写；PPS(0x53)/AVS(0x51/0x52) 与
+  *    PD 功率数据区(0x60~0x8F) 只有 CH224Q 才支持，CH224A 上调用无意义；
+  *  · 用单电阻配置档位时 I2C 功能自动使能，此时可以用 I2C 改请求电压并读回状态；
+  *  · 寄存器 0x0A 是"请求电压"：0=5V 1=9V 2=12V 3=15V 4=20V 5=28V；
+  *    28V 属于 EPR（PD3.1），需要适配器支持 EPR 且用了带 eMarker 的 Type-C 公头；
+  *  · 寄存器 0x50 是"当前档位最大可用电流"，单位 50mA，只在 PD 握手成功时有效。
+  *
+  * I2C3 与 MCP4725(DC 输出) 共用，驱动内部会取 IIC3_MutexHandle（不可递归：
+  * 公开函数之间不要互相调用后再调用，内部实现已拆成不带锁的 static 版本）。
+  ******************************************************************************
+  */
+
 #include "stm32f4xx_hal.h"
 #include <stdint.h>
 
+/*=============================== 基础配置 ===============================*/
+#define CH224A_ADDR_PRIMARY     0x22            // 7 位地址（不含读写位）
+#define CH224A_ADDR_ALT         0x23            // 7 位地址备选（CH224A/Q 均可能）
+#define CH224A_IIC_HANDLE       (&hi2c3)        // 挂在 I2C3 上
+#define CH224A_MEM_ADDR_SIZE    I2C_MEMADD_SIZE_8BIT
+#define CH224A_IIC_TIMEOUT      20              // ms，PD 芯片响应很快，不要挂住总线
+#define CH224A_MUTEX_TIMEOUT    100             // ms，取 I2C3 互斥锁的超时
 
-/************************** 基础宏定义 **************************/
-// 1. I2C 核心参数（用户指定）
-#define CH224A_ADDR         0x23        // CH224A 7位I2C地址
-#define CH224A_IIC_HANDLE   &hi2c3      // I2C句柄
+/*=============================== 寄存器地址 ===============================*/
+#define CH224A_REG_STATUS       0x09            // 协议状态（只读）
+#define CH224A_REG_VOLT_CTRL    0x0A            // 请求电压（只写）
+#define CH224A_REG_CURRENT      0x50            // 当前档位最大电流（只读，×50mA）
 
-// 3. I2C 通信配置
-#define CH224A_MEM_ADDR_SIZE    I2C_MEMADD_SIZE_8BIT  // 寄存器地址长度：8位
-#define CH224A_IIC_TIMEOUT      100                   // 通信超时时间：100ms
+/*=============================== 状态位 ===============================*/
+#define CH224A_ST_BC12          0x01U           // BIT0 BC1.2 握手成功
+#define CH224A_ST_QC2           0x02U           // BIT1 QC2.0 握手成功
+#define CH224A_ST_QC3           0x04U           // BIT2 QC3.0 握手成功
+#define CH224A_ST_PD            0x08U           // BIT3 PD 握手成功
+#define CH224A_ST_EPR_ACTIVE    0x10U           // BIT4 EPR 已激活（28V 档）
+#define CH224A_ST_EPR_EXIST     0x20U           // BIT5 电源支持 EPR（>100W 档）
+#define CH224A_ST_AVS_EXIST     0x40U           // BIT6 电源支持 AVS
 
-// 4. CH224A 关键寄存器地址（手册表5-3）
-#define CH224A_REG_STATUS       0x09    // 状态寄存器（只读：协议握手状态）
-#define CH224A_REG_VOLT_CTRL    0x0A    // 电压控制寄存器（只写：切换电压档位/模式）
-#define CH224A_REG_CURRENT      0x50    // 电流数据寄存器（只读：当前PD档位最大电流）
-#define CH224A_REG_AVS_H        0x51    // AVS电压配置寄存器（高8位：只写）
-#define CH224A_REG_AVS_L        0x52    // AVS电压配置寄存器（低8位：只写）
-#define CH224A_REG_PPS          0x53    // PPS电压配置寄存器（只写）
-
-/************************** 枚举与结构体定义 **************************/
-// 1. 电压档位/模式枚举（对应手册表5-2及0x0A寄存器说明）
+/*=============================== 类型定义 ===============================*/
+// 请求电压档位（对应 0x0A 寄存器取值）
 typedef enum {
-    CH224A_VOLT_5V      = 0x00,  // 5V 固定档位
-    CH224A_VOLT_9V      = 0x01,  // 9V 固定档位
-    CH224A_VOLT_12V     = 0x02,  // 12V 固定档位
-    CH224A_VOLT_15V     = 0x03,  // 15V 固定档位
-    CH224A_VOLT_20V     = 0x04,  // 20V 固定档位
-    CH224A_VOLT_28V     = 0x05,  // 28V 固定档位
-    CH224A_MODE_PPS     = 0x06,  // PPS 动态调压模式
-    CH224A_MODE_AVS     = 0x07   // AVS 动态调压模式
-} CH224A_VoltModeTypeDef;
+    CH224A_VOLT_5V  = 0,
+    CH224A_VOLT_9V  = 1,
+    CH224A_VOLT_12V = 2,
+    CH224A_VOLT_15V = 3,
+    CH224A_VOLT_20V = 4,
+    CH224A_VOLT_28V = 5
+} CH224A_VoltTypeDef;
 
-// 2. 协议状态结构体
+// 协议状态（寄存器的解析结果）
 typedef struct {
-    uint8_t BC12_Active  : 1;  // BIT0：BC1.2协议握手成功（1=成功）
-    uint8_t QC2_Active   : 1;  // BIT1：QC2.0协议握手成功（1=成功）
-    uint8_t QC3_Active   : 1;  // BIT2：QC3.0协议握手成功（1=成功）
-    uint8_t PD_Active    : 1;  // BIT3：PD协议握手成功（1=成功）
-    uint8_t EPR_Active   : 1;  // BIT4：EPR模式激活（1=激活，仅28V档位有效）
-    uint8_t Reserved     : 3;  // BIT5~BIT7：保留位（无意义）
-} CH224A_ProtocolStatusTypeDef;
+    uint8_t raw;            // 0x09 原始值
+    uint8_t bc12;           // BC1.2
+    uint8_t qc2;            // QC2.0
+    uint8_t qc3;            // QC3.0
+    uint8_t pd;             // PD（含 PD3.0）
+    uint8_t epr_active;     // EPR 已激活（28V）
+    uint8_t epr_exist;      // 电源支持 EPR
+    uint8_t avs_exist;      // 电源支持 AVS
+} CH224A_Status_t;
 
+/*=============================== 函数声明 ===============================*/
+/* 上电探测：依次试 0x22 / 0x23，找到就记住地址并返回 1，否则返回 0 */
+uint8_t CH224A_Init(void);
+/* 是否已经探测到芯片（0 = 不在线） */
+uint8_t CH224A_IsPresent(void);
+/* 已探测到的 7 位地址（0 = 未探测） */
+uint8_t CH224A_GetAddress(void);
+/* 重新探测（热插拔适配器后调用） */
+uint8_t CH224A_Probe(void);
 
-/************************** 函数声明 **************************/
-// 1. 基础寄存器操作
-HAL_StatusTypeDef CH224A_WriteReg(uint8_t reg_addr, uint8_t data);  // 单寄存器写1字节
-HAL_StatusTypeDef CH224A_ReadReg(uint8_t reg_addr, uint8_t *data);   // 单寄存器读1字节
-HAL_StatusTypeDef CH224A_WriteMultiReg(uint8_t start_reg, uint8_t *data_buf, uint8_t len);  // 多寄存器连续写
-
-// 2. 核心功能操作
-HAL_StatusTypeDef CH224A_SetVoltage(CH224A_VoltModeTypeDef volt_mode);  // 设置电压档位/模式
-HAL_StatusTypeDef CH224A_GetProtocolStatus(CH224A_ProtocolStatusTypeDef *status);  // 读取协议状态
-HAL_StatusTypeDef CH224A_GetMaxCurrent(uint16_t *current_ma);  // 读取当前PD档位最大电流（单位：mA）
-HAL_StatusTypeDef CH224A_ConfigAVS(uint16_t avs_volt_mv);  // 配置AVS模式电压（单位：mV，5000~30000）
-HAL_StatusTypeDef CH224A_ConfigPPS(uint16_t pps_volt_mv);  // 配置PPS模式电压（单位：mV，5000~30000）
+/* 读协议状态；返回 HAL_OK 表示读取成功 */
+HAL_StatusTypeDef CH224A_ReadStatus(CH224A_Status_t *status);
+/* 读当前档位最大可用电流（mA），仅 PD 握手成功后有效；PD 未握手返回 HAL_ERROR */
+HAL_StatusTypeDef CH224A_ReadMaxCurrentMa(uint16_t *current_ma);
+/* 请求某个电压档位（写入 0x0A，芯片会重新和适配器协商） */
+HAL_StatusTypeDef CH224A_RequestVoltage(CH224A_VoltTypeDef volt);
+/* 档位对应的字符串（"5V"、"20V" ...） */
+const char *CH224A_VoltText(CH224A_VoltTypeDef volt);
 
 #endif  // __CH224A_H

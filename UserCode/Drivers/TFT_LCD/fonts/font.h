@@ -34,5 +34,6 @@ extern const FontInfo MapleMono9x12;
 extern const FontInfo yahei24x24;
 extern const FontInfo NotoMono10x14;
 extern const FontInfo Mono5x7;
+extern const FontInfo pd_text;      // PD 检测 APP 专用 16x16 字库（ASCII + 界面汉字）
 
 #endif //XM_POWER_KIT_FONT_H

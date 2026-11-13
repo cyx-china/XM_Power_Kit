@@ -111,7 +111,8 @@ typedef enum {
     APP_DSO,        // 示波器
     APP_AWG,        // 任意波发生器
     APP_DMM,        // 万用表
-    APP_CAL         // 校准
+    APP_PD,         // USB PD 协议检测 / 诱骗（CH224A）
+    APP_CAL         // 校准（必须保持最后一个：PageSelectTask 用 TargetApp > APP_CAL 做越界校验）
 }AppListType;
 
 extern AppListType RunningApp;
@@ -145,6 +146,11 @@ void Calibrate_ReturnToMain(void);
 void Suspend_AwgTask(void);
 void Resume_AwgTask(void);
 
+
+/*=================== PdTask ======================*/
+void Start_PdTask(void *argument);
+void Suspend_PdTask(void);
+void Resume_PdTask(void);
 
 /*=================== DmmTask =====================*/
 void Resume_DmmTask(void);

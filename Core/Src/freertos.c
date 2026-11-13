@@ -136,6 +136,13 @@ const osThreadAttr_t DmmCoreTask_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for PdTask */
+osThreadId_t PdTaskHandle;
+const osThreadAttr_t PdTask_attributes = {
+  .name = "PdTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* Definitions for DsoCoreTask */
 osThreadId_t DsoCoreTaskHandle;
 const osThreadAttr_t DsoCoreTask_attributes = {
@@ -222,6 +229,7 @@ extern void Start_PIDTask(void *argument);
 extern void Start_CalibrateTask(void *argument);
 extern void Start_AwgTask(void *argument);
 extern void Start_DmmCoreTask(void *argument);
+extern void Start_PdTask(void *argument);
 extern void Start_DsoCoreTask(void *argument);
 extern void Start_SerialCoreTask(void *argument);
 
@@ -357,6 +365,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of DmmCoreTask */
   DmmCoreTaskHandle = osThreadNew(Start_DmmCoreTask, NULL, &DmmCoreTask_attributes);
+
+  /* creation of PdTask */
+  PdTaskHandle = osThreadNew(Start_PdTask, NULL, &PdTask_attributes);
 
   /* creation of DsoCoreTask */
   DsoCoreTaskHandle = osThreadNew(Start_DsoCoreTask, NULL, &DsoCoreTask_attributes);

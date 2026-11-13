@@ -37,6 +37,7 @@ extern osThreadId_t DpsCoreTaskHandle;            // 数控电源APP任务句柄
 extern osThreadId_t AwgTaskHandle;                // 任意波形发生器APP任务句柄
 extern osThreadId_t CalibrateTaskHandle;          // 校准任务句柄
 extern osThreadId_t DmmCoreTaskHandle;            // 数字万用表APP任务句柄
+extern osThreadId_t PdTaskHandle;                 // USB PD 协议检测APP任务句柄
 extern osThreadId_t DsoCoreTaskHandle;            // 示波器APP任务句柄
 extern osThreadId_t SerialCoreTaskHandle;         // 串口通信APP任务句柄
 // ============================= Mutex_Handles =============================//

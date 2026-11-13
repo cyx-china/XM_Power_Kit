@@ -43,6 +43,7 @@ extern const ImageInfo img_sbq_56x56;       // 示波器
 extern const ImageInfo img_bxfsq_56x56;     // 信号源
 extern const ImageInfo img_wyb_56x56;       // 万用表
 extern const ImageInfo img_cgq_56x56;       // 传感器
+extern const ImageInfo img_pd_56x56;        // USB PD 协议检测
 extern const ImageInfo img_jiaozhun_56x56;  // 校准
 extern const ImageInfo img_sz_56x56;        // 设置
 extern const ImageInfo img_xinxi_56x56;     // 关于

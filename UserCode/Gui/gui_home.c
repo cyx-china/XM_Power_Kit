@@ -44,7 +44,7 @@ static const HomeTile_t s_tiles[HOME_TILE_NUM] = {
     { &img_sbq_56x56,      "示波器", HOME_ACTION_APP,      APP_DSO   },
     { &img_bxfsq_56x56,    "信号源", HOME_ACTION_APP,      APP_AWG   },
     { &img_wyb_56x56,      "万用表", HOME_ACTION_APP,      APP_DMM   },
-    { &img_cgq_56x56,      "传感器", HOME_ACTION_APP,      APP_NONE  },   // 暂未开放
+    { &img_pd_56x56,       "PD",     HOME_ACTION_APP,      APP_PD    },   // USB PD 协议检测 / 诱骗
     { &img_jiaozhun_56x56, "校准",   HOME_ACTION_APP,      APP_CAL   },
     { &img_sz_56x56,       "设置",   HOME_ACTION_SETTINGS, APP_NONE  },
     { &img_xinxi_56x56,    "关于",   HOME_ACTION_ABOUT,    APP_NONE  }

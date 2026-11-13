@@ -49,6 +49,7 @@ const ImageInfo img_cgq_56x56 = { .width = 56, .height = 56, .path = "0:/images/
 const ImageInfo img_jiaozhun_56x56 = { .width = 56, .height = 56, .path = "0:/images/jiaozhun.bin" };
 const ImageInfo img_sz_56x56 = { .width = 56, .height = 56, .path = "0:/images/sz.bin" };
 const ImageInfo img_xinxi_56x56 = { .width = 56, .height = 56, .path = "0:/images/xinxi.bin" };
+const ImageInfo img_pd_56x56 = { .width = 56, .height = 56, .path = "0:/images/pd.bin" };
 
 
 
