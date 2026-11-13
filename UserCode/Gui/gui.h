@@ -53,17 +53,19 @@ typedef enum {
     GUI_KEY_BACK        // MODE
 } GuiKey_t;
 
-// 一个界面（页面）的描述：进入/退出/按键/整屏重绘
+// 一个界面（页面）的描述：进入/退出/按键/周期回调/整屏重绘
 typedef struct GuiScreen {
     void (*on_enter)(void);
     void (*on_exit)(void);
     void (*on_key)(GuiKey_t key);
+    void (*on_tick)(uint32_t now_ms);       // 周期回调（约 10ms 一次），可为 NULL
     void (*on_draw)(void);
 } GuiScreen;
 
 /*=============================== 框架 API ===============================*/
 void Gui_Init(void);                            // 框架初始化，进入首页
 void Gui_Dispatch(GuiKey_t key);                // 把按键事件交给当前界面
+void Gui_Tick(uint32_t now_ms);                 // 周期回调，由 GUI 任务每轮调用
 void Gui_Navigate(const GuiScreen *screen);     // 进入新界面（可返回）
 void Gui_Back(void);                            // 返回上一界面（栈空则回首页）
 void Gui_Redraw(void);                          // 请求当前界面整屏重绘
@@ -91,5 +93,6 @@ void Gui_Switch(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool on);
 extern const GuiScreen gui_screen_home;
 extern const GuiScreen gui_screen_settings;
 extern const GuiScreen gui_screen_about;
+extern const GuiScreen gui_screen_diag;
 
 #endif // XM_POWER_KIT_GUI_H

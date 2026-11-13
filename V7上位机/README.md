@@ -29,7 +29,7 @@ python selftest.py
 
 | 页签 | 内容 |
 | --- | --- |
-| 参数配置 | 5 个大类、18 个分组，共 56 个参数；可读当前值/默认值，修改后统一写入；表头「新值」留空表示不修改 |
+| 参数配置 | 5 个大类、18 个分组，共 58 个参数；可读当前值/默认值，修改后统一写入；表头「新值」留空表示不修改 |
 | 文件管理 | 浏览设备外部 Flash 上的 FATFS（类似资源管理器）；**拖拽上传**、上传文件夹、**多选批量下载/删除**、重命名、新建文件夹、右键菜单；显示容量与传输进度，可取消 |
 | 固件升级 | 选择 `XM_Power_Kit.bin`（自动识别版本/CRC）→ 写入设备并安装；可一键回滚到上一版本。设备停在 bootloader 时自动切到「维护模式」，按钮变成「写入并安装」 |
 | 设备信息 | 固件版本、协议版本、参数数量、Flash 容量、蓝牙波特率设置、刷新字库缓存、重启设备 |
@@ -138,8 +138,8 @@ A5 5A | LEN_L LEN_H | CMD | SEQ | DATA[LEN] | CRC_L CRC_H
 | 0x01 | SYS_INFO | — | proto, 固件版本串, 参数个数, 参数字节数, 特性位（bit0 USB / bit1 蓝牙 / bit2 文件 / bit3 OTA / bit4 维护模式）, 蓝牙波特率, 总容量, 剩余容量 |
 | 0x02 | SYS_REBOOT | — | — |
 | 0x03 | SYS_BT_BAUD | u32 波特率 | — |
-| 0x10 | PARAM_GET | u8 kind（0 当前 / 1 默认） | 224 字节参数 |
-| 0x11 | PARAM_SET | 224 字节参数 | — |
+| 0x10 | PARAM_GET | u8 kind（0 当前 / 1 默认） | 232 字节参数 |
+| 0x11 | PARAM_SET | 232 字节参数 | — |
 | 0x20 | FS_LIST | len+path, u16 start, u8 max | count, u16 next（0xFFFF 结束）, 条目 |
 | 0x21 | FS_READ | len+path, u32 offset, u16 len | u16 长度 + 数据 |
 | 0x22 | FS_WRITE | len+path, u32 offset, u16 len + 数据 | u16 已写字节数 |
@@ -166,7 +166,7 @@ A5 5A | LEN_L LEN_H | CMD | SEQ | DATA[LEN] | CRC_L CRC_H
 | 文件 | 作用 |
 | --- | --- |
 | `protocol.py` | 帧编解码、CRC16/CRC32、命令/状态码常量、升级包格式常量 |
-| `params.py` | 56 个参数的类型/名称/单位/界面分组，编解码 |
+| `params.py` | 58 个参数的类型/名称/单位/界面分组，编解码 |
 | `device.py` | 串口链路、请求重试、参数与文件系统高层接口 |
 | `worker.py` | 后台线程，所有串口操作与文件传输在这里执行 |
 | `ui_params.py` | 参数配置页 |

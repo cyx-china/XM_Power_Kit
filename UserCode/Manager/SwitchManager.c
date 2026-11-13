@@ -17,8 +17,38 @@ static void PWM_SetDuty(uint32_t channel, uint8_t percent) {
     __HAL_TIM_SET_COMPARE(&htim1, channel, ((arr + 1U) * (uint32_t)percent) / 100U);
 }
 
+/*
+ * 背光渐变：改亮度只记目标值，实际比较值由 PWM_BrightnessService() 每 BL_FADE_STEP_MS 走 1%。
+ * 该服务在 TIM6 的 1ms 时基回调里调用，全程约 200ms，避免开关屏时亮度突跳。
+ */
+#define BL_FADE_STEP_MS     2U
+
+static uint8_t s_bl_target  = 0;        // 目标亮度（0~100）
+static uint8_t s_bl_current = 0;        // 当前实际亮度（0~100）
+static uint8_t s_bl_divider = 0;        // 分频计数
+
 void PWM_SetBrightness(uint8_t percent) {
-    PWM_SetDuty(TIM_CHANNEL_2, percent);
+    if (percent > 100U) {
+        percent = 100U;
+    }
+    s_bl_target = percent;
+}
+
+void PWM_BrightnessService(void) {
+    if (s_bl_current == s_bl_target) {
+        s_bl_divider = 0;
+        return;
+    }
+    if (++s_bl_divider < BL_FADE_STEP_MS) {
+        return;
+    }
+    s_bl_divider = 0;
+    if (s_bl_current < s_bl_target) {
+        s_bl_current++;
+    } else {
+        s_bl_current--;
+    }
+    PWM_SetDuty(TIM_CHANNEL_2, s_bl_current);
 }
 
 void PWM_SetFanDuty(uint8_t percent) {

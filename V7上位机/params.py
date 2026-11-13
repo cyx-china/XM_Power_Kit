@@ -68,6 +68,8 @@ PARAM_META = [
     (53, "Beezer_Time", "uint16", "蜂鸣时长", "n × 10ms"),
     (54, "Fan_Enable", "uint16", "启用风扇", "0 或 1"),
     (55, "Fan_StartTemperature", "uint16", "风扇启转温度", "20~50 ℃"),
+    (56, "Fan_FullTemperature", "uint16", "风扇满速温度", "45~80 ℃"),
+    (57, "Screen_Rotate180", "uint16", "屏幕旋转 180°", "0 或 1"),
 ]
 
 PARAM_TOTAL_COUNT = len(PARAM_META)
@@ -98,15 +100,15 @@ PAGES = [
         ("电阻表", [43, 44, 45, 46, 47, 48]),
     ]),
     ("其他配置", [
-        ("屏幕", [49, 50, 51]),
+        ("屏幕", [49, 50, 51, 57]),
         ("蜂鸣器", [52, 53]),
-        ("风扇", [54, 55]),
+        ("风扇", [54, 55, 56]),
     ]),
 ]
 
 
 def decode_params(raw: bytes) -> dict:
-    """224 字节 -> {id: 值}"""
+    """参数原始字节 -> {id: 值}"""
     if len(raw) < PARAM_TOTAL_BYTES:
         raise ValueError("参数数据长度不足：%d" % len(raw))
     values = {}
@@ -122,7 +124,7 @@ def decode_params(raw: bytes) -> dict:
 
 
 def encode_params(values: dict) -> bytes:
-    """{id: 值} -> 224 字节（缺项按 0 填充，调用方应保证完整）"""
+    """{id: 值} -> 参数原始字节（缺项按 0 填充，调用方应保证完整）"""
     buf = bytearray(PARAM_TOTAL_BYTES)
     for pid, name, typ, label, unit in PARAM_META:
         v = values.get(pid, 0)

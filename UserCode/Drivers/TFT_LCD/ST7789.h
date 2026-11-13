@@ -35,6 +35,13 @@
 void LCD_WR_CMD(uint16_t command);
 
 /**
+ * @name   LCD_SetRotation
+ * @brief  设置屏幕方向：0 = 默认方向，1 = 180° 旋转
+ * @param  rotate180 : 0/1
+ **/
+void LCD_SetRotation(uint8_t rotate180);
+
+/**
  * @name   LCD_WR_DATA
  * @brief  通过FSMC向屏幕传输一个命令
  * @param  data :命令

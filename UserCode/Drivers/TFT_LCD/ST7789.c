@@ -12,6 +12,17 @@ void LCD_WR_CMD(uint16_t command) {
 }
 
 // 发送一个16bit数据
+/**
+ * @name   LCD_SetRotation
+ * @brief  设置屏幕方向：0 = 默认方向，1 = 180° 旋转（整机倒装时用）
+ * @param  rotate180 : 0/1
+ * @note   MADCTL 默认 0x60（DIS_DIR 3），取反 MY/MX 即 0xA0 实现 180° 旋转
+ **/
+void LCD_SetRotation(uint8_t rotate180) {
+    LCD_WR_CMD(0x36);
+    LCD_WR_DATA((rotate180 != 0U) ? 0xA0U : 0x60U);
+}
+
 void LCD_WR_DATA(uint16_t data) {
     *LCD_DATA_ADDR = data;
 }

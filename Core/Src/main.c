@@ -36,6 +36,7 @@
 #include "ff.h"
 #include "Flash.h"
 #include "UserTask.h"
+#include "SwitchManager.h"
 
 /* USER CODE END Includes */
 
@@ -135,7 +136,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
+    
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -206,6 +207,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   if (htim->Instance == TIM6)
   {
     HAL_IncTick();
+    PWM_BrightnessService();        // 背光渐变（1ms 时基驱动）
   }
   /* USER CODE BEGIN Callback 1 */
 

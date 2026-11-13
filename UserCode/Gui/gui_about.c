@@ -32,12 +32,23 @@ static void about_draw(void) {
     Gui_TextCenter(160, 172, "Copyright (C) Xuemeng", &ui_mono, GUI_COL_TEXT_DIM, GUI_COL_BG);
     Gui_TextCenter(160, 190, "CC-BY-NC-SA 4.0", &ui_mono, GUI_COL_TEXT_DIM, GUI_COL_BG);
 
-    Gui_TextCenter(160, 216, "按 SET 或 MODE 返回", &ui_text, GUI_COL_TEXT_DIM, GUI_COL_BG);
+    Gui_TextCenter(160, 216, "↓ 设备信息    SET 返回", &ui_text, GUI_COL_TEXT_DIM, GUI_COL_BG);
 }
 
 static void about_on_key(GuiKey_t key) {
-    if (key == GUI_KEY_ENTER || key == GUI_KEY_BACK) {
-        Gui_Back();
+    switch (key) {
+        case GUI_KEY_DOWN:
+        case GUI_KEY_RIGHT:
+            Gui_Navigate(&gui_screen_diag);      // 下键/编码器右转进入设备信息
+            break;
+        case GUI_KEY_ENTER:
+        case GUI_KEY_BACK:
+        case GUI_KEY_UP:
+        case GUI_KEY_LEFT:
+            Gui_Back();
+            break;
+        default:
+            break;
     }
 }
 
@@ -49,5 +60,6 @@ const GuiScreen gui_screen_about = {
     .on_enter = about_on_enter,
     .on_exit  = NULL,
     .on_key   = about_on_key,
+    .on_tick  = NULL,
     .on_draw  = about_draw
 };

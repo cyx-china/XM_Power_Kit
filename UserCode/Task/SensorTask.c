@@ -47,7 +47,9 @@ volatile float Input_Power   = 0.00f;    // 输入功率
 volatile uint8_t Fan_Duty_Cycle = 0;    // 风扇占空比
 
 volatile bool IsSleeping = false;       // 是否处于睡眠状态
-volatile int32_t SleepCounter = 0;      // 睡眠计数器
+
+static uint32_t s_idle_start_tick = 0;  // 最近一次用户操作的系统节拍（休眠计时）
+static bool s_fan_on = false;           // 风扇当前是否已启动（回差判断用）
 // ===================== 任务函数 ===================//
 
 void Start_SensorTask(void *argument){
@@ -81,20 +83,43 @@ void Start_SensorTask(void *argument){
 }
 
 
-const float TEMP_FULL      = 60.0f;     // 达到100%占空比的温度（℃）
 const uint8_t DUTY_MIN     = 20;        // 最低占空比
 const uint8_t DUTY_MAX     = 100;       // 最高占空比
 
+#define FAN_HYSTERESIS_C    2.0f        // 关断回差（℃），避免在启转温度附近反复启停
+#define FAN_FULL_GAP_C      5.0f        // 满速温度至少比启转温度高出多少度
+
 static uint8_t Fan_GetDutyCycle(float current_temp){
-    if (UserParam.Fan_Enable == 0){return 0;}       // 未启用风扇，占空比返回0
+    if (UserParam.Fan_Enable == 0){      // 未启用风扇：清状态并返回 0
+        s_fan_on = false;
+        return 0;
+    }
 
     float start_temp = (float)UserParam.Fan_StartTemperature;
+    float full_temp  = (float)UserParam.Fan_FullTemperature;
 
-    if (start_temp >= TEMP_FULL) {return DUTY_MAX;}   // 参数异常（启转温度≥满速温度）时避免除零
-    if (current_temp <= start_temp) {return 0;}
-    if (current_temp >= TEMP_FULL)  {return DUTY_MAX;}
+    if (full_temp < (start_temp + FAN_FULL_GAP_C)) {   // 参数不合理时拉开间距，避免除零
+        full_temp = start_temp + FAN_FULL_GAP_C;
+    }
 
-    float temp_range   = TEMP_FULL - start_temp;
+    if (!s_fan_on) {                     // 未启动：升到启转温度才开
+        if (current_temp < start_temp) {
+            return 0;
+        }
+        s_fan_on = true;
+    } else if (current_temp <= (start_temp - FAN_HYSTERESIS_C)) {   // 已启动：降到回差以下才关
+        s_fan_on = false;
+        return 0;
+    }
+
+    if (current_temp <= start_temp) {    // 回差带内保持最低转速，不直接停
+        return DUTY_MIN;
+    }
+    if (current_temp >= full_temp) {
+        return DUTY_MAX;
+    }
+
+    float temp_range   = full_temp - start_temp;
     float duty_range   = (float)(DUTY_MAX - DUTY_MIN);
     float temp_percent = (current_temp - start_temp) / temp_range;
 
@@ -111,18 +136,26 @@ static void FAN_Regulation(void) {
 }
 
 static void SleepingProcess(void) {
-    if (IsSleeping || UserParam.Screen_Sleeptime == 0){return;}    // 已经在睡眠模式或关闭休眠，直接返回
+    uint32_t timeout_ms = (uint32_t)UserParam.Screen_Sleeptime * 1000U;
 
-    SleepCounter --;            // 睡眠计数器减 1
-    if (SleepCounter <= 0){     // 睡眠计数器小于等于0，进入睡眠模式
+    if (IsSleeping || timeout_ms == 0U) {       // 已经在睡眠模式或关闭休眠，直接返回
+        return;
+    }
+    if ((osKernelGetTickCount() - s_idle_start_tick) >= timeout_ms) {   // 按真实毫秒计时
         IsSleeping = true;
         PWM_SetBrightness(10);      // 将屏幕亮度设置为10 %
-        SleepCounter = UserParam.Screen_Sleeptime;  //  重置睡眠计数器
     }
 }
 
+/* 复位休眠计时，从"现在"重新开始算（InitTask 启动时、修改休眠时间时调用） */
+void Sensor_ResetIdleTimer(void) {
+    s_idle_start_tick = osKernelGetTickCount();
+}
+
 void WakeUp(void) {
-    if (!IsSleeping){return;}    // 不在睡眠模式，直接返回
+    Sensor_ResetIdleTimer();        // 任何操作都重新计时
+
+    if (!IsSleeping){return;}       // 不在睡眠模式，直接返回
 
     IsSleeping = false;
     PWM_SetBrightness((uint8_t)UserParam.Screen_Brightness);  // 恢复屏幕亮度

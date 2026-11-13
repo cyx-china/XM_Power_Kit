@@ -1,5 +1,6 @@
 #ifndef XM_POWER_KIT_USERDEFINEMANAGE_H
 #define XM_POWER_KIT_USERDEFINEMANAGE_H
+#include <stdbool.h>
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
 
@@ -81,6 +82,8 @@ typedef enum {
     // 风扇设置
     Fan_Enable,                         // 是否启用风扇        (uint16_t)  0/1
     Fan_StartTemperature,                // 风扇启转温度        (uint16_t)  20~50
+    Fan_FullTemperature,                // 风扇满速温度        (uint16_t)  45~80
+    Screen_Rotate180,                   // 屏幕旋转 180°       (uint16_t)  0/1
     Param_Number                        // 参数个数
 } UserParamType_e;
 
@@ -159,6 +162,8 @@ typedef struct {
     uint16_t Beezer_Time;                 // 蜂鸣时长           (uint16_t)  10 * n ms
     uint16_t Fan_Enable;                  // 是否启用风扇        (uint16_t)  0/1
     uint16_t Fan_StartTemperature;         // 风扇启转温度        (uint16_t)  20~50
+    uint16_t Fan_FullTemperature;          // 风扇满速温度        (uint16_t)  45~80
+    uint16_t Screen_Rotate180;             // 屏幕旋转 180°       (uint16_t)  0/1
 } UserParamType_t;
 
 extern UserParamType_t UserParam;
@@ -167,6 +172,9 @@ HAL_StatusTypeDef UserParam_ResetToDefault(void);
 HAL_StatusTypeDef UserParam_UpdateSingle(UserParamType_e id, const void *value);
 HAL_StatusTypeDef UserParam_LoadAllValues(void);
 HAL_StatusTypeDef UserParam_SaveAllValues(void);
+HAL_StatusTypeDef UserParam_ResetCalibrationDefaults(void);   // 只把校准参数恢复默认
+HAL_StatusTypeDef UserParam_ResetAllDefaults(void);           // 全部参数恢复默认
+bool              UserParam_IsDefault(UserParamType_e id);    // 该参数是否仍是默认值
 
 HAL_StatusTypeDef Process_Default_Data(uint8_t *buf);
 HAL_StatusTypeDef Process_Current_Data(uint8_t* buf);

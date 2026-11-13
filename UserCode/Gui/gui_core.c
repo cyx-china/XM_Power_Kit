@@ -73,6 +73,12 @@ void Gui_Dispatch(GuiKey_t key) {
     }
 }
 
+void Gui_Tick(uint32_t now_ms) {
+    if (s_current != NULL && s_current->on_tick != NULL) {
+        s_current->on_tick(now_ms);
+    }
+}
+
 void Gui_Redraw(void) {
     if (s_current != NULL && s_current->on_draw != NULL) {
         s_current->on_draw();

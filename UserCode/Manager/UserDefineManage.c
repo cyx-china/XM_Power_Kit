@@ -80,6 +80,8 @@ const UserParamType_t UserParamDefault = {
     .Beezer_Time          = 1,          // 蜂鸣时常，注意，实际时常是10 * 此值 ms，也不必改太，10ms足够了
     .Fan_Enable           = 1,          // 是否启用风扇        (uint16_t)  0/1
     .Fan_StartTemperature  = 40,         // 风扇启转温度        (uint16_t)  20~50
+    .Fan_FullTemperature  = 60,         // 风扇满速温度        (uint16_t)  45~80
+    .Screen_Rotate180     = 0,          // 屏幕旋转 180°       (uint16_t)  0/1
 };
 
 // 实际参数值结构体
@@ -160,7 +162,12 @@ static const ParamDesc_t param_desc_table[Param_Number] = {
     {2, &UserParamDefault.Beezer_Time,                 &UserParam.Beezer_Time},
     {2, &UserParamDefault.Fan_Enable,                  &UserParam.Fan_Enable},
     {2, &UserParamDefault.Fan_StartTemperature,         &UserParam.Fan_StartTemperature},
+    {2, &UserParamDefault.Fan_FullTemperature,          &UserParam.Fan_FullTemperature},
+    {2, &UserParamDefault.Screen_Rotate180,             &UserParam.Screen_Rotate180},
 };
+
+// 最后一个校准类参数（含它在内的 0..该值 都算校准参数，恢复默认校准时只重置这一段）
+#define PARAM_LAST_CALIBRATION      ((uint32_t) DMM_Res_R2K)
 
 // -------------------------- 核心函数实现 --------------------------
 /*
@@ -176,6 +183,7 @@ static const ParamDesc_t param_desc_table[Param_Number] = {
 static osMutexId_t Param_Mutex = NULL;
 
 static HAL_StatusTypeDef UserParam_ResetToDefault_NoLock(void);   // 前置声明：LoadAllValues 内部会调用
+static HAL_StatusTypeDef UserParam_SaveAllValues_NoLock(void);    // 前置声明：LoadAllValues 补齐旧文件时会调用
 
 // 首次调用发生在 InitTask 的参数加载阶段（此时还没有其它任务访问参数文件），之后不再创建
 static void Param_MutexInit(void)
@@ -224,19 +232,24 @@ static HAL_StatusTypeDef UserParam_LoadAllValues_NoLock(void)
         return HAL_ERROR;
     }
 
-    // 读取文件内容到缓冲区
+    // 读取文件内容到缓冲区。文件可能是旧版本（参数项比现在少），
+    // 此时只读文件里实际存在的项，其余项保留上面填的默认值，读完再把文件补齐到新长度。
+    FSIZE_t fsize = f_size(&fil);
+    UINT want = (fsize >= (FSIZE_t) PARAM_TOTAL_BYTES) ? (UINT) PARAM_TOTAL_BYTES : (UINT) fsize;
+
+    want -= want % 4U;
     br = 0;
-    res = f_read(&fil, buffer, PARAM_TOTAL_BYTES, &br);
+    res = f_read(&fil, buffer, want, &br);
     f_close(&fil); // 立即关闭文件，减少资源占用
 
     // 校验读取结果
-    if (res != FR_OK || br != PARAM_TOTAL_BYTES) {
+    if (res != FR_OK || br != want || want == 0U) {
         vPortFree(buffer); // 释放缓冲区
         return HAL_ERROR;
     }
 
-    // 查表更新UserParam结构体
-    for (uint32_t i = 0; i < Param_Number; i++) {
+    // 查表更新UserParam结构体（只覆盖文件里存在的项）
+    for (uint32_t i = 0; i < (uint32_t) (br / 4U); i++) {
         uint8_t *src = &buffer[i * 4];                  // 缓冲区中当前参数的起始地址
         const ParamDesc_t *desc = &param_desc_table[i]; // 当前参数的描述信息
 
@@ -250,8 +263,13 @@ static HAL_StatusTypeDef UserParam_LoadAllValues_NoLock(void)
         }
     }
 
-    // 释放缓冲区并返回成功
+    // 释放缓冲区
     vPortFree(buffer);
+
+    // 旧版本文件项数不足：把缺的默认值补写回去，避免下次仍按旧长度读取
+    if (br != (UINT) PARAM_TOTAL_BYTES) {
+        (void) UserParam_SaveAllValues_NoLock();
+    }
     return HAL_OK;
 }
 
@@ -540,6 +558,43 @@ HAL_StatusTypeDef UserParam_SaveAllValues(void)
     HAL_StatusTypeDef status = UserParam_SaveAllValues_NoLock();
     Param_Unlock();
     return status;
+}
+
+/* 把 [first, last] 区间参数的默认值写回内存，并整体落盘 */
+static HAL_StatusTypeDef Param_RestoreRange(uint32_t first, uint32_t last)
+{
+    HAL_StatusTypeDef status;
+    uint32_t i;
+
+    Param_Lock();
+    for (i = first; i <= last; i++) {
+        const ParamDesc_t *desc = &param_desc_table[i];
+
+        memcpy(desc->current_ptr, desc->default_ptr, desc->data_len);
+    }
+    status = UserParam_SaveAllValues_NoLock();
+    Param_Unlock();
+    return status;
+}
+
+/* 只恢复校准参数（0..PARAM_LAST_CALIBRATION），屏幕/风扇/蜂鸣器等设置保持不动 */
+HAL_StatusTypeDef UserParam_ResetCalibrationDefaults(void)
+{
+    return Param_RestoreRange(0U, PARAM_LAST_CALIBRATION);
+}
+
+/* 全部参数恢复默认（出厂设置） */
+HAL_StatusTypeDef UserParam_ResetAllDefaults(void)
+{
+    return Param_RestoreRange(0U, (uint32_t) Param_Number - 1U);
+}
+
+/* 判断某个参数是否仍是默认值（设备信息页用来显示校准状态） */
+bool UserParam_IsDefault(UserParamType_e id)
+{
+    const ParamDesc_t *desc = &param_desc_table[id];
+
+    return memcmp(desc->current_ptr, desc->default_ptr, desc->data_len) == 0;
 }
 
 HAL_StatusTypeDef Process_Current_Data(uint8_t *buf)

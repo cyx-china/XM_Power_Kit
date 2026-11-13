@@ -49,10 +49,14 @@ typedef enum {
     SK_SLEEP = 0,
     SK_BRIGHT,
     SK_FLIP,
+    SK_ROTATE,
     SK_BEEP_VOL,
     SK_BEEP_TIME,
     SK_FAN_EN,
     SK_FAN_TEMP,
+    SK_FAN_FULL,
+    SK_RST_CAL,
+    SK_RST_ALL,
     SK_BACK,
     SK_NONE = 0xFF
 } SetKey_t;
@@ -66,17 +70,22 @@ typedef struct {
 } SetRow_t;
 
 static const SetRow_t s_rows[] = {
-    { ROW_TITLE,  SK_NONE,      "显示设置",   0,   0 },
-    { ROW_CHOICE, SK_SLEEP,     "自动休眠",   0,   5 },
-    { ROW_SLIDER, SK_BRIGHT,    "屏幕亮度",   10, 100 },
-    { ROW_SWITCH, SK_FLIP,      "颜色翻转",   0,   1 },
-    { ROW_TITLE,  SK_NONE,      "蜂鸣器设置", 0,   0 },
-    { ROW_SLIDER, SK_BEEP_VOL,  "蜂鸣音量",   10, 100 },
-    { ROW_SLIDER, SK_BEEP_TIME, "蜂鸣时长",   1,   8 },
-    { ROW_TITLE,  SK_NONE,      "风扇设置",   0,   0 },
-    { ROW_SWITCH, SK_FAN_EN,    "风扇使能",   0,   1 },
-    { ROW_SLIDER, SK_FAN_TEMP,  "启转温度",   20,  50 },
-    { ROW_BUTTON, SK_BACK,      "返回",       0,   0 }
+    { ROW_TITLE,  SK_NONE,      "显示设置",     0,   0 },
+    { ROW_CHOICE, SK_SLEEP,     "自动休眠",     0,   5 },
+    { ROW_SLIDER, SK_BRIGHT,    "屏幕亮度",     10, 100 },
+    { ROW_SWITCH, SK_FLIP,      "颜色翻转",     0,   1 },
+    { ROW_SWITCH, SK_ROTATE,    "屏幕旋转",     0,   1 },
+    { ROW_TITLE,  SK_NONE,      "蜂鸣器设置",   0,   0 },
+    { ROW_SLIDER, SK_BEEP_VOL,  "蜂鸣音量",     10, 100 },
+    { ROW_SLIDER, SK_BEEP_TIME, "蜂鸣时长",     1,   8 },
+    { ROW_TITLE,  SK_NONE,      "风扇设置",     0,   0 },
+    { ROW_SWITCH, SK_FAN_EN,    "风扇使能",     0,   1 },
+    { ROW_SLIDER, SK_FAN_TEMP,  "启转温度",     20,  50 },
+    { ROW_SLIDER, SK_FAN_FULL,  "满速温度",     45,  80 },
+    { ROW_TITLE,  SK_NONE,      "恢复设置",     0,   0 },
+    { ROW_BUTTON, SK_RST_CAL,   "恢复默认校准", 0,   0 },
+    { ROW_BUTTON, SK_RST_ALL,   "恢复全部参数", 0,   0 },
+    { ROW_BUTTON, SK_BACK,      "返回",         0,   0 }
 };
 
 #define SET_ROW_NUM   ((uint8_t) (sizeof(s_rows) / sizeof(s_rows[0])))
@@ -89,9 +98,31 @@ static const char *const s_sleep_labels[6] = { "关闭", "1分钟", "5分钟", "
 static uint8_t s_focus = 1;        // 当前焦点行
 static bool s_edit = false;        // 是否处于编辑态
 static uint16_t s_offset = 0;      // 列表滚动偏移（内容坐标）
-static bool s_changed = false;     // 本次进入是否改过参数
 static bool s_popup = false;       // 下拉选择面板是否展开
 static uint8_t s_popup_sel = 0;    // 面板里选中的项
+static uint8_t s_confirm = 0;      // 确认框：0 关 / 1 恢复默认校准 / 2 恢复全部参数
+static uint8_t s_confirm_sel = 1;  // 确认框选择：0 取消 / 1 确定
+
+/* 保存去抖：改完参数等 600ms 没人再动才落盘，避免转编码器时反复擦写文件 */
+#define SET_SAVE_DELAY_MS   600U
+#define SET_SAVE_RETRY_MS   3000U
+#define SET_TOAST_MS        1200U
+
+static bool s_dirty = false;            // 有未落盘的改动
+static uint32_t s_save_due = 0;         // 到点保存（系统节拍）
+static bool s_toast_on = false;         // 提示条是否显示
+static uint32_t s_toast_until = 0;      // 提示条消失时刻
+static const char *s_toast_text = "";   // 提示文本（只指向常量字符串）
+static uint16_t s_toast_color = GUI_COL_TEXT;
+
+static void set_draw_all(void);
+static void set_draw_body(void);
+static void set_draw_confirm(void);
+static void set_draw_toast(void);
+static void set_repaint(void);
+static void set_mark_dirty(void);
+static void set_toast_show(const char *text, uint16_t color);
+static void set_apply_hardware(void);
 
 /*=============================== 工具函数 ===============================*/
 static uint16_t set_row_top(uint8_t index) {
@@ -146,6 +177,8 @@ static int16_t set_get(uint8_t index) {
         case SK_BEEP_TIME: value = (int16_t) UserParam.Beezer_Time;           break;
         case SK_FAN_EN:    value = (int16_t) UserParam.Fan_Enable;            break;
         case SK_FAN_TEMP:  value = (int16_t) UserParam.Fan_StartTemperature;  break;
+        case SK_FAN_FULL:  value = (int16_t) UserParam.Fan_FullTemperature;   break;
+        case SK_ROTATE:    value = (int16_t) (UserParam.Screen_Rotate180 & 0x01U); break;
         default:           value = 0;                                        break;
     }
 
@@ -171,7 +204,7 @@ static void set_apply(uint8_t index, int16_t value) {
         case SK_SLEEP:
             UserParam.Screen_Sleeptime = s_sleep_seconds[value];
             IsSleeping = false;
-            SleepCounter = (int32_t) s_sleep_seconds[value];
+            Sensor_ResetIdleTimer();        // 从"现在"重新计时
             if (UserParam.Screen_Sleeptime == 0U) {
                 PWM_SetBrightness((uint8_t) UserParam.Screen_Brightness);
             }
@@ -202,10 +235,18 @@ static void set_apply(uint8_t index, int16_t value) {
         case SK_FAN_TEMP:
             UserParam.Fan_StartTemperature = (uint16_t) value;
             break;
+        case SK_FAN_FULL:
+            UserParam.Fan_FullTemperature = (uint16_t) value;
+            break;
+        case SK_ROTATE:
+            UserParam.Screen_Rotate180 = (uint16_t) value;
+            LCD_SetRotation((uint8_t) (value & 0x01));   // 只改地址映射，接着必须整屏重绘
+            Gui_Redraw();
+            break;
         default:
             break;
     }
-    s_changed = true;
+    set_mark_dirty();
 }
 
 /* 行内显示值的文本 */
@@ -228,6 +269,9 @@ static void set_value_text(uint8_t index, char *buf, uint16_t size) {
         case SK_FAN_TEMP:
             (void) snprintf(buf, size, "%d℃", (int) value);
             break;
+        case SK_FAN_FULL:
+            (void) snprintf(buf, size, "%d℃", (int) value);
+            break;
         default:
             buf[0] = 0;
             break;
@@ -242,7 +286,16 @@ static void set_draw_row(uint8_t index) {
     uint16_t card_bg;
     bool fits;
 
-    if (!set_row_visible(index) || y32 < (int32_t) SET_BODY_Y0) {
+    if (!set_row_visible(index)) {
+        return;
+    }
+    if (y32 < (int32_t) SET_BODY_Y0) {          // 顶部被窗口裁掉的行：只画露出来的卡片残块
+        uint16_t clip_end = (uint16_t) (y32 + SET_ROW_H - 1);
+
+        if (clip_end > 239U) {
+            clip_end = 239U;
+        }
+        Gui_Fill(SET_ROW_X0, SET_BODY_Y0, SET_ROW_X1, clip_end, GUI_COL_CARD);
         return;
     }
     y = (uint16_t) y32;
@@ -310,8 +363,8 @@ static void set_draw_row(uint8_t index) {
         }
         case ROW_BUTTON:
             if ((uint16_t) (y + 33U) <= 239U) {
-                Gui_TextRight(SET_ROW_X1 - SET_TEXT_DX, (uint16_t) (y + 13U), "确定", &ui_text,
-                              GUI_COL_ACCENT, card_bg);
+                Gui_TextRight(SET_ROW_X1 - SET_TEXT_DX, (uint16_t) (y + 13U),
+                              (row->key == SK_BACK) ? "确定" : "执行", &ui_text, GUI_COL_ACCENT, card_bg);
             }
             break;
         default:
@@ -361,19 +414,154 @@ static void set_draw_popup(void) {
     }
 }
 
+/*=============================== 提示条 ===============================*/
+static void set_draw_toast(void) {
+    const uint16_t x0 = 76, y0 = 194, x1 = 244, y1 = 222;
+
+    if (!s_toast_on) {
+        return;
+    }
+    Gui_RoundFill(x0, y0, x1, y1, 8, GUI_COL_CARD);
+    Gui_RoundFrame(x0, y0, x1, y1, 8, GUI_COL_ACCENT, 1);
+    Gui_TextCenter(160, (uint16_t) (y0 + 4U), s_toast_text, &ui_text, s_toast_color, GUI_COL_CARD);
+}
+
+static void set_repaint(void) {
+    set_draw_body();
+    set_draw_toast();
+}
+
+/*=============================== 确认框 ===============================*/
+static void set_draw_confirm(void) {
+    const uint16_t x0 = 30, x1 = 289, y0 = 66, y1 = 174;
+    const uint16_t btn_y0 = 132, btn_y1 = 162;
+
+    Gui_RoundFill(x0, y0, x1, y1, 10, GUI_COL_CARD);
+    Gui_RoundFrame(x0, y0, x1, y1, 10, GUI_COL_ACCENT, 2);
+    Gui_TextCenter(160, 82, (s_confirm == 1U) ? "恢复默认校准？" : "恢复全部参数？", &ui_text,
+                   GUI_COL_TEXT, GUI_COL_CARD);
+    Gui_TextCenter(160, 108, (s_confirm == 1U) ? "电源 / 示波器 / 万用表 / 信号源"
+                                               : "含屏幕、蜂鸣器、风扇设置", &ui_text,
+                   GUI_COL_TEXT_SUB, GUI_COL_CARD);
+
+    Gui_RoundFill(46, btn_y0, 148, btn_y1, 8,
+                  (s_confirm_sel == 0U) ? GUI_COL_ACCENT : GUI_COL_ACCENT_DARK);
+    Gui_TextCenter(97, (uint16_t) (btn_y0 + 6U), "取消", &ui_text, GUI_COL_TEXT,
+                   (s_confirm_sel == 0U) ? GUI_COL_ACCENT : GUI_COL_ACCENT_DARK);
+
+    Gui_RoundFill(172, btn_y0, 274, btn_y1, 8,
+                  (s_confirm_sel == 1U) ? GUI_COL_ACCENT : GUI_COL_ACCENT_DARK);
+    Gui_TextCenter(223, (uint16_t) (btn_y0 + 6U), "确定", &ui_text, GUI_COL_TEXT,
+                   (s_confirm_sel == 1U) ? GUI_COL_ACCENT : GUI_COL_ACCENT_DARK);
+}
+
+/* 把参数里的硬件相关项重新作用一遍（恢复默认后调用） */
+static void set_apply_hardware(void) {
+    uint8_t brightness = (uint8_t) UserParam.Screen_Brightness;
+    uint16_t volume = UserParam.Beezer_Volume;
+
+    if ((brightness < 10U) || (brightness > 100U)) {
+        brightness = 100U;
+    }
+    PWM_SetBrightness(brightness);
+    LCD_WR_CMD((UserParam.Screen_ShowFlip == 0U) ? 0x21 : 0x20);
+    LCD_SetRotation((uint8_t) (UserParam.Screen_Rotate180 & 0x01U));
+
+    if ((volume < 1U) || (volume > 100U)) {
+        volume = 100U;
+    }
+    __HAL_TIM_SET_COMPARE(&htim9, TIM_CHANNEL_1, (uint32_t) ((volume - 1U) / 2U));
+
+    Sensor_ResetIdleTimer();
+}
+
+static void set_confirm_apply(void) {
+    uint8_t type = s_confirm;
+    HAL_StatusTypeDef status;
+
+    s_confirm = 0;
+    status = (type == 1U) ? UserParam_ResetCalibrationDefaults() : UserParam_ResetAllDefaults();
+    if (status != HAL_OK) {
+        set_toast_show("保存失败", GUI_RGB(248, 113, 113));
+    } else {
+        set_apply_hardware();
+        s_dirty = false;
+        set_toast_show("已恢复默认", GUI_COL_TEXT);
+    }
+    set_draw_all();
+}
+
+static void set_confirm_key(GuiKey_t key) {
+    switch (key) {
+        case GUI_KEY_LEFT:
+        case GUI_KEY_UP:
+            s_confirm_sel = 0;
+            set_draw_confirm();
+            break;
+        case GUI_KEY_RIGHT:
+        case GUI_KEY_DOWN:
+            s_confirm_sel = 1;
+            set_draw_confirm();
+            break;
+        case GUI_KEY_ENTER:
+            if (s_confirm_sel == 1U) {
+                set_confirm_apply();
+            } else {
+                s_confirm = 0;
+                set_repaint();
+            }
+            break;
+        case GUI_KEY_BACK:
+        default:
+            s_confirm = 0;
+            set_repaint();
+            break;
+    }
+}
+
+/*=============================== 保存去抖 ===============================*/
+static void set_toast_show(const char *text, uint16_t color) {
+    s_toast_text = text;
+    s_toast_color = color;
+    s_toast_on = true;
+    s_toast_until = osKernelGetTickCount() + SET_TOAST_MS;
+}
+
+static void set_mark_dirty(void) {
+    s_dirty = true;
+    s_save_due = osKernelGetTickCount() + SET_SAVE_DELAY_MS;
+}
+
+static void set_save_pending(void) {
+    HAL_StatusTypeDef status;
+
+    if (!s_dirty) {
+        return;
+    }
+    status = UserParam_SaveAllValues();
+    if (status == HAL_OK) {
+        s_dirty = false;
+        set_toast_show("已保存", GUI_COL_TEXT);
+    } else {                                    // 落盘失败：红字提示，过几秒再试
+        s_save_due = osKernelGetTickCount() + SET_SAVE_RETRY_MS;
+        set_toast_show("保存失败", GUI_RGB(248, 113, 113));
+    }
+    set_repaint();
+}
+
 static void set_draw_all(void) {
     Gui_Fill(0, 0, 319, SET_HEAD_H - 1U, GUI_COL_BG);
     Gui_TextCenter(160, 8, "系 统 设 置", &ui_text, GUI_COL_TITLE, GUI_COL_BG);
     Gui_Line(0, SET_HEAD_H - 1U, 319, SET_HEAD_H - 1U, GUI_COL_CARD);
     set_draw_body();
+    set_draw_toast();
 }
 
 /*=============================== 滚动 ===============================*/
-/* 把偏移对齐到行首：顶部永远是一整行，最后一行允许被窗口底部裁掉一点 */
+/* 把偏移对齐到行首；末尾不足一页时直接停到最大偏移，保证最后一行完整可见 */
 static uint16_t set_align_offset(uint16_t desired) {
     uint16_t view_h = (uint16_t) (SET_BODY_Y1 - SET_BODY_Y0 + 1U);
     uint16_t content = set_content_height();
-    uint16_t aligned = 0;
     uint8_t i;
 
     if (content <= view_h) {
@@ -383,20 +571,16 @@ static uint16_t set_align_offset(uint16_t desired) {
         desired = (uint16_t) (content - view_h);
     }
     for (i = 0; i < SET_ROW_NUM; i++) {                     // 不小于 desired 的最小行首
-        if (set_row_top(i) >= desired) {
-            aligned = set_row_top(i);
-            break;
-        }
-    }
-    if ((uint16_t) (aligned + view_h) > content) {          // 末尾一页：退回能铺满窗口且不越界的行首
-        aligned = 0;
-        for (i = 0; i < SET_ROW_NUM; i++) {
-            if (set_row_top(i) <= desired) {
-                aligned = set_row_top(i);
+        uint16_t aligned = set_row_top(i);
+
+        if (aligned >= desired) {
+            if ((uint32_t) aligned + view_h <= (uint32_t) content) {
+                return aligned;
             }
+            break;                                          // 该行首放不下整屏，退回最大偏移
         }
     }
-    return aligned;
+    return desired;
 }
 
 /* 让焦点行完整可见，返回偏移是否变化 */
@@ -439,8 +623,8 @@ static void set_focus_move(int8_t dir) {
         return;
     }
     s_focus = set_next_focus(s_focus, dir);
-    if (set_ensure_visible(s_focus)) {
-        set_draw_body();
+    if (set_ensure_visible(s_focus) || s_toast_on) {
+        set_repaint();
     } else {
         set_draw_row(old);
         set_draw_row(s_focus);
@@ -464,7 +648,11 @@ static void set_step(int8_t dir) {
         return;
     }
     set_apply(s_focus, value);
-    set_draw_row(s_focus);
+    if (s_toast_on) {
+        set_repaint();
+    } else {
+        set_draw_row(s_focus);
+    }
 }
 
 static void set_enter(void) {
@@ -483,7 +671,13 @@ static void set_enter(void) {
             set_draw_popup();
             break;
         case ROW_BUTTON:
-            Gui_Back();
+            if (s_rows[s_focus].key == SK_BACK) {
+                Gui_Back();
+            } else {
+                s_confirm = (s_rows[s_focus].key == SK_RST_CAL) ? 1U : 2U;
+                s_confirm_sel = 1;          // 默认停在"确定"上，转一格就能取消
+                set_draw_confirm();
+            }
             break;
         default:
             break;
@@ -516,6 +710,11 @@ static void set_popup_key(GuiKey_t key) {
 }
 
 static void set_on_key(GuiKey_t key) {
+    if (s_confirm != 0U) {
+        set_confirm_key(key);
+        return;
+    }
+
     if (s_popup) {
         set_popup_key(key);
         return;
@@ -566,18 +765,33 @@ static void set_on_enter(void) {
     s_focus = 1;
     s_edit = false;
     s_offset = 0;
-    s_changed = false;
     s_popup = false;
+    s_confirm = 0;
+    s_dirty = false;
+    s_toast_on = false;
     set_ensure_visible(s_focus);
     set_draw_all();
 }
 
 static void set_on_exit(void) {
     s_popup = false;
+    s_confirm = 0;
     s_edit = false;
-    if (s_changed) {
-        (void) UserParam_SaveAllValues();       // 返回时统一落盘（与原实现一致）
-        s_changed = false;
+    s_toast_on = false;
+    if (s_dirty) {
+        (void) UserParam_SaveAllValues();       // 离开时把没落盘的改动立刻写掉
+        s_dirty = false;
+    }
+}
+
+/* 周期回调：保存去抖到期就落盘，提示条到期就擦掉 */
+static void set_on_tick(uint32_t now_ms) {
+    if (s_dirty && ((int32_t) (now_ms - s_save_due) >= 0)) {
+        set_save_pending();
+    }
+    if (s_toast_on && ((int32_t) (now_ms - s_toast_until) >= 0)) {
+        s_toast_on = false;
+        set_repaint();
     }
 }
 
@@ -585,5 +799,6 @@ const GuiScreen gui_screen_settings = {
     .on_enter = set_on_enter,
     .on_exit  = set_on_exit,
     .on_key   = set_on_key,
+    .on_tick  = set_on_tick,
     .on_draw  = set_draw_all
 };

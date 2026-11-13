@@ -32,8 +32,8 @@
 extern ADC_HandleTypeDef hadc1;
 extern DMA_HandleTypeDef hdma_adc1;
 
-#define SYS_VERSION_CODE        "STM32F407VE.261113.Rel.0013"
-#define VERSION_STR             "Rel.0013"  // 固件版本号
+#define SYS_VERSION_CODE        "STM32F407VE.261114.Rel.0014"
+#define VERSION_STR             "Rel.0014"  // 固件版本号
 
 extern char Sys_Version[30];
 /*==================== InitTask ===================*/
@@ -51,9 +51,8 @@ extern volatile float DCDC_Temperature;    // DCDC 温度
 extern volatile uint8_t Fan_Duty_Cycle;    // 风扇占空比
 
 extern volatile bool IsSleeping;            // 是否处于睡眠状态
-extern volatile int32_t SleepCounter;       // 睡眠计数器
-
-void WakeUp(void);
+void WakeUp(void);                          // 有操作：重新开始休眠计时，睡眠中则唤醒屏幕
+void Sensor_ResetIdleTimer(void);           // 复位休眠计时（不改变亮度）
 /*================= LcdFlushTask ================*/
 typedef enum {
     CLEAR_SCREEN = 0,    // 清屏

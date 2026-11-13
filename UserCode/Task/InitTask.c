@@ -206,8 +206,8 @@ static bool Sys_Init(void) {
   }
   PWM_SetBrightness(brightness);
 
-  // 设置睡眠时间
-  SleepCounter = UserParam.Screen_Sleeptime;
+  // 复位休眠计时（按系统节拍计时，见 SensorTask.c）
+  Sensor_ResetIdleTimer();
 
   // 设置蜂鸣器音量（音量 0 会让 CCR 变成 32767，三极管常通发热，这里兜底）
   uint16_t volume = UserParam.Beezer_Volume;
@@ -225,6 +225,9 @@ static bool Sys_Init(void) {
   } else {
     LCD_WR_CMD(0x20);        // 关闭颜色翻转
   }
+
+  // 屏幕方向（整机倒装时旋转 180°）
+  LCD_SetRotation((uint8_t) (UserParam.Screen_Rotate180 & 0x01U));
 
   WaveGen_DC(1000, 0, 0, 0);      // 生成0V
   return pass;

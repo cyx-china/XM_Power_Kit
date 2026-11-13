@@ -84,6 +84,8 @@ void Start_GuiTask(void *argument) {
                 Gui_Dispatch(key);
             }
         }
+
+        Gui_Tick(osKernelGetTickCount());   // 周期回调：设置页的保存去抖与提示条计时都靠它
     }
 }
 
