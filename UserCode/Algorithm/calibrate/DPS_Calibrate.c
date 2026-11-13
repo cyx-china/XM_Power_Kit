@@ -83,7 +83,7 @@ static void DpsCal_Display_Voltage_Edit_handler(KeyEventMsg_t msg);
 static void DpsCal_Display_Current_Main_handler(KeyEventMsg_t msg);
 static void DpsCal_Display_Current_Edit_handler(KeyEventMsg_t msg);
 static void DpsCal_Output_Main_handler(KeyEventMsg_t msg);
-static uint8_t DpsCal_CheckLinearCoeff(float data[10], float *A, float *B);
+static uint8_t DpsCal_CheckLinearCoeff(float data[10], float *A, float *B, float *r2);
 
 // 各页面对应的按键处理函数映射表
 static void (*DpsCalPage_handlers[DpsCal_Page_Num])(KeyEventMsg_t) = {
@@ -166,8 +166,9 @@ void dps_cal_handler(KeyEventMsg_t msg) {       // 按键事件分发
 #define DPS_CAL_FAIL_R   0x10U
 #define DPS_CAL_FAIL_ARG 0x80U      // 入参非法（正常流程不会出现）
 
-static uint8_t DpsCal_CheckLinearCoeff(float data[10], float *A, float *B) {
+static uint8_t DpsCal_CheckLinearCoeff(float data[10], float *A, float *B, float *r2) {
     if (data == NULL || A == NULL || B == NULL) return DPS_CAL_FAIL_ARG;
+    if (r2 != NULL) *r2 = 0.0f;
 
     const int n = 9;                                                        // 总共有9个数据点
     float sum_x = 0.0f, sum_y = 0.0f, sum_xy = 0.0f, sum_x2 = 0.0f;
@@ -194,17 +195,24 @@ static uint8_t DpsCal_CheckLinearCoeff(float data[10], float *A, float *B) {
     if (a > -20.0f || a < -400.0f) flags |= DPS_CAL_FAIL_K;                // 斜率必须是负的
     if (b < 1000.0f || b > 9000.0f) flags |= DPS_CAL_FAIL_B;               // 截距在 0~4095 附近
 
-    float mean = sum_x / (float)n;                                          // R² 线性度校验
+    // R² 线性度校验：残差与总平方差都必须用 DAC（被预测量）的单位，
+    // 拿电压方差当分母会与残差量纲不一致，导致 R² 恒在 0.99 附近、永远判不达标
+    float mean_dac = sum_y / (float)n;
     float ss_tot = 0.0f, ss_res = 0.0f;
     for (int i = 0; i < n; i++) {
         float volt = data[2*i+1];
         float dac  = data[2*i];
         float pred = a * volt + b;
-        ss_tot += (volt - mean) * (volt - mean);
+        ss_tot += (dac - mean_dac) * (dac - mean_dac);
         ss_res += (dac - pred) * (dac - pred);
     }
-    if (ss_tot <= 0.0f) flags |= DPS_CAL_FAIL_D;
-    else if ((1.0f - ss_res / ss_tot) < 0.999f) flags |= DPS_CAL_FAIL_R;
+    if (ss_tot <= 0.0f) {
+        flags |= DPS_CAL_FAIL_D;
+    } else {
+        float r_squared = 1.0f - ss_res / ss_tot;                           // 线性度（1.0 表示完全落在拟合直线上）
+        if (r2 != NULL) *r2 = r_squared;
+        if (r_squared < 0.999f) flags |= DPS_CAL_FAIL_R;
+    }
 
     if (flags != 0U) return flags;                                          // 不可信：不写 A/B
 
@@ -214,13 +222,12 @@ static uint8_t DpsCal_CheckLinearCoeff(float data[10], float *A, float *B) {
 }
 
 // 把失败标志位拼成提示串，例如 "失败，K,B,R"
-static void DpsCal_FormatFailMsg(uint8_t flags, char *buf, size_t size) {
+static void DpsCal_FormatFailMsg(uint8_t flags, float r2, char *buf, size_t size) {
     static const struct { uint8_t bit; char letter; } items[] = {
         {DPS_CAL_FAIL_V, 'V'},
         {DPS_CAL_FAIL_D, 'D'},
         {DPS_CAL_FAIL_K, 'K'},
         {DPS_CAL_FAIL_B, 'B'},
-        {DPS_CAL_FAIL_R, 'R'},
     };
 
     int used = snprintf(buf, size, "失败，");
@@ -230,6 +237,18 @@ static void DpsCal_FormatFailMsg(uint8_t flags, char *buf, size_t size) {
     for (size_t i = 0; i < sizeof items / sizeof items[0]; i++) {
         if ((flags & items[i].bit) == 0U) continue;
         int w = snprintf(buf + used, size - (size_t) used, "%s%c", first ? "" : ",", items[i].letter);
+        if (w < 0 || (size_t) (used + w) >= size) return;
+        used += w;
+        first = false;
+    }
+
+    // R² 后面直接带上实测值（三位小数），方便判断到底差多少
+    if ((flags & DPS_CAL_FAIL_R) != 0U) {
+        int32_t milli = (int32_t) (r2 * 1000.0f + 0.5f);                    // 千分位取整，不用 %f
+        if (milli < 0) milli = 0;
+        if (milli > 9999) milli = 9999;
+        int w = snprintf(buf + used, size - (size_t) used, "%sR:%d.%03d",
+                         first ? "" : ",", (int) (milli / 1000), (int) (milli % 1000));
         if (w < 0 || (size_t) (used + w) >= size) return;
         used += w;
         first = false;
@@ -566,8 +585,9 @@ static void DpsCal_Output_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_string(25,165,"拟合计算中，请等待", &yahei16x16,0xdf3c,0x29a7,1);
 
             float DPS_Voltage_DAC_Coefficient = 0.0f, DPS_Voltage_DAC_Constant = 0.0f;
+            float fit_r2 = 0.0f;
             uint8_t fit_flags = DpsCal_CheckLinearCoeff(DpsCal_OutputCal_Data, &DPS_Voltage_DAC_Coefficient,
-                                                        &DPS_Voltage_DAC_Constant);
+                                                        &DPS_Voltage_DAC_Constant, &fit_r2);
             osDelay(2000);
 
             if (fit_flags == 0U) {
@@ -577,8 +597,8 @@ static void DpsCal_Output_Main_handler(KeyEventMsg_t msg) {
                 UserParam.DPS_Voltage_DAC_Coefficient = DPS_Voltage_DAC_Coefficient;
                 UserParam.DPS_Voltage_DAC_Constant = DPS_Voltage_DAC_Constant;
             } else {
-                char fail_msg[24];
-                DpsCal_FormatFailMsg(fit_flags, fail_msg, sizeof fail_msg);
+                char fail_msg[32];
+                DpsCal_FormatFailMsg(fit_flags, fit_r2, fail_msg, sizeof fail_msg);
                 lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
                 lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
                 lcd_draw_string(25,165, fail_msg, &yahei16x16,0xF800,0x29a7,1);
