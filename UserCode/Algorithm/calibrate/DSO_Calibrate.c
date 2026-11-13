@@ -1,4 +1,5 @@
 #include "DSO_Calibrate.h"
+#include "CalClamp.h"
 #include "format.h"
 
 #include <inttypes.h>
@@ -147,9 +148,14 @@ static const CalStep_t cal_steps[] = {
 };
 #define CAL_STEP_NUM (sizeof(cal_steps) / sizeof(cal_steps[0]))
 
-static void CalibrateSingleStep(const CalStep_t *step) {
+// 单档校准：10 秒内没把读数调到 128 就判定失败
+// （输入悬空、信号源没开、或一直饱和时，原实现是 while(1) 死等，只能断电重启）
+#define DSO_CAL_STEP_TIMEOUT_MS  (10000U)
+
+static bool CalibrateSingleStep(const CalStep_t *step) {
     char buf[64];
     uint8_t stable_cnt = 0;
+    uint32_t start_tick = osKernelGetTickCount();
 
     OSC_Magnify_Ctrl(step->magnify_val);
     DsoCal_Amp_Current = step->amp_val;
@@ -164,13 +170,21 @@ static void CalibrateSingleStep(const CalStep_t *step) {
             if (++stable_cnt >= 10) break; // 10 * 100ms = 1s
         } else {
             stable_cnt = 0;
-            if (DSO_AVG_ADC_VAL > 128) *(step->original_param) -= 1;
-            else if (DSO_AVG_ADC_VAL < 128) *(step->original_param) += 1;
+            if (DSO_AVG_ADC_VAL > 128) *step->original_param = cal_clamp_i16((int32_t) *step->original_param - 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
+            else if (DSO_AVG_ADC_VAL < 128) *step->original_param = cal_clamp_i16((int32_t) *step->original_param + 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
         }
 
         fmt_fixed(Current_Voltage_str, sizeof(Current_Voltage_str), DSO_CAL_VOLTAGE, 3, 6, FMT_SIGN | FMT_ZERO_PAD);
         lcd_draw_string(58,90,Current_Voltage_str, &DIN_Medium32x48,0xeb0c,0x0000,2);
         osDelay(100);
+
+        if ((osKernelGetTickCount() - start_tick) > DSO_CAL_STEP_TIMEOUT_MS) {
+            lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
+            lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
+            lcd_draw_string(25,165,"校准超时，请检查信号源与接线", &yahei16x16,0xF800,0x29a7,1);
+            osDelay(1500);
+            return false;
+        }
     }
 
     lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
@@ -178,6 +192,7 @@ static void CalibrateSingleStep(const CalStep_t *step) {
     snprintf(buf, sizeof(buf), "%s档校准完成！", step->step_name);
     lcd_draw_string(25,165, buf, &yahei16x16,0xdf3c,0x29a7,1);
     osDelay(1000);
+    return true;
 }
 
 
@@ -187,9 +202,15 @@ static void DsoCal_Origin_Main_handler(KeyEventMsg_t msg) {
         if (!Is_Origin_Cal) {
             Is_Origin_Cal = true;
             Is_Busy = true;
-            // 循环执行所有校准步骤
+            // 循环执行所有校准步骤；任一步失败（超时）就整体中止，停在原点页等待重试
+            bool ok = true;
             for (int i = 0; i < CAL_STEP_NUM; i++) {
-                CalibrateSingleStep(&cal_steps[i]);
+                if (!CalibrateSingleStep(&cal_steps[i])) { ok = false; break; }
+            }
+            if (!ok) {
+                Is_Busy = false;
+                Is_Origin_Cal = false;
+                return;
             }
 
             lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);

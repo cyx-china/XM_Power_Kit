@@ -1,4 +1,5 @@
 #include "AWG_Calibrate.h"
+#include "CalClamp.h"
 #include "format.h"
 
 #include <inttypes.h>
@@ -134,10 +135,10 @@ static void AwgCal_Origin_Main_handler(KeyEventMsg_t msg) {
 
 static void AwgCal_Origin_Edit_handler(KeyEventMsg_t msg) {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT) {
-        UserParam.DDS_Original += 1;
+        UserParam.DDS_Original = cal_clamp_i16((int32_t) UserParam.DDS_Original + 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT) {
-        UserParam.DDS_Original -= 1;
+        UserParam.DDS_Original = cal_clamp_i16((int32_t) UserParam.DDS_Original - 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
         AwgCal_Page_Current = AwgCal_Origin_Main;
@@ -169,6 +170,7 @@ static void AwgCal_Output_Main_handler(KeyEventMsg_t msg) {
         }
         else if (AwgCal_Output_Page_current == 1) {                                      // 如果选中的是 下一步 按钮
             UserParam_SaveAllValues();  // 保存配置
+            WaveGen_Stop();             // 校准结束必须停输出，否则退出后仍挂着 1V
             Calibrate_ReturnToMain();   // 返回主界面
             StartBeezer(0);
             return;
@@ -189,10 +191,10 @@ static void AwgCal_Output_Main_handler(KeyEventMsg_t msg) {
 
 static void AwgCal_Output_Edit_handler(KeyEventMsg_t msg) {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT) {
-        UserParam.DDS_Factor += 0.001f;
+        UserParam.DDS_Factor = cal_clamp_f(UserParam.DDS_Factor + 0.001f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT) {
-        UserParam.DDS_Factor -= 0.001f;
+        UserParam.DDS_Factor = cal_clamp_f(UserParam.DDS_Factor - 0.001f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
         AwgCal_Page_Current = AwgCal_Output_Main;

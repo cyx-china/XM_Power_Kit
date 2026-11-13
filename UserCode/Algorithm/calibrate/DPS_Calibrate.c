@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include "CalClamp.h"
 #include "format.h"
 #include <stdio.h>
 #include <tgmath.h>
@@ -146,23 +147,59 @@ void dps_cal_handler(KeyEventMsg_t msg) {       // 按键事件分发
 
 // ============= 内部函数实现 =============
 
-// 线性拟合函数
+// 线性拟合函数：DAC = A * Voltage + B
+//
+// 只在"数据确实可信"时才写参数，任何一项不满足都返回错误码，
+// 调用处会显示"校准失败，请重试"并且不写入 UserParam
+// （原实现直接除 denom：9 个点电压几乎相同时 denom≈0，A/B 会变成 inf/NaN
+//   并被保存，之后电源就再也调不起来）。
+//   返回 -1 参数空指针
+//   返回 -2 某点电压超出合理范围（没接线 / 没开电源 / 读数贴边）
+//   返回 -3 电压几乎不变，无法拟合
+//   返回 -4 斜率 A 的符号或量级不合理（DAC 与电压负相关，约 -100）
+//   返回 -5 截距 B 超出合理范围
+//   返回 -6 线性度 R² < 0.999（采样抖动过大）
 static int DpsCal_CalculateLinearCoeff(float data[10], float *A, float *B) {
-    // DAC = A * Voltage + B , 我们线性拟合出未知量 A 和 B
     if (data == NULL || A == NULL || B == NULL) return -1;
+
     const int n = 9;                                                        // 总共有9个数据点
     float sum_x = 0.0f, sum_y = 0.0f, sum_xy = 0.0f, sum_x2 = 0.0f;
+
     for (int i = 0; i < n; i++) {
-        float dac = data[2*i];
+        float dac  = data[2*i];
         float volt = data[2*i+1];
-        sum_x += volt;                                                      // 计算 电压 和
-        sum_y += dac;                                                       // 计算 DAC 和
+
+        if (volt < 0.20f || volt > 38.0f) return -2;                        // 单点不可信
+
+        sum_x  += volt;                                                     // 计算 电压 和
+        sum_y  += dac;                                                      // 计算 DAC 和
         sum_xy += volt * dac;                                               // 计算 电压*DAC 和
         sum_x2 += volt * volt;                                              // 计算 电压 平方和
     }
+
     float denom = (float)n * sum_x2 - sum_x * sum_x;
-    *A = ((float)n * sum_xy - sum_x * sum_y) / denom;
-    *B = (sum_y * sum_x2 - sum_x * sum_xy) / denom;
+    if (fabsf(denom) < 1.0e-3f) return -3;                                  // 电压几乎不变
+
+    float a = ((float)n * sum_xy - sum_x * sum_y) / denom;
+    float b = (sum_y * sum_x2 - sum_x * sum_xy) / denom;
+
+    if (a > -20.0f || a < -400.0f) return -4;                               // 斜率必须是负的
+    if (b < 1000.0f || b > 9000.0f) return -5;                              // 截距在 0~4095 附近
+
+    float mean = sum_x / (float)n;                                          // R² 线性度校验
+    float ss_tot = 0.0f, ss_res = 0.0f;
+    for (int i = 0; i < n; i++) {
+        float volt = data[2*i+1];
+        float dac  = data[2*i];
+        float pred = a * volt + b;
+        ss_tot += (volt - mean) * (volt - mean);
+        ss_res += (dac - pred) * (dac - pred);
+    }
+    if (ss_tot <= 0.0f) return -3;
+    if ((1.0f - ss_res / ss_tot) < 0.999f) return -6;
+
+    *A = a;
+    *B = b;
     return 0;
 }
 
@@ -214,10 +251,10 @@ static void DpsCal_Origin_Voltage_Main_handler(KeyEventMsg_t msg) {
 // 电压原点校准 编辑页面
 static void DpsCal_Origin_Voltage_Edit_handler(KeyEventMsg_t msg) {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT) {
-        UserParam.DPS_Voltage_Original += 1;
+        UserParam.DPS_Voltage_Original = cal_clamp_i16((int32_t) UserParam.DPS_Voltage_Original + 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT) {
-        UserParam.DPS_Voltage_Original -= 1;
+        UserParam.DPS_Voltage_Original = cal_clamp_i16((int32_t) UserParam.DPS_Voltage_Original - 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
         DpsCal_Page_Current = DpsCal_Origin_Voltage_Main;
@@ -295,10 +332,10 @@ static void DpsCal_Origin_Current_Main_handler(KeyEventMsg_t msg) {
 // 电流原点校准 编辑界面
 static void DpsCal_Origin_Current_Edit_handler(KeyEventMsg_t msg) {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT) {
-        UserParam.DPS_Current_Original += 1;
+        UserParam.DPS_Current_Original = cal_clamp_i16((int32_t) UserParam.DPS_Current_Original + 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT) {
-        UserParam.DPS_Current_Original -= 1;
+        UserParam.DPS_Current_Original = cal_clamp_i16((int32_t) UserParam.DPS_Current_Original - 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
         DpsCal_Page_Current = DpsCal_Origin_Current_Main;
@@ -358,10 +395,10 @@ static void DpsCal_Display_Voltage_Main_handler(KeyEventMsg_t msg) {
 // 电压显示校准 编辑界面
 static void DpsCal_Display_Voltage_Edit_handler(KeyEventMsg_t msg) {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT) {
-        UserParam.DPS_Voltage_Factor += 0.01f;
+        UserParam.DPS_Voltage_Factor = cal_clamp_f(UserParam.DPS_Voltage_Factor + 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT) {
-        UserParam.DPS_Voltage_Factor -= 0.01f;
+        UserParam.DPS_Voltage_Factor = cal_clamp_f(UserParam.DPS_Voltage_Factor - 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
         DpsCal_Page_Current = DpsCal_Display_Voltage_Main;
@@ -429,10 +466,10 @@ static void DpsCal_Display_Current_Main_handler(KeyEventMsg_t msg) {
 // 电压显示校准 编辑界面
 static void DpsCal_Display_Current_Edit_handler(KeyEventMsg_t msg) {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT) {
-        UserParam.DPS_Current_Factor += 0.01f;
+        UserParam.DPS_Current_Factor = cal_clamp_f(UserParam.DPS_Current_Factor + 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT) {
-        UserParam.DPS_Current_Factor -= 0.01f;
+        UserParam.DPS_Current_Factor = cal_clamp_f(UserParam.DPS_Current_Factor - 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
         DpsCal_Page_Current = DpsCal_Display_Current_Main;

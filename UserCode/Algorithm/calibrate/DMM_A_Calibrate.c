@@ -1,4 +1,5 @@
 #include "DMM_A_Calibrate.h"
+#include "CalClamp.h"
 #include "format.h"
 #include <inttypes.h>
 #include <stdio.h>
@@ -186,11 +187,11 @@ static void DmmACal_Origin_Edit_handler(KeyEventMsg_t msg)
 {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT)
     {
-        UserParam.DMM_Current_Original += 1;
+        UserParam.DMM_Current_Original = cal_clamp_i16((int32_t) UserParam.DMM_Current_Original + 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT)
     {
-        UserParam.DMM_Current_Original -= 1;
+        UserParam.DMM_Current_Original = cal_clamp_i16((int32_t) UserParam.DMM_Current_Original - 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER)
     {
@@ -262,11 +263,11 @@ static void DmmACal_Coefficient_Edit_handler(KeyEventMsg_t msg)
 {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT)
     {
-        UserParam.DMM_Current_Factor += 0.01f;
+        UserParam.DMM_Current_Factor = cal_clamp_f(UserParam.DMM_Current_Factor + 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT)
     {
-        UserParam.DMM_Current_Factor -= 0.01f;
+        UserParam.DMM_Current_Factor = cal_clamp_f(UserParam.DMM_Current_Factor - 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER)
     {

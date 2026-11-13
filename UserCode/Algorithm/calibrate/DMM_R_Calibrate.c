@@ -1,4 +1,5 @@
 #include "DMM_R_Calibrate.h"
+#include "CalClamp.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include "lcd_draw_api.h"
@@ -180,11 +181,11 @@ static void DmmRCal_R200_Origin_Main_handler(KeyEventMsg_t msg) {
 static void DmmRCal_R200_Origin_Edit_handler(KeyEventMsg_t msg) {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT)
     {
-        UserParam.DMM_Res_R200_Original += 1;
+        UserParam.DMM_Res_R200_Original = cal_clamp_i16((int32_t) UserParam.DMM_Res_R200_Original + 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT)
     {
-        UserParam.DMM_Res_R200_Original -= 1;
+        UserParam.DMM_Res_R200_Original = cal_clamp_i16((int32_t) UserParam.DMM_Res_R200_Original - 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER)
     {
@@ -260,10 +261,10 @@ static void DmmRCal_R2k_Origin_Main_handler(KeyEventMsg_t msg) {
 
 static void DmmRCal_R2k_Origin_Edit_handler(KeyEventMsg_t msg) {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT) {
-        UserParam.DMM_Res_R2K_Original += 1;
+        UserParam.DMM_Res_R2K_Original = cal_clamp_i16((int32_t) UserParam.DMM_Res_R2K_Original + 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT) {
-        UserParam.DMM_Res_R2K_Original -= 1;
+        UserParam.DMM_Res_R2K_Original = cal_clamp_i16((int32_t) UserParam.DMM_Res_R2K_Original - 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER) {
         DmmRCal_Page_Current = DmmRCal_R2k_Origin_Main;

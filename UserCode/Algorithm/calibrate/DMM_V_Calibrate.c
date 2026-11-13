@@ -1,4 +1,5 @@
 #include "DMM_V_Calibrate.h"
+#include "CalClamp.h"
 #include "format.h"
 #include <inttypes.h>
 #include <stdio.h>
@@ -190,11 +191,11 @@ static void DmmVCal_Origin_Edit_handler(KeyEventMsg_t msg)
 {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT)
     {
-        UserParam.DMM_Voltage_Original += 1;
+        UserParam.DMM_Voltage_Original = cal_clamp_i16((int32_t) UserParam.DMM_Voltage_Original + 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT)
     {
-        UserParam.DMM_Voltage_Original -= 1;
+        UserParam.DMM_Voltage_Original = cal_clamp_i16((int32_t) UserParam.DMM_Voltage_Original - 1, CAL_OFFSET_MIN, CAL_OFFSET_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER)
     {
@@ -284,11 +285,11 @@ static void DmmVCal_Positive_Edit_handler(KeyEventMsg_t msg)
 {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT)
     {
-        UserParam.DMM_Voltage_Factor_R += 0.01f;
+        UserParam.DMM_Voltage_Factor_R = cal_clamp_f(UserParam.DMM_Voltage_Factor_R + 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT)
     {
-        UserParam.DMM_Voltage_Factor_R -= 0.01f;
+        UserParam.DMM_Voltage_Factor_R = cal_clamp_f(UserParam.DMM_Voltage_Factor_R - 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER)
     {
@@ -363,11 +364,11 @@ static void DmmVCal_Negative_Edit_handler(KeyEventMsg_t msg)
 {
     if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_RIGHT)
     {
-        UserParam.DMM_Voltage_Factor_B += 0.01f;
+        UserParam.DMM_Voltage_Factor_B = cal_clamp_f(UserParam.DMM_Voltage_Factor_B + 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_ENCODER && msg.event == ENCODER_EVENT_LEFT)
     {
-        UserParam.DMM_Voltage_Factor_B -= 0.01f;
+        UserParam.DMM_Voltage_Factor_B = cal_clamp_f(UserParam.DMM_Voltage_Factor_B - 0.01f, CAL_FACTOR_MIN, CAL_FACTOR_MAX);
     }
     else if (msg.key == KEY_SET || msg.key == KEY_ENCODER)
     {
