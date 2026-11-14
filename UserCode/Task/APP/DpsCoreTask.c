@@ -1402,8 +1402,14 @@ void Resume_DpsCoreTask(void) {
     graph_sample_tick = osKernelGetTickCount();
     graph_frame_pending = 1;
 
+    // 每次进入 APP 都完全刷新：目标电压/电流回到默认 5V / 2A，
+    // 控制环状态与 DAC 一并复位。必须放在重画界面之前，否则界面还显示上一次的值。
+    PID_Init();                                  // 复位控制环（模式、误差、计数器、DAC 基准）
+    SetTargetVoltage(5.0f);                      // 默认目标电压 5.0V
+    SetTargetCurrent(2.0f);                      // 默认限流 2.0A
+
     DPS_ADC_Init();             // 重新初始化ADC
-    DrawDpsMainBasicElement();     // 绘制基础UI界面
+    DrawDpsMainBasicElement();     // 绘制基础UI界面（显示 5.00V / 2.00A）
     osDelay(150);          // 延时确保UI绘制完成
 
     // 注册ADC转换完成回调函数，用于处理采集数据
@@ -1416,9 +1422,6 @@ void Resume_DpsCoreTask(void) {
     __HAL_TIM_SET_AUTORELOAD(&htim8, 2249);
     DPS_UpdateEnergyPeriod();             // 按刚下发的 TIM8 配置刷新能量积分步长
     AdcTim_ON();                                                            // 启动定时器（ADC触发源）
-
-    PID_Init();                                                             // 初始化PID控制器
-    SetTargetVoltage(5.0f);                                                 // 设置默认目标电压5.0V
 
     // 恢复任务运行，重启业务逻辑
     osThreadResume(DpsCoreTaskHandle);          // 恢复DPS核心任务
