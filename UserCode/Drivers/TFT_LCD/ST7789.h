@@ -35,11 +35,12 @@
 void LCD_WR_CMD(uint16_t command);
 
 /**
- * @name   LCD_SetRotation
+ * @name   LCD_SetOrientation
  * @brief  设置屏幕方向：0 = 默认方向，1 = 180° 旋转
  * @param  rotate180 : 0/1
+ * @param  flip_horizontal : 0/1，独立控制左右翻转
  **/
-void LCD_SetRotation(uint8_t rotate180);
+void LCD_SetOrientation(uint8_t rotate180, uint8_t flip_horizontal);
 
 /**
  * @name   LCD_WR_DATA

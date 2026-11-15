@@ -233,7 +233,8 @@ static bool Sys_Init(void) {
   }
 
   // 屏幕方向（整机倒装时旋转 180°）
-  LCD_SetRotation((uint8_t) (UserParam.Screen_Rotate180 & 0x01U));
+  LCD_SetOrientation((uint8_t) (UserParam.Screen_Rotate180 & 0x01U),
+                       (uint8_t) (UserParam.Screen_FlipHorizontal & 0x01U));
 
   WaveGen_DC(1000, 0, 0, 0);      // 生成0V
   return pass;

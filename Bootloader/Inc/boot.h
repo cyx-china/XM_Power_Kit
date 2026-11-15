@@ -159,6 +159,8 @@ uint8_t  Boot_Storage_Provision(void);
 /* 读一个用户参数的 16 位原值（uparam.bin 没有/读不出来就用编译期默认值） */
 #define BOOT_PARAM_SCREEN_BRIGHT    49U     /* Screen_Brightness */
 #define BOOT_PARAM_SCREEN_FLIP      51U     /* Screen_ShowFlip  0=开反色 1=关反色 */
+#define BOOT_PARAM_SCREEN_ROTATE    57U     /* Screen_Rotate180 */
+#define BOOT_PARAM_SCREEN_FLIP_HORIZONTAL 59U /* Screen_FlipHorizontal */
 uint16_t Boot_Storage_Param16(uint8_t index);
 
 /* ============================ CRC32 ============================ */
@@ -205,6 +207,7 @@ bool     Boot_IntFlash_EraseSector(uint32_t sector);
 bool     Boot_Lcd_Init(void);
 /* 面板颜色反色：与应用 InitTask 保持一致（ShowFlip=0 → 开反色 0x21） */
 void     Boot_Lcd_SetInversion(bool invert_on);
+void     Boot_Lcd_SetOrientation(uint8_t rotate180, uint8_t flip_horizontal);
 void     Boot_Lcd_SetWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 void     Boot_Lcd_Fill(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color);
 void     Boot_Lcd_Blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels);

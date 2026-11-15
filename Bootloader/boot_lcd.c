@@ -6,6 +6,7 @@
  ******************************************************************************
  */
 #include "boot.h"
+#include "screen_orientation.h"
 #include "stm32f4xx_hal.h"
 
 /* FSMC bank1 NE1 基址 0x60000000：A16 当 RS（0=命令，1=数据） */
@@ -130,8 +131,8 @@ static void lcd_panel_init(void)
     lcd_cmd(0xC5);                          /* VCOM */
     lcd_data(0x1A);
 
-    lcd_cmd(0x36);                          /* 显示方向：横屏 270° */
-    lcd_data(0x60);
+    /* 文件系统就绪前使用默认值，之后应用保存的方向设置。 */
+    Boot_Lcd_SetOrientation(0U, 0U);
 
     lcd_cmd(0xB2);                          /* porch */
     lcd_data(0x0C);
@@ -259,6 +260,12 @@ void Boot_Lcd_BacklightPwm(uint8_t percent)
 void Boot_Lcd_SetInversion(bool invert_on)
 {
     lcd_cmd(invert_on ? 0x21U : 0x20U);
+}
+
+void Boot_Lcd_SetOrientation(uint8_t rotate180, uint8_t flip_horizontal)
+{
+    lcd_cmd(0x36U);
+    lcd_data(ScreenOrientation_Madctl(rotate180, flip_horizontal));
 }
 
 /* ============================ 对外初始化 ============================ */

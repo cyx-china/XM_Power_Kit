@@ -51,6 +51,7 @@ typedef enum {
     SK_BRIGHT,
     SK_FLIP,
     SK_ROTATE,
+    SK_FLIP_HORIZONTAL,
     SK_BEEP_VOL,
     SK_BEEP_TIME,
     SK_DAC_SWAP,
@@ -77,6 +78,7 @@ static const SetRow_t s_rows[] = {
     { ROW_SLIDER, SK_BRIGHT,    "屏幕亮度",     10, 100 },
     { ROW_SWITCH, SK_FLIP,      "颜色翻转",     0,   1 },
     { ROW_SWITCH, SK_ROTATE,    "屏幕旋转",     0,   1 },
+    { ROW_SWITCH, SK_FLIP_HORIZONTAL, "X 翻转",   0, 1 },
     { ROW_TITLE,  SK_NONE,      "蜂鸣器设置",   0,   0 },
     { ROW_SLIDER, SK_BEEP_VOL,  "蜂鸣音量",     0,  100 },
     { ROW_SLIDER, SK_BEEP_TIME, "蜂鸣时长",     1,   8 },
@@ -183,6 +185,7 @@ static int16_t set_get(uint8_t index) {
         case SK_FAN_TEMP:  value = (int16_t) UserParam.Fan_StartTemperature;  break;
         case SK_FAN_FULL:  value = (int16_t) UserParam.Fan_FullTemperature;   break;
         case SK_ROTATE:    value = (int16_t) (UserParam.Screen_Rotate180 & 0x01U); break;
+        case SK_FLIP_HORIZONTAL: value = (int16_t) (UserParam.Screen_FlipHorizontal & 0x01U); break;
         case SK_DAC_SWAP:  value = (int16_t) (UserParam.DDS_SwapDac & 0x01U);  break;
         default:           value = 0;                                        break;
     }
@@ -254,9 +257,16 @@ static void set_apply(uint8_t index, int16_t value) {
         case SK_FAN_FULL:
             UserParam.Fan_FullTemperature = (uint16_t) value;
             break;
+        case SK_FLIP_HORIZONTAL:
+            UserParam.Screen_FlipHorizontal = (uint16_t) value;
+            LCD_SetOrientation((uint8_t) (UserParam.Screen_Rotate180 & 0x01U),
+                               (uint8_t) value);
+            Gui_Redraw();
+            break;
         case SK_ROTATE:
             UserParam.Screen_Rotate180 = (uint16_t) value;
-            LCD_SetRotation((uint8_t) (value & 0x01));   // 只改地址映射，接着必须整屏重绘
+            LCD_SetOrientation((uint8_t) (value & 0x01),
+                               (uint8_t) (UserParam.Screen_FlipHorizontal & 0x01U));
             Gui_Redraw();
             break;
         default:
@@ -485,7 +495,8 @@ static void set_apply_hardware(void) {
     }
     PWM_SetBrightness(brightness);
     LCD_WR_CMD((UserParam.Screen_ShowFlip == 0U) ? 0x21 : 0x20);
-    LCD_SetRotation((uint8_t) (UserParam.Screen_Rotate180 & 0x01U));
+    LCD_SetOrientation((uint8_t) (UserParam.Screen_Rotate180 & 0x01U),
+                       (uint8_t) (UserParam.Screen_FlipHorizontal & 0x01U));
 
     if ((volume < 1U) || (volume > 100U)) {
         volume = 100U;

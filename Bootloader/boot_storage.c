@@ -93,6 +93,10 @@ uint16_t Boot_Storage_Param16(uint8_t index)
         return 0U;
     }
 
+    /* 旧参数文件没有新增项时也使用默认值，避免首次升级时方向不一致。 */
+    value = (uint16_t)boot_param_default[(uint32_t)index * 4U] |
+            ((uint16_t)boot_param_default[((uint32_t)index * 4U) + 1U] << 8);
+
     if (f_open(&file, BOOT_FILE_PARAM, FA_READ | FA_OPEN_EXISTING) == FR_OK)
     {
         if ((f_lseek(&file, (FSIZE_t)index * 4U) == FR_OK) &&
@@ -104,7 +108,5 @@ uint16_t Boot_Storage_Param16(uint8_t index)
         return value;
     }
 
-    value = (uint16_t)boot_param_default[(uint32_t)index * 4U] |
-            ((uint16_t)boot_param_default[((uint32_t)index * 4U) + 1U] << 8);
     return value;
 }

@@ -282,6 +282,9 @@ int main(void)
         bool invert_on = (Boot_Storage_Param16(BOOT_PARAM_SCREEN_FLIP) == 0U);
 
         Boot_Lcd_SetInversion(invert_on);
+        Boot_Lcd_SetOrientation(
+            (uint8_t)(Boot_Storage_Param16(BOOT_PARAM_SCREEN_ROTATE) & 1U),
+            (uint8_t)(Boot_Storage_Param16(BOOT_PARAM_SCREEN_FLIP_HORIZONTAL) & 1U));
 
         if (s_ui_shown)
         {

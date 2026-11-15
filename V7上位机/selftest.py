@@ -308,6 +308,17 @@ def main() -> int:
     back = P.decode_params(raw)
     assert back[0] == -5 and back[4] == 42 and abs(back[1] - 3.5) < 1e-6 and back[49] == 80
 
+    # Horizontal flip is appended without moving calibration or rotation slots.
+    assert P.PARAM_BY_NAME["Screen_Rotate180"][0] == 57
+    assert P.PARAM_BY_NAME["DDS_SwapDac"][0] == 58
+    assert P.PARAM_BY_NAME["Screen_FlipHorizontal"][0] == 59
+    for rotate in (0, 1):
+        for flip in (0, 1):
+            changed = P.encode_params({**vals, 57: rotate, 58: 1, 59: flip})
+            decoded = P.decode_params(changed)
+            assert changed[:57 * 4] == raw[:57 * 4]
+            assert (decoded[57], decoded[58], decoded[59]) == (rotate, 1, flip)
+
     # 5) 设备交互
     dev = FakeDevice()
     info = dev.get_info()
