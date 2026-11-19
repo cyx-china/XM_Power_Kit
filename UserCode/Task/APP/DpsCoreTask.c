@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include "DpsGraph.h"
+#include "DpsSafety.h"
 
 /* ========================== 宏定义 ========================== */
 /**
@@ -181,6 +182,9 @@ char set1[12], set2[12], set3[12], set4[12], set5[12];  // 快速设置5个项�
 
 bool Flush_OutputData = true;                // 输出数据刷新使能：true-刷新，false-暂停
 volatile bool IsPowerOn = false;             // 电源使能：true-开启，false-关闭
+
+static volatile uint8_t dps_fault_request = 0;          // PID 任务请求主任务执行保护关机（1=有待处理跳闸）
+static DpsFault_t       dps_fault_shown = DPS_FAULT_NONE;   // 当前正在显示的保护提示（NONE=没有）
 
 volatile uint16_t dps_adc_raw_buf[128] = {0};  // ADC原始采样缓冲区（128个值，偶数列-电压，奇数列-电流）
 volatile float Voltage = 0;                  // 实时输出电压（单位：V）
@@ -401,6 +405,9 @@ void Start_PIDTask(void *argument);                         // PID运算子任�
 // 通用辅助函数
 static void digit_page_handler(KeyEventMsg_t msg, const DigitEditContext_t *ctx);   // 数位编辑通用处理
 static void apply_quick_set_by_index(uint8_t index);                                // 应用指定索引的快速设置参数
+static void Dps_TurnOutputOn(void);                                                 // 打开输出（含保护复位）
+static void Dps_TurnOutputOff(void);                                                // 关闭输出（手动关机与保护跳闸共用）
+static void Dps_DrawProtectDialog(void);                                            // 保护提示框
 
 /* ========================== 页面处理函数回调表 ========================== */
 /**
@@ -589,6 +596,73 @@ static void Dps_ResetOutputAndWriteDac(void) {
     }
 }
 
+/* ========================== 输出开关与保护提示 ========================== */
+
+/**
+ * @brief  打开输出
+ * @note   先清保护锁存并进入静默期，再把 DAC 写回目标电压位置，最后按顺序合闸
+ * @retval 无
+ */
+static void Dps_TurnOutputOn(void) {
+    IsPowerOn = true;
+    DpsSafety_Reset();                  // 清故障 + 重启防抖窗口（上电瞬间不算过压/过流）
+    Dps_ResetOutputAndWriteDac();       // 先把 DAC 写回目标电压位置，再打开输出级
+    DpsPower_ON();
+    osDelay(10);
+    DpsRelease_OFF();
+    DpsGnd_ON();
+    DpsDc_ON();
+}
+
+/**
+ * @brief  关闭输出（手动关机与保护跳闸共用同一套顺序）
+ * @note   先切主电源，再等 80ms 泄放，最后断开 DC 与接地回路
+ * @retval 无
+ */
+static void Dps_TurnOutputOff(void) {
+    IsPowerOn = false;
+    DpsSafety_Disarm();                 // 清防抖计时，保留故障锁存
+    DpsPower_OFF();
+    DpsRelease_ON();
+    osDelay(80);
+    DpsDc_OFF();
+    DpsGnd_OFF();
+}
+
+/**
+ * @brief  绘制保护提示框
+ * @note   全 ASCII 文案，直接用现成字库；三行：保护码 / OUTPUT OFF / SET CLEAR
+ * @retval 无
+ */
+static void Dps_DrawProtectDialog(void) {
+    const char *code = DpsSafety_CodeText(dps_fault_shown);
+    uint16_t code_w = (uint16_t) (strlen(code) * yahei16x16.font_width +
+                                  (strlen(code) - 1U) * 6U);
+    uint16_t x = (uint16_t) ((320U - (code_w + 18U + 136U)) / 2U);
+    uint16_t x2;
+
+    /* 清掉"快速设置"按钮露在警示条上沿外面的两行像素，避免残边 */
+    lcd_draw_rect(175, 144, 319, 145, 0x29a7, 1);
+
+    /* 通栏警示条：正好盖住"功率数值 / 快速设置 / ON-OFF / CV-CC"，不切断上面两行大字号读数 */
+    lcd_draw_rect(0, 146, 319, 206, 0x4000, 1);
+    lcd_draw_rect(0, 146, 319, 147, 0xF800, 1);
+    lcd_draw_rect(0, 205, 319, 206, 0xF800, 1);
+
+    /* 第一行：保护码 + OUTPUT OFF */
+    lcd_draw_string(x, 154, code, &yahei16x16, 0xFFE0, 0x4000, 6);   // 黄色保护码，和白色说明区分开
+    x2 = (uint16_t) (x + code_w + 18U);
+    lcd_draw_string(x2, 153, "OUTPUT", &JetBrainsMono14x18, 0xFFFF, 0x4000, 0);
+    lcd_draw_string((uint16_t) (x2 + 6U * 14U + 10U), 153, "OFF",
+                    &JetBrainsMono14x18, 0xFFFF, 0x4000, 0);
+
+    /* 第二行：清除方式（等宽字体没有空格字形，两段分开画） */
+    x = (uint16_t) ((320U - (3U * 14U + 14U + 5U * 14U)) / 2U);
+    lcd_draw_string(x, 180, "SET", &JetBrainsMono14x18, 0xCE79, 0x4000, 0);
+    lcd_draw_string((uint16_t) (x + 3U * 14U + 14U), 180, "CLEAR",
+                    &JetBrainsMono14x18, 0xCE79, 0x4000, 0);
+}
+
 /* ========================== 数位编辑通用处理函数实现 ========================== */
 /**
  * @brief  电压/电流数位编辑通用处理函数
@@ -755,6 +829,36 @@ void Start_DpsCoreTask(void *argument) {
         if (IsPowerOn) Time_update_time_count++;
         // 风扇状态更新计时
         Fan_update_time_count ++;
+
+        // ---------- 保护跳闸：PID 任务已切断主电源，这里完成泄放、界面与提示 ----------
+        if (dps_fault_request != 0) {
+            dps_fault_request = 0;
+            Dps_TurnOutputOff();                    // 完整关机序列（PID 任务只切了主电源）
+            dps_fault_shown = DpsSafety_GetFault();
+            current_page = PAGE_MAIN;               // 无论故障发生在哪一页，都回到主界面显示提示
+            previous_page = PAGE_MAIN;
+            main_page_cursor_current = main_page_cursor_past = Main_Voltage;
+            DrawDpsMainBasicElement();
+            Dps_DrawProtectDialog();
+            StartBeezer(800);
+            osDelay(10);
+            continue;
+        }
+
+        // ---------- 提示挂着时只接受"清除"，不再刷新页面（否则提示框会被数值刷新覆盖） ----------
+        if (dps_fault_shown != DPS_FAULT_NONE) {
+            if (osMessageQueueGet(KeyEventQueueHandle, &DPS_Keymsg, NULL, 0) == osOK) {
+                if ((DPS_Keymsg.key == KEY_SET && DPS_Keymsg.event == KEY_EVENT_CLICK) ||
+                    (DPS_Keymsg.key == KEY_ENCODER && DPS_Keymsg.event == KEY_EVENT_CLICK)) {
+                    dps_fault_shown = DPS_FAULT_NONE;
+                    DpsSafety_ClearFault();
+                    DrawDpsMainBasicElement();
+                    StartBeezer(0);
+                }
+            }
+            osDelay(10);
+            continue;
+        }
 
         // 曲线采样：按系统节拍约 38ms 取一点（266 点 ≈ 10 秒，一列一点）
         // 用节拍而不是循环计数：界面刷新耗时会拖慢循环，否则 10 秒窗口会变成十几秒
@@ -1071,26 +1175,14 @@ void dps_main_page_handler(KeyEventMsg_t msg) {
     }
     // 长按SET：电源开关
     else if (msg.key == KEY_SET && msg.event == KEY_EVENT_LONG_PRESS) {
-        IsPowerOn = !IsPowerOn;
-        if (IsPowerOn) {
-            // 电源开启：更新UI + 硬件控制
+        if (!IsPowerOn) {
+            Dps_TurnOutputOn();             // 电源开启：更新UI + 硬件控制
             lcd_draw_round_rect(175, 177, 239, 200, 8, 0x9fec, 1);
             lcd_draw_string(193, 180, "ON", &JetBrainsMono14x18, 0x632c, 0x9fec, 2);
-            Dps_ResetOutputAndWriteDac();   // 先把 DAC 写回目标电压位置，再打开输出级
-            DpsPower_ON();
-            osDelay(10);
-            DpsRelease_OFF();
-            DpsGnd_ON();
-            DpsDc_ON();
         } else {
-            // 电源关闭：更新UI + 硬件控制
+            Dps_TurnOutputOff();            // 电源关闭：更新UI + 硬件控制
             lcd_draw_round_rect(175, 177, 239, 200, 8, 0x632c, 1);
             lcd_draw_string(186, 180, "OFF", &JetBrainsMono14x18, 0xFFFF, 0x632c, 2);
-            DpsPower_OFF();
-            DpsRelease_ON();
-            osDelay(80);
-            DpsDc_OFF();
-            DpsGnd_OFF();
         }
     }
     // 长按编码器：切换到LVGL APP
@@ -1348,6 +1440,7 @@ void DPS_ADC_DeInit(void) {
  * @retval 无
  */
 void Suspend_DpsCoreTask(void) {
+    DpsSafety_Disarm();     // 离开 APP：清保护计时（故障锁存一起清掉，下次进入重新开始）
     // 关闭电源输出，确保硬件安全
     DpsPower_OFF();         // 关闭主电源
     DpsRelease_ON();        // 使能释放保护
@@ -1408,6 +1501,10 @@ void Resume_DpsCoreTask(void) {
     SetTargetVoltage(5.0f);                      // 默认目标电压 5.0V
     SetTargetCurrent(2.0f);                      // 默认限流 2.0A
 
+    DpsSafety_Reset();                           // 清保护锁存，重新进入上电静默期
+    dps_fault_shown   = DPS_FAULT_NONE;
+    dps_fault_request = 0;
+
     DPS_ADC_Init();             // 重新初始化ADC
     DrawDpsMainBasicElement();     // 绘制基础UI界面（显示 5.00V / 2.00A）
     osDelay(150);          // 延时确保UI绘制完成
@@ -1449,8 +1546,21 @@ void Start_PIDTask(void *argument) {
     bool     last_dac_valid = false;
 
     for (;;) {
-        // 仅当电源开启时执行PID运算和DAC更新
+        // 仅当电源开启时执行保护判定、PID运算和DAC更新
         if (IsPowerOn == true) {
+            // ---------- 断电保护：过压 / 过流 / 短路 ----------
+            // 判定放在 PID 任务里（1ms 一次）；一旦成立立刻切断主电源，剩下的泄放与提示交给主任务，
+            // 避免在这里用 osDelay 阻塞控制节拍
+            if (DpsSafety_Update(Voltage_PID, Current_PID, Target_Voltage, Target_Current,
+                                 PowerMode, true) != DPS_FAULT_NONE) {
+                IsPowerOn = false;
+                DpsPower_OFF();
+                dps_fault_request = 1;
+                last_dac_valid = false;
+                osDelay(1);
+                continue;
+            }
+
             // 计算电流PID输出值（目标电流-实际电流的闭环调节）
             uint16_t DAC_Value = PID_Calculate(Current_PID,Voltage_PID);
             // 仅在 DAC 值变化（或缓存被外部失效）时才真正写 I2C
@@ -1607,20 +1717,10 @@ void dps_graph_handler(KeyEventMsg_t msg) {
     }
     // 长按SET：电源开关
     else if (msg.key == KEY_SET && msg.event == KEY_EVENT_LONG_PRESS) {
-        IsPowerOn = !IsPowerOn;
-        if (IsPowerOn) {
-            Dps_ResetOutputAndWriteDac();   // 先把 DAC 写回目标电压位置，再打开输出级
-            DpsPower_ON();
-            osDelay(10);
-            DpsRelease_OFF();
-            DpsGnd_ON();
-            DpsDc_ON();
+        if (!IsPowerOn) {
+            Dps_TurnOutputOn();
         } else {
-            DpsPower_OFF();
-            DpsRelease_ON();
-            osDelay(80);
-            DpsDc_OFF();
-            DpsGnd_OFF();
+            Dps_TurnOutputOff();
         }
         DrawGraphPowerChip();
         StartBeezer(0);

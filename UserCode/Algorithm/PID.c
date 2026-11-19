@@ -48,11 +48,13 @@ static uint16_t cc_dac_floor(void) {
 
 /**
  * @brief  过压回退阈值（相对目标电压的余量）
- * @note  取「目标电压的 5%」与「0.5V」中较大者：低压档位不会被标定误差误触发，高压档位也不会放得过宽。
+ * @note  取「目标电压的 5%」与「0.2V」中较大者：低压档位不会被标定误差误触发，高压档位也不会放得过宽。
+ *        这是控制层的软回退；更外层的硬保护（DpsSafety，max(0.4V, 8%)）必须留得比它宽，
+ *        否则正常回调还没把电压拉回来，保护层就已经把输出切断了。
  */
 static float ovp_margin(void) {
     float margin = Target_Voltage * 0.05f;
-    return (margin < 0.5f) ? 0.5f : margin;
+    return (margin < 0.2f) ? 0.2f : margin;
 }
 
 /**
