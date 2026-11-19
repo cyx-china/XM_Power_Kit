@@ -83,6 +83,7 @@ target_include_directories(${BOOT_NAME} PRIVATE
         ${PROJ_DIR}/Middlewares/ST/STM32_USB_Device_Library/Core/Inc
         ${PROJ_DIR}/Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc
         ${PROJ_DIR}/UserCode/Task/APP/SerialCoreTask
+        ${PROJ_DIR}/UserCode/Drivers/TFT_LCD
         ${PROJ_DIR}/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
 )
 

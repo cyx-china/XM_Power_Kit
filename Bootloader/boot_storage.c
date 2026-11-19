@@ -93,6 +93,10 @@ uint16_t Boot_Storage_Param16(uint8_t index)
         return 0U;
     }
 
+    /* 先取编译期默认值：旧版 uparam.bin 里没有新增的尾部参数时，读不到也保持默认 */
+    value = (uint16_t)boot_param_default[(uint32_t)index * 4U] |
+            ((uint16_t)boot_param_default[((uint32_t)index * 4U) + 1U] << 8);
+
     if (f_open(&file, BOOT_FILE_PARAM, FA_READ | FA_OPEN_EXISTING) == FR_OK)
     {
         if ((f_lseek(&file, (FSIZE_t)index * 4U) == FR_OK) &&
@@ -101,10 +105,7 @@ uint16_t Boot_Storage_Param16(uint8_t index)
             value = (uint16_t)buf[0] | ((uint16_t)buf[1] << 8);
         }
         f_close(&file);
-        return value;
     }
 
-    value = (uint16_t)boot_param_default[(uint32_t)index * 4U] |
-            ((uint16_t)boot_param_default[((uint32_t)index * 4U) + 1U] << 8);
     return value;
 }

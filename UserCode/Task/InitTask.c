@@ -232,8 +232,9 @@ static bool Sys_Init(void) {
     LCD_WR_CMD(0x20);        // 关闭颜色翻转
   }
 
-  // 屏幕方向（整机倒装时旋转 180°）
-  LCD_SetRotation((uint8_t) (UserParam.Screen_Rotate180 & 0x01U));
+  // 屏幕方向（整机倒装时旋转 180°，面板本身镜像时左右翻转）
+  LCD_SetOrientation((uint8_t) (UserParam.Screen_Rotate180 & 0x01U),
+                     (uint8_t) (UserParam.Screen_FlipHorizontal & 0x01U));
 
   WaveGen_DC(1000, 0, 0, 0);      // 生成0V
   return pass;

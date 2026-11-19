@@ -1,5 +1,7 @@
 #include "ST7789.h"
 
+#include "lcd_orientation.h"
+
 #include "cmsis_os2.h"
 #include "dma.h"
 #include "os_handles.h"
@@ -13,14 +15,15 @@ void LCD_WR_CMD(uint16_t command) {
 
 // 发送一个16bit数据
 /**
- * @name   LCD_SetRotation
- * @brief  设置屏幕方向：0 = 默认方向，1 = 180° 旋转（整机倒装时用）
- * @param  rotate180 : 0/1
- * @note   MADCTL 默认 0x60（DIS_DIR 3），取反 MY/MX 即 0xA0 实现 180° 旋转
+ * @name   LCD_SetOrientation
+ * @brief  设置屏幕方向：180° 旋转与左右镜像可以自由组合
+ * @param  rotate180 : 0/1，整机倒装时用
+ * @param  flip_horizontal : 0/1，面板本身左右镜像时用
+ * @note   基准值由 DIS_DIR 决定（本机 0x60）；180° 同时翻 MY/MX，左右镜像只翻 MX
  **/
-void LCD_SetRotation(uint8_t rotate180) {
+void LCD_SetOrientation(uint8_t rotate180, uint8_t flip_horizontal) {
     LCD_WR_CMD(0x36);
-    LCD_WR_DATA((rotate180 != 0U) ? 0xA0U : 0x60U);
+    LCD_WR_DATA(LCD_Orientation_Madctl(LCD_MADCTL_FOR_DIR(DIS_DIR), rotate180, flip_horizontal));
 }
 
 void LCD_WR_DATA(uint16_t data) {
@@ -114,12 +117,12 @@ HAL_StatusTypeDef LCD_Init(void) {
     LCD_WR_CMD(0x36);        // 显示方向设置（MY/MX/MV/ML控制）
     #if (DIS_DIR == 0)       // 正常竖显（MY=0,MX=0,MV=0,ML=0）
         LCD_WR_DATA(0x00);
-    #elif (DIS_DIR == 1)     // 旋转90°（MY=1,MX=0,MV=1,ML=0 → 0xA0）
-        LCD_WR_DATA(0xA0);
-    #elif (DIS_DIR == 2)     // 旋转180°（MY=1,MX=1,MV=0,ML=0 → 0xC0）
-        LCD_WR_DATA(0xC0);
-    #elif (DIS_DIR == 3)     // 旋转270°（MY=0,MX=1,MV=1,ML=0 → 0x60）
-        LCD_WR_DATA(0x60);
+    #elif (DIS_DIR == 1)     // 旋转90°（MY=1,MX=0,MV=1,ML=0 → 0xA0），方向随后由参数接管
+        LCD_WR_DATA(LCD_MADCTL_FOR_DIR(1));
+    #elif (DIS_DIR == 2)     // 旋转180°（MY=1,MX=1,MV=0,ML=0 → 0xC0），方向随后由参数接管
+        LCD_WR_DATA(LCD_MADCTL_FOR_DIR(2));
+    #elif (DIS_DIR == 3)     // 旋转270°（MY=0,MX=1,MV=1,ML=0 → 0x60），方向随后由参数接管
+        LCD_WR_DATA(LCD_MADCTL_FOR_DIR(3));
     #endif
 
     // -----------------------  porch设置与栅极控制 -----------------------

@@ -282,6 +282,10 @@ int main(void)
         bool invert_on = (Boot_Storage_Param16(BOOT_PARAM_SCREEN_FLIP) == 0U);
 
         Boot_Lcd_SetInversion(invert_on);
+        /* 方向跟随应用里的「屏幕旋转 180°」与「左右翻转」 */
+        Boot_Lcd_SetOrientation(
+            (uint8_t)(Boot_Storage_Param16(BOOT_PARAM_SCREEN_ROTATE) & 1U),
+            (uint8_t)(Boot_Storage_Param16(BOOT_PARAM_SCREEN_MIRROR) & 1U));
 
         if (s_ui_shown)
         {
