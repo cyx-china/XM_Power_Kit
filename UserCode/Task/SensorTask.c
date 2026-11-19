@@ -66,7 +66,7 @@ void Start_SensorTask(void *argument){
         // INA226 与 TMP102 都挂在 I2C1 上，合并为一次加锁，避免反复申请/释放互斥锁
         osMutexAcquire(IIC1_MutexHandle, osWaitForever);
 
-        // 电压与电流用一次自增读事务取回（原先两次独立事务，多花一个 I2C 传输时间）
+        // 电压与电流各一次事务（INA226 指针不会自增，不能合并成一次长读）
         float input_voltage = 0.0f;
         float input_current = 0.0f;
         INA226_ReadBusVoltageAndCurrent(&hina226_input, &input_voltage, &input_current);

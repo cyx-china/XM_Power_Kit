@@ -10,8 +10,11 @@
  *
  * 本机 DIS_DIR = 3，基准值 0x60（MY=0, MX=1, MV=1）为 320x240 横向正向。
  *   · 180° 旋转：同时翻转 MY 与 MX（0x60 -> 0xA0）
- *   · 左右镜像：只翻转 MX（0x60 -> 0x20）
- * 两者都打开时即上下镜像（0xE0）。
+ *   · 左右镜像：只翻转 MY（0x60 -> 0xE0）
+ * 两者都打开时即上下镜像（0xA0 ^ 0x80 = 0x20）。
+ *
+ * 注意：本机面板（ST7789，MV=1 横显）上实测 MX 并不是单纯的左右镜像，
+ * 它会让画面同时左右+上下翻转（等价于 180°），所以左右镜像只能用 MY。
  */
 
 #define LCD_MADCTL_DIR0             0x00U   /* 竖显     MY=0 MX=0 MV=0 */
@@ -20,7 +23,7 @@
 #define LCD_MADCTL_DIR3             0x60U   /* 横显 270 MY=0 MX=1 MV=1（本机使用） */
 
 #define LCD_MADCTL_ROTATE180_MASK   0xC0U   /* MY | MX：180° 旋转 */
-#define LCD_MADCTL_MIRROR_H_MASK    0x40U   /* MX：左右镜像（MV=1 时对应屏幕水平方向） */
+#define LCD_MADCTL_MIRROR_H_MASK    0x80U   /* MY：左右镜像（本面板实测 MX 会变成 180°） */
 
 /* 把 DIS_DIR 编译期方向换算成 MADCTL 基准值 */
 #define LCD_MADCTL_FOR_DIR(dir)     (((dir) == 0) ? LCD_MADCTL_DIR0 : \

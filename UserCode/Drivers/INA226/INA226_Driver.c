@@ -91,30 +91,35 @@ float INA226_ReadBusVoltage(INA226_HandleTypeDef* dev) {
 }
 
 /**
- * @brief  一次事务读取总线电压和电流
- * @note   INA226 支持寄存器自增读，总线电压(0x02)/功率(0x03)/电流(0x04) 是连续地址，
- *         因此 6 字节一次读回即可同时得到电压和电流，省掉一次独立的 I2C 事务。
+ * @brief  读取总线电压与电流（同一把总线锁内做两次事务）
+ * @note   INA226 的指针寄存器**不会自增**（数据手册「Programming the INA226」一节）：
+ *         连续读 N 个字节只会把当前指针指向的寄存器重复读回来。因此电压(0x02)与
+ *         电流(0x04)必须各写一次指针、各读 2 字节。曾经把它合并成一次 6 字节读，
+ *         结果 data[4]/data[5] 其实是第三份总线电压，电流读数完全错乱（常为 0）。
+ *         两次事务仍放在同一个函数里，调用方只需加一次互斥锁。
  * @param  dev: 设备句柄
  * @param  voltage: 输出总线电压（V）
  * @param  current: 输出电流（A）
- * @retval 无（读失败时输出 0）
+ * @retval 无（某个通道读失败时该通道输出 0）
  */
 void INA226_ReadBusVoltageAndCurrent(INA226_HandleTypeDef* dev, float* voltage, float* current) {
-    uint8_t data[6];
+    uint8_t data[2];
 
     if (HAL_I2C_Mem_Read(dev->hi2c, dev->address << 1, INA226_BUS_VOLTAGE_REG,
-                         I2C_MEMADD_SIZE_8BIT, data, 6, 100) != HAL_OK) {
+                         I2C_MEMADD_SIZE_8BIT, data, 2, 100) == HAL_OK) {
+        uint16_t raw_voltage = (uint16_t) (((uint16_t) data[0] << 8) | data[1]);
+        *voltage = (float) raw_voltage * 0.00125f;
+    } else {
         *voltage = 0.0f;
-        *current = 0.0f;
-        return;
     }
 
-    uint16_t raw_voltage = (uint16_t)(((uint16_t)data[0] << 8) | data[1]);   // 0x02 总线电压
-    // data[2]/data[3] 是 0x03 功率寄存器，本函数不需要
-    int16_t  raw_current = (int16_t)(((uint16_t)data[4] << 8) | data[5]);    // 0x04 电流
-
-    *voltage = (float)raw_voltage * 0.00125f;
-    *current = (float)raw_current * dev->current_lsb;
+    if (HAL_I2C_Mem_Read(dev->hi2c, dev->address << 1, INA226_CURRENT_REG,
+                         I2C_MEMADD_SIZE_8BIT, data, 2, 100) == HAL_OK) {
+        int16_t raw_current = (int16_t) (((uint16_t) data[0] << 8) | data[1]);
+        *current = (float) raw_current * dev->current_lsb;
+    } else {
+        *current = 0.0f;
+    }
 }
 
 /**

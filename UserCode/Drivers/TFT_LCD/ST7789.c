@@ -19,7 +19,7 @@ void LCD_WR_CMD(uint16_t command) {
  * @brief  设置屏幕方向：180° 旋转与左右镜像可以自由组合
  * @param  rotate180 : 0/1，整机倒装时用
  * @param  flip_horizontal : 0/1，面板本身左右镜像时用
- * @note   基准值由 DIS_DIR 决定（本机 0x60）；180° 同时翻 MY/MX，左右镜像只翻 MX
+ * @note   基准值由 DIS_DIR 决定（本机 0x60）；180° 同时翻 MY/MX，左右镜像只翻 MY
  **/
 void LCD_SetOrientation(uint8_t rotate180, uint8_t flip_horizontal) {
     LCD_WR_CMD(0x36);
