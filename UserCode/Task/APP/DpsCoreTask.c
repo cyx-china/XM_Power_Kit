@@ -589,9 +589,15 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         // 电流零点补偿：前端失调随输出电压线性上升（≈2mA/V），每块板不同，
         // 由校准页"电流原点"那一步自动扫描拟合出斜率/截距（单位都是 ADC 计数）。
         // 必须先补偿再做 IIR，否则 Current_PID 也带着假电流，恒流环在高压下会误判。
+        //
+        // 只在输出级打开时补偿：输出关闭时采样电阻共模是 0V，前端只剩固定失调，
+        // 那一点已经由"电流原点"校准掉（DPS_Current_Original）。若此时仍套用拟合线，
+        // 就会把截距 B 当成偏移加进去，反而把校准好的零点推偏 ~1 计数（3.2mA）。
         int32_t temp2 = (int32_t)(sum_ch2 >> 6) + UserParam.DPS_Current_Original;
-        float   vi_comp = UserParam.DPS_Current_Zero_K * raw_voltage + UserParam.DPS_Current_Zero_B;
-        temp2 -= (int32_t) (vi_comp + ((vi_comp >= 0.0f) ? 0.5f : -0.5f));
+        if (IsPowerOn) {
+            float vi_comp = UserParam.DPS_Current_Zero_K * raw_voltage + UserParam.DPS_Current_Zero_B;
+            temp2 -= (int32_t) (vi_comp + ((vi_comp >= 0.0f) ? 0.5f : -0.5f));
+        }
 
         if (temp2 < 0)    temp2 = 0;
         if (temp2 > 4095) temp2 = 4095;
