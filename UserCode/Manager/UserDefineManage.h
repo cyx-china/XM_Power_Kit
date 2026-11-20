@@ -86,6 +86,8 @@ typedef enum {
     Screen_Rotate180,                   // 屏幕旋转 180°       (uint16_t)  0/1
     DDS_SwapDac,                        // DAC 输出交换（波形/偏置对调） (uint16_t)  0/1
     Screen_FlipHorizontal,              // 屏幕左右翻转        (uint16_t)  0/1
+    DPS_Current_Zero_K,                 // 电流零点-电压斜率    (float)     计数/V（校准自动拟合）
+    DPS_Current_Zero_B,                 // 电流零点-电压截距    (float)     计数（校准自动拟合）
     Param_Number                        // 参数个数
 } UserParamType_e;
 
@@ -168,6 +170,8 @@ typedef struct {
     uint16_t Screen_Rotate180;             // 屏幕旋转 180°       (uint16_t)  0/1
     uint16_t DDS_SwapDac;                  // DAC 输出交换（波形/偏置对调） (uint16_t)  0/1
     uint16_t Screen_FlipHorizontal;        // 屏幕左右翻转        (uint16_t)  0/1
+    float DPS_Current_Zero_K;               // 电流零点-电压斜率    (float)     计数/V
+    float DPS_Current_Zero_B;               // 电流零点-电压截距    (float)     计数
 } UserParamType_t;
 
 extern UserParamType_t UserParam;

@@ -72,6 +72,8 @@ PARAM_META = [
     (57, "Screen_Rotate180", "uint16", "屏幕旋转 180°", "0 或 1"),
     (58, "DDS_SwapDac", "uint16", "DAC 输出交换", "0 或 1，山寨 MCU 波形反相时打开"),
     (59, "Screen_FlipHorizontal", "uint16", "屏幕左右翻转", "0 或 1，面板本身左右镜像时打开"),
+    (60, "DPS_Current_Zero_K", "float", "电流零点斜率", "计数/V，校准自动拟合"),
+    (61, "DPS_Current_Zero_B", "float", "电流零点截距", "计数，校准自动拟合"),
 ]
 
 PARAM_TOTAL_COUNT = len(PARAM_META)
@@ -84,6 +86,7 @@ PARAM_BY_NAME = {m[1]: m for m in PARAM_META}
 PAGES = [
     ("数控电源", [
         ("校准参数", [0, 1, 2, 3, 4, 5]),
+        ("电流零点补偿", [60, 61]),
         ("PID 参数", [6, 7, 8]),
         ("快速设置", list(range(9, 19))),
         ("风扇", [19]),

@@ -15,6 +15,10 @@
   *   SCP: 处于恒流（限流）状态且实测电压 < 0.9V，持续 300ms
   *
   * 硬阈值必须高于控制层 PID 的过压回退余量 max(0.2V, 5%)，否则正常回调就会被误切断。
+ *
+ * 下调设定电压后（硬件没有泄放电阻）电压只能靠负载或漏电慢慢回落，
+ * 这段时间 OVP 走"参考电平跟随"：限值 = max(正常阈值, 过程最低电平 + 回升余量)，
+ * 只禁止电压往上爬，不禁止它慢慢降下来；落回正常阈值内自动恢复目标判定。
   ******************************************************************************
   */
 
@@ -36,7 +40,8 @@
 
 #define DPS_ARM_MS              300U        /* 开输出/改设定后的静默期（OVP/OCP） */
 #define DPS_SCP_ARM_MS          800U        /* 短路保护静默期更长：容性负载上电充电 */
-#define DPS_OVP_SETTLE_MAX_MS   2000U       /* 下调设定电压后等输出回落的最长时间（见 DpsSafety.c） */
+#define DPS_OVP_SETTLE_RISE_ABS   0.5f      /* 回落态里允许的电压回升绝对量（V） */
+#define DPS_OVP_SETTLE_RISE_RATIO 0.05f     /* 回落态里允许的电压回升相对量（过程最低电平的 5%） */
 
 /* ========================== 类型 ========================== */
 typedef enum {
@@ -50,6 +55,7 @@ typedef enum {
 void DpsSafety_Reset(void);                 /* 清故障锁存 + 进入静默期（开输出/进入 APP 时调用） */
 void DpsSafety_Disarm(void);                /* 关输出：清计时与目标快照，保留故障锁存 */
 void DpsSafety_ClearFault(void);            /* 用户确认后清故障（等同于 Reset） */
+void DpsSafety_SetScanMode(bool on);        /* 诊断扫描期间彻底关闭三路保护（扫描结束后必须置 false） */
 
 /**
  * @brief  每 1ms 调用一次的保护判定

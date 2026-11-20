@@ -187,6 +187,12 @@ static volatile uint8_t dps_fault_request = 0;          // PID 任务请求主�
 static DpsFault_t       dps_fault_shown = DPS_FAULT_NONE;   // 当前正在显示的保护提示（NONE=没有）
 
 volatile uint16_t dps_adc_raw_buf[128] = {0};  // ADC原始采样缓冲区（128个值，偶数列-电压，奇数列-电流）
+
+/* 校准用：电流零点扫描期间的原始计数累加（ADC 回调里写，校准流程里读） */
+static volatile uint8_t  cal_capture = 0;
+static volatile uint32_t cal_sum_v = 0;
+static volatile uint32_t cal_sum_i = 0;
+static volatile uint32_t cal_n = 0;
 volatile float Voltage = 0;                  // 实时输出电压（单位：V）
 volatile float Voltage_PID = 0;              // 实时输出电压_PID（单位：V）
 volatile float Current = 0;                  // 实时输出电流_显示（单位：A）
@@ -408,6 +414,8 @@ static void apply_quick_set_by_index(uint8_t index);                            
 static void Dps_TurnOutputOn(void);                                                 // 打开输出（含保护复位）
 static void Dps_TurnOutputOff(void);                                                // 关闭输出（手动关机与保护跳闸共用）
 static void Dps_DrawProtectDialog(void);                                            // 保护提示框
+void DPS_Cal_CaptureStart(void);                                                     // 校准用：开始累加原始计数
+void DPS_Cal_CaptureStop(uint16_t *raw_v, uint16_t *raw_i, uint32_t *n);              // 校准用：停止累加并取均值
 
 /* ========================== 页面处理函数回调表 ========================== */
 /**
@@ -513,6 +521,37 @@ static void DPS_UpdateEnergyPeriod(void) {
     energy_dt_hour = trigger_period_s * 64.0 / 3600.0;                       // 一次回调 = 64 对采样
 }
 
+/* ========================== 校准用：原始计数采集 ========================== */
+
+/**
+ * @brief  开始累加未校准的原始计数
+ * @note   只给校准页用：把"电流零点 vs 输出电压"的扫描数据采出来，
+ *         累加发生在 ADC 回调里（与 ISR 天然同步，不需要额外加锁）
+ */
+void DPS_Cal_CaptureStart(void) {
+    cal_sum_v   = 0U;
+    cal_sum_i   = 0U;
+    cal_n       = 0U;
+    cal_capture = 1U;
+}
+
+/**
+ * @brief  停止累加并取回均值
+ * @param  raw_v: 电压通道计数均值（未加偏移）
+ * @param  raw_i: 电流通道计数均值（未加偏移、未补偿）
+ * @param  n:     参与平均的 ADC 回调次数
+ */
+void DPS_Cal_CaptureStop(uint16_t *raw_v, uint16_t *raw_i, uint32_t *n) {
+    uint32_t samples;
+
+    cal_capture = 0U;
+    samples     = cal_n;
+
+    if (raw_v != NULL) *raw_v = (samples != 0U) ? (uint16_t) (cal_sum_v / samples) : 0U;
+    if (raw_i != NULL) *raw_i = (samples != 0U) ? (uint16_t) (cal_sum_i / samples) : 0U;
+    if (n != NULL)     *n     = samples;
+}
+
 /**
  * @brief  ADC转换完成回调函数
  * @param  hadc: ADC句柄指针
@@ -530,20 +569,34 @@ void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
             sum_ch2 += dps_adc_raw_buf[2 * i + 1];
         }
 
+        // 校准：累加未校准、未补偿的原始计数，供"电流零点 vs 电压"拟合使用
+        if (cal_capture) {
+            cal_sum_v += (uint32_t) (sum_ch1 >> 6);
+            cal_sum_i += (uint32_t) (sum_ch2 >> 6);
+            cal_n++;
+        }
+
         // 计算均值并叠加校准偏移
         int32_t temp1 = (int32_t)(sum_ch1 >> 6) + UserParam.DPS_Voltage_Original;
-        int32_t temp2 = (int32_t)(sum_ch2 >> 6) + UserParam.DPS_Current_Original;
 
         // 超出 ADC 量程一律按满量程处理（原实现回 0，过压时反而会被当成 0V，控制环因此失去保护）
         if (temp1 < 0)    temp1 = 0;
         if (temp1 > 4095) temp1 = 4095;
-        if (temp2 < 0)    temp2 = 0;
-        if (temp2 > 4095) temp2 = 4095;
 
         // 转换为实际电压值（3.3V参考，12位ADC，乘以校准系数）
         float raw_voltage = (float) temp1 * 3.3f / 4096.0f * UserParam.DPS_Voltage_Factor;
 
-        // 转换为实际电流值（扣除电压耦合偏移和固定偏移）
+        // 电流零点补偿：前端失调随输出电压线性上升（≈2mA/V），每块板不同，
+        // 由校准页"电流原点"那一步自动扫描拟合出斜率/截距（单位都是 ADC 计数）。
+        // 必须先补偿再做 IIR，否则 Current_PID 也带着假电流，恒流环在高压下会误判。
+        int32_t temp2 = (int32_t)(sum_ch2 >> 6) + UserParam.DPS_Current_Original;
+        float   vi_comp = UserParam.DPS_Current_Zero_K * raw_voltage + UserParam.DPS_Current_Zero_B;
+        temp2 -= (int32_t) (vi_comp + ((vi_comp >= 0.0f) ? 0.5f : -0.5f));
+
+        if (temp2 < 0)    temp2 = 0;
+        if (temp2 > 4095) temp2 = 4095;
+
+        // 转换为实际电流值
         float raw_current = (float) temp2 * 3.3f / 4096.0f * UserParam.DPS_Current_Factor;
 
         // ==========================================

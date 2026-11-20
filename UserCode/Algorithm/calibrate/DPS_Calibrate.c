@@ -11,6 +11,7 @@
 #include "SwitchManager.h"
 #include "tim.h"
 #include "PID.h"
+#include "DpsSafety.h"
 #include "os_handles.h"
 #include "UserTask.h"
 
@@ -18,6 +19,9 @@
 extern volatile uint16_t dps_adc_raw_buf[128];                          // ADC原始数据           DpsCoreTask.c
 extern volatile float Voltage;                                          // 输出电压值            DpsCoreTask.c
 extern volatile float Current_PID;                                      // 输出电流值            DpsCoreTask.c
+extern volatile float Current;                                          // 显示用输出电流        DpsCoreTask.c
+extern void DPS_Cal_CaptureStart(void);                                 // 开始累加原始计数      DpsCoreTask.c
+extern void DPS_Cal_CaptureStop(uint16_t *raw_v, uint16_t *raw_i, uint32_t *n);  // 停止累加并取均值
 extern volatile bool IsPowerOn;                                         // 电源是否打开          DpsCoreTask.c
 extern void CB_DPS_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc);       // ADC转换完成回调函数    DpsCoreTask.c
 extern void DPS_ADC_Init(void);                                         // ADC初始化              DpsCoreTask.c
@@ -258,6 +262,159 @@ static void DpsCal_FormatFailMsg(uint8_t flags, float r2, char *buf, size_t size
     if (first) (void) snprintf(buf + used, size - (size_t) used, "未知");
 }
 
+// ============= 电流零点-电压补偿扫描 =============
+//
+// 前端失调随输出电压线性上升（约 2mA/V），36V 空载就能读出数十毫安假电流，
+// 会让恒流环在高压下误判。这里用"只升不降"的扫描把失调量出来，拟合成
+//   零点残差(计数) = K × 输出电压 + B
+// 两个系数存进参数表，ADC 回调里先按它扣掉再做滤波。
+// 原有的电流原点（输出关闭时的零点，DPS_Current_Original）单独保留，
+// 本拟合的 y 已经是"扣掉该零点之后"的残差，所以 V=0 那个点不在曲线上。
+
+#define DPS_ZERO_CAL_POINTS      15U
+#define DPS_ZERO_CAL_SETTLE_MS   800U
+#define DPS_ZERO_CAL_CAPTURE_MS  300U
+#define DPS_ZERO_CAL_LOAD_LIMIT  0.20f
+
+static const float DpsCal_ZeroSweep_V[DPS_ZERO_CAL_POINTS] = {
+    1.0f, 2.0f, 4.0f, 6.0f, 8.0f,
+    10.0f, 12.0f, 15.0f, 18.0f, 21.0f,
+    24.0f, 27.0f, 30.0f, 33.0f, 36.0f
+};
+
+static float DpsCal_Zero_V[DPS_ZERO_CAL_POINTS];     // 每个点的实测电压
+static float DpsCal_Zero_I[DPS_ZERO_CAL_POINTS];     // 每个点的零点残差（计数）
+
+// 画提示框（单行）
+static void DpsCal_ZeroHint(const char *text, uint16_t color) {
+    lcd_draw_round_rect(15,158,305,188,8,0x29a7,1);
+    lcd_draw_round_rect(15,158,305,188,8,0x632C,0);
+    lcd_draw_string(25,165,text, &yahei16x16,color,0x29a7,1);
+}
+
+// 最小二乘拟合 y = K*x + B，并做可信性检查
+// 失败返回 false，调用处不写参数（宁可不补偿，也不能把 NaN 存进 uparam.bin）
+static bool DpsCal_FitZeroLine(const float *x, const float *y, uint8_t n,
+                               float *K, float *B, float *r2) {
+    float sum_x = 0.0f, sum_y = 0.0f, sum_xy = 0.0f, sum_x2 = 0.0f;
+    float denom, k, b;
+
+    if (x == NULL || y == NULL || K == NULL || B == NULL || n < 5U) return false;
+
+    for (uint8_t i = 0; i < n; i++) {
+        sum_x  += x[i];
+        sum_y  += y[i];
+        sum_xy += x[i] * y[i];
+        sum_x2 += x[i] * x[i];
+    }
+    denom = (float) n * sum_x2 - sum_x * sum_x;
+    if (fabsf(denom) < 1.0e-3f) return false;                       // 电压跨度太小
+
+    k = ((float) n * sum_xy - sum_x * sum_y) / denom;
+    b = (sum_y * sum_x2 - sum_x * sum_xy) / denom;
+
+    if (fabsf(k) > 5.0f) return false;                              // 斜率离谱（≈0.6 计数/V）
+    if (fabsf(b) > 100.0f) return false;                            // 截距离谱
+
+    float mean_y = sum_y / (float) n;
+    float ss_tot = 0.0f, ss_res = 0.0f;
+    for (uint8_t i = 0; i < n; i++) {
+        float pred = k * x[i] + b;
+        ss_tot += (y[i] - mean_y) * (y[i] - mean_y);
+        ss_res += (y[i] - pred) * (y[i] - pred);
+    }
+    if (ss_tot <= 0.0f) return false;
+
+    float rs = 1.0f - ss_res / ss_tot;
+    if (r2 != NULL) *r2 = rs;
+    if (rs < 0.90f) return false;                                   // 抖动过大
+
+    *K = k;
+    *B = b;
+    return true;
+}
+
+// 执行一次"电流零点 vs 输出电压"扫描并拟合，成功则写入两个参数
+// 返回 true 表示已经写入参数
+static bool DpsCal_RunZeroSweep(void) {
+    uint8_t  count = 0U;
+    bool     ok = false;
+    float    k = 0.0f, b = 0.0f, r2 = 0.0f;
+    char     msg[40];
+
+    // 1) 先断电、用泄放电阻把输出电容放干净：只升不降的前提是起点接近 0V
+    IsPowerOn = false;
+    DpsPower_OFF();
+    DpsRelease_ON();
+    DpsDc_OFF();
+    DpsGnd_OFF();
+    osDelay(600);
+
+    DpsSafety_SetScanMode(true);                    // 扫描期间三路保护让位
+    SetTargetCurrent(MAX_OUTPUT_CURRENT);           // 放开限流，全程恒压
+    SetTargetVoltage(DpsCal_ZeroSweep_V[0]);        // 从最低档起步
+
+    PID_InvalidateDacCache();                       // 让 PID 按新目标重写 DAC
+    IsPowerOn = true;
+    DpsPower_ON();
+    osDelay(100);
+    DpsRelease_OFF();
+    DpsGnd_ON();
+    DpsDc_ON();
+
+    // 2) 逐档上升，每档稳定后取原始计数的平均值
+    for (uint8_t i = 0; i < DPS_ZERO_CAL_POINTS; i++) {
+        uint16_t raw_v = 0U, raw_i = 0U;
+        uint32_t n = 0U;
+
+        SetTargetVoltage(DpsCal_ZeroSweep_V[i]);
+        (void) snprintf(msg, sizeof(msg), "校准点%u，等待稳定中", (unsigned) (i + 1U));
+        DpsCal_ZeroHint(msg, 0xdf3c);
+        osDelay(DPS_ZERO_CAL_SETTLE_MS);
+
+        if (Current > DPS_ZERO_CAL_LOAD_LIMIT) break;   // 带载测出来的零点没有意义
+
+        DPS_Cal_CaptureStart();
+        osDelay(DPS_ZERO_CAL_CAPTURE_MS);
+        DPS_Cal_CaptureStop(&raw_v, &raw_i, &n);
+        if (n == 0U) break;
+
+        DpsCal_Zero_V[count] = Voltage;
+        // 残差 = 原始计数 + 电流原点（与 ADC 回调里的零点定义保持一致）
+        DpsCal_Zero_I[count] = (float) raw_i + (float) UserParam.DPS_Current_Original;
+        count++;
+    }
+
+    // 3) 断电放电，把电压拉回 0V，后面的显示校准再从 0V 升上去
+    IsPowerOn = false;
+    DpsPower_OFF();
+    DpsRelease_ON();
+    osDelay(80);
+    DpsDc_OFF();
+    DpsGnd_OFF();
+    osDelay(500);
+    DpsSafety_SetScanMode(false);
+    DpsSafety_Reset();
+    SetTargetVoltage(5.0f);                         // 显示校准用 5V，安全且稳定
+    SetTargetCurrent(2.0f);
+
+    if (count >= 5U && DpsCal_FitZeroLine(DpsCal_Zero_V, DpsCal_Zero_I, count, &k, &b, &r2)) {
+        UserParam.DPS_Current_Zero_K = k;
+        UserParam.DPS_Current_Zero_B = b;
+        ok = (UserParam_SaveAllValues() == HAL_OK);
+    }
+
+    if (ok) {
+        DpsCal_ZeroHint("校准成功，参数已保存！", 0xdf3c);
+    } else {
+        DpsCal_ZeroHint("请移除负载，按下按钮后自动校准", 0xF800);
+    }
+    StartBeezer(0);
+    osDelay(1200);
+
+    return ok;
+}
+
 // ============= 子页面 handler 实现 =============
 
 // 电压原点校准 主页面
@@ -335,6 +492,10 @@ static void DpsCal_Origin_Current_Main_handler(KeyEventMsg_t msg) {
             lcd_draw_line(162,225,191,225,0x87d3);
         }
         else if (DpsCal_Origin_CurPage_current == 1) {                                          // 如果选中的是下一步按钮
+            /* 先做"电流零点 vs 输出电压"的扫描拟合（约 17 秒）：输出会一路升到 36V，
+               结束后断电放电回到 0V，后面的显示校准照原流程从 0V 升上去 */
+            (void) DpsCal_RunZeroSweep();
+
             DpsCal_Page_Current = DpsCal_Display_Voltage_Main;                                  // 将当前页面移交给 电压显示校准 主页面
             
             // 更新提示框文字

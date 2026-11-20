@@ -34,19 +34,21 @@ static uint32_t s_ocp_since;
 static bool     s_scp_active;
 static uint32_t s_scp_since;
 
-/* 下调设定电压后的"回落窗口"：见 Update() 里的说明 */
-static bool     s_ovp_blocked;
-static uint32_t s_ovp_block_until;
+/* 参考电平跟随：下调设定电压后输出靠负载/漏电慢慢回落，
+   这期间只允许电压保持在"过程最低电平"附近，不允许再往上爬。 */
+static bool  s_settling;
+static float s_v_trough;                        /* 进入回落态以来的最低实测电压 */
+
+static bool  s_scan_mode;                       /* 诊断扫描期间彻底关闭保护 */
 
 /* ========================== 内部辅助 ========================== */
 
-/* 清空三路计时（不改静默期与故障锁存） */
+/* 清空三路计时（不改静默期、不改回落态、不改故障锁存） */
 static void counters_clear(void)
 {
     s_ovp_active = false;
     s_ocp_active = false;
     s_scp_active = false;
-    s_ovp_blocked = false;
     s_ovp_since  = 0U;
     s_ocp_since  = 0U;
     s_scp_since  = 0U;
@@ -83,10 +85,19 @@ static float margin_of(float base, float ratio, float absolute)
 
 /* ========================== 对外接口 ========================== */
 
+void DpsSafety_SetScanMode(bool on)
+{
+    s_scan_mode = on;
+    if (on) {                       /* 扫描期间不判任何保护，也不能残留计时 */
+        counters_clear();
+        s_settling = false;
+    }
+}
+
 void DpsSafety_Disarm(void)
 {
     counters_clear();
-    s_ovp_blocked = false;
+    s_settling = false;
     s_has_last = false;             /* 下次开输出重新取目标快照并进入静默期 */
 }
 
@@ -96,6 +107,7 @@ void DpsSafety_Reset(void)
 
     s_fault    = DPS_FAULT_NONE;
     s_has_last = false;
+    s_settling = false;
     rearm(now);
 }
 
@@ -124,10 +136,16 @@ DpsFault_t DpsSafety_Update(float voltage, float current,
                             bool cc_mode, bool output_on)
 {
     uint32_t now;
+    float    normal_margin;
+    float    normal_limit;
     float    limit;
 
     if (!output_on) {                       /* 输出关着：清计时、保留故障锁存 */
         DpsSafety_Disarm();
+        return s_fault;
+    }
+    if (s_scan_mode) {                      /* 诊断扫描：保护全部让位 */
+        counters_clear();
         return s_fault;
     }
     if (s_fault != DPS_FAULT_NONE) {         /* 已跳闸：保持锁存，等用户确认 */
@@ -136,21 +154,29 @@ DpsFault_t DpsSafety_Update(float voltage, float current,
 
     now = osKernelGetTickCount();
 
+    normal_margin = margin_of(target_voltage, DPS_OVP_RATIO_MARGIN, DPS_OVP_ABS_MARGIN);
+    normal_limit  = target_voltage + normal_margin;
+
     /* 目标值被改动：重新进入静默期，防止"把电压调低"被当成过压 */
     if ((!s_has_last) ||
         (fabsf(target_voltage - s_last_target_v) > 0.05f) ||
         (fabsf(target_current - s_last_target_c) > 0.02f)) {
-        /* 下调设定电压时，输出只能靠负载或泄放电阻把电容放掉，
-           轻载/空载下几百毫秒都落不到新设定值——这段时间里不能判过压，
-           但要封顶（2s），否则真的失控就再也保护不了。
-           一旦实测电压回落到新阈值以内，立刻恢复正常判定。 */
-        if (s_has_last && (target_voltage < (s_last_target_v - 0.05f))) {
-            s_ovp_blocked     = true;
-            s_ovp_block_until = now + DPS_OVP_SETTLE_MAX_MS;
+        /* 只有"新目标低于当前实测电压"才需要回落态：输出电容没有泄放电阻，
+           轻载/空载下电压只能靠漏电慢慢掉，这期间物理上做不到立即到达目标。
+           抬升设定时电压就在目标以下，不进入回落态。 */
+        if (voltage > normal_limit) {
+            if (!s_settling) {
+                s_settling  = true;
+                s_v_trough  = voltage;      /* 以进入时的电平为基准 */
+            }
+            /* 已在回落态里再次下调：不抬高基准，继续跟随已有的最低电平 */
+        } else {
+            s_settling = false;
         }
-        s_has_last       = true;
-        s_last_target_v  = target_voltage;
-        s_last_target_c  = target_current;
+
+        s_has_last      = true;
+        s_last_target_v = target_voltage;
+        s_last_target_c = target_current;
         rearm(now);
         return DPS_FAULT_NONE;
     }
@@ -159,19 +185,32 @@ DpsFault_t DpsSafety_Update(float voltage, float current,
         return DPS_FAULT_NONE;
     }
 
-    /* ---------- OVP：电压超过目标 + max(0.4V, 8%) 持续 30ms ---------- */
-    limit = target_voltage + margin_of(target_voltage, DPS_OVP_RATIO_MARGIN, DPS_OVP_ABS_MARGIN);
-    if (s_ovp_blocked && ((voltage <= limit) || ((int32_t) (now - s_ovp_block_until) >= 0))) {
-        s_ovp_blocked = false;          /* 已经回落 或 超出回落窗口，恢复过压判定 */
-    }
-    if (!s_ovp_blocked) {
-        cond_track(voltage > limit, now, &s_ovp_active, &s_ovp_since);
-        if (s_ovp_active && ((uint32_t) (now - s_ovp_since) >= DPS_OVP_DELAY_MS)) {
-            s_fault = DPS_FAULT_OVP;
-            return s_fault;
+    /* ---------- 回落态：基准跟着电压一路往下走 ---------- */
+    if (s_settling) {
+        if (voltage < s_v_trough) {
+            s_v_trough = voltage;
         }
-    } else {
-        s_ovp_active = false;
+        /* 落回正常阈值以内（留一半余量的缓冲）就退出回落态，恢复以目标为基准 */
+        if (voltage <= (target_voltage + normal_margin * 0.5f)) {
+            s_settling = false;
+        }
+    }
+
+    /* ---------- OVP：电压超过限值持续 30ms ---------- */
+    limit = normal_limit;
+    if (s_settling) {
+        float rise         = margin_of(s_v_trough, DPS_OVP_SETTLE_RISE_RATIO, DPS_OVP_SETTLE_RISE_ABS);
+        float settle_limit = s_v_trough + rise;
+
+        if (settle_limit > limit) {          /* 回落期间只允许电压在"最低点 + 回升余量"以内 */
+            limit = settle_limit;
+        }
+    }
+
+    cond_track(voltage > limit, now, &s_ovp_active, &s_ovp_since);
+    if (s_ovp_active && ((uint32_t) (now - s_ovp_since) >= DPS_OVP_DELAY_MS)) {
+        s_fault = DPS_FAULT_OVP;
+        return s_fault;
     }
 
     /* ---------- OCP：电流超过目标 + max(0.3A, 10%) 持续 100ms ---------- */

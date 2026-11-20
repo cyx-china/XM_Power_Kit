@@ -84,6 +84,8 @@ const UserParamType_t UserParamDefault = {
     .Screen_Rotate180     = 0,          // 屏幕旋转 180°       (uint16_t)  0/1
     .DDS_SwapDac          = 0,          // DAC 输出交换，山寨 MCU 下波形反相时打开  (uint16_t)  0/1
     .Screen_FlipHorizontal = 0,         // 屏幕左右翻转，面板本身左右镜像时打开      (uint16_t)  0/1
+    .DPS_Current_Zero_K   = 0.0f,       // 电流零点-电压斜率，0 表示不做补偿（需跑一次校准）
+    .DPS_Current_Zero_B   = 0.0f,       // 电流零点-电压截距
 };
 
 // 实际参数值结构体
@@ -168,6 +170,8 @@ static const ParamDesc_t param_desc_table[Param_Number] = {
     {2, &UserParamDefault.Screen_Rotate180,             &UserParam.Screen_Rotate180},
     {2, &UserParamDefault.DDS_SwapDac,                  &UserParam.DDS_SwapDac},
     {2, &UserParamDefault.Screen_FlipHorizontal,        &UserParam.Screen_FlipHorizontal},
+    {4, &UserParamDefault.DPS_Current_Zero_K,           &UserParam.DPS_Current_Zero_K},
+    {4, &UserParamDefault.DPS_Current_Zero_B,           &UserParam.DPS_Current_Zero_B},
 };
 
 // 最后一个校准类参数（含它在内的 0..该值 都算校准参数，恢复默认校准时只重置这一段）

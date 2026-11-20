@@ -308,7 +308,7 @@ def main() -> int:
     back = P.decode_params(raw)
     assert back[0] == -5 and back[4] == 42 and abs(back[1] - 3.5) < 1e-6 and back[49] == 80
     # 新增参数尾部追加，不能挤动已有编号
-    assert P.PARAM_TOTAL_COUNT == 60
+    assert P.PARAM_TOTAL_COUNT == 62
     assert P.PARAM_BY_NAME["Screen_Rotate180"][0] == 57
     assert P.PARAM_BY_NAME["DDS_SwapDac"][0] == 58
     assert P.PARAM_BY_NAME["Screen_FlipHorizontal"][0] == 59
